@@ -1,5 +1,7 @@
 HELP.md
+.DS_Store
 .gradle
+.env
 build/
 !gradle/wrapper/gradle-wrapper.jar
 !**/src/main/**/build/

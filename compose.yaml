@@ -1,11 +1,28 @@
+name: limitguard-platform
+
 services:
   postgres:
-    image: 'postgres:latest'
+    image: postgres:18
+    restart: unless-stopped
     environment:
-      - 'POSTGRES_DB=mydatabase'
-      - 'POSTGRES_PASSWORD=secret'
-      - 'POSTGRES_USER=myuser'
-    volumes:
-      - './infra/postgres/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro'
+      POSTGRES_DB: ${POSTGRES_DB:-limitguard}
+      POSTGRES_USER: ${POSTGRES_USER:-limitguard}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-limitguard}
     ports:
-      - '5432'
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/postgres/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\"",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  postgres_data:

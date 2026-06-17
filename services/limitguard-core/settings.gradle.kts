@@ -12,4 +12,4 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "limits-service"
+rootProject.name = "limitguard-core"
