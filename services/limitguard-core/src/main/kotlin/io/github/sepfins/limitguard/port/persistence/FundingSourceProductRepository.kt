@@ -1,0 +1,18 @@
+package io.github.sepfins.limitguard.port.persistence
+
+import io.github.sepfins.limitguard.domain.common.FundingSourceProductId
+import io.github.sepfins.limitguard.domain.common.TenantId
+import io.github.sepfins.limitguard.domain.funding.FundingSourceCategory
+import io.github.sepfins.limitguard.domain.funding.FundingSourceProduct
+import io.github.sepfins.limitguard.domain.funding.FundingSourceProductCode
+import kotlin.time.Instant
+
+interface FundingSourceProductRepository {
+    fun findActive(tenantId: TenantId, at: Instant): List<FundingSourceProduct>
+    fun findByParent(tenantId: TenantId,parentId: FundingSourceProductId): List<FundingSourceProduct>
+    fun findByAccountCategory(tenantId: TenantId, accountCategory: FundingSourceCategory): List<FundingSourceProduct>
+    fun findByCode(tenantId: TenantId,code: FundingSourceProductCode): FundingSourceProduct?
+    fun findById(tenantId: TenantId,id: FundingSourceProductId): FundingSourceProduct?
+    fun insert(tenantId: TenantId,product: FundingSourceProduct): FundingSourceProduct
+    fun update(tenantId: TenantId,product: FundingSourceProduct): FundingSourceProduct
+}

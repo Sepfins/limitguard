@@ -1,6 +1,5 @@
 package io.github.sepfins.limitguard.domain.change
 
-import io.github.sepfins.limitguard.domain.common.ChannelId
 import io.github.sepfins.limitguard.domain.common.IdempotencyKey
 import io.github.sepfins.limitguard.domain.common.LimitChangeRequestId
 import io.github.sepfins.limitguard.domain.common.LimitRuleId
@@ -22,9 +21,9 @@ data class LimitRuleChangeRequest(
     val requestedRule: Metadata,
     val status: LimitRuleChangeStatus = LimitRuleChangeStatus.REQUESTED,
     val limitRuleId: LimitRuleId? = null,
-    val requesterPartyProfileId: PartyProfileId? = null,
     val authorityDelegationId: PartyProfileDelegationId? = null,
-    val requestChannelId: ChannelId? = null,
+    val requestActorContext: RequestActorContext,
+    val requesterPartyProfileId: PartyProfileId? = null,
     val targetMandateId: MandateId? = null,
     val beforeRule: Metadata? = null,
     val approvedRule: Metadata? = null,
@@ -47,9 +46,6 @@ data class LimitRuleChangeRequest(
             require(beforeRule == null) { "CREATE change must not carry a before-rule snapshot" }
         } else {
             require(limitRuleId != null) { "$changeType change must target an existing rule" }
-        }
-        require(requestedBy is ChangeActor.System || requestChannelId != null) {
-            "non-system change requests must include a request channel"
         }
         require(effectiveAt == null || expiresAt == null || expiresAt > effectiveAt) {
             "expiresAt must be after effectiveAt"
