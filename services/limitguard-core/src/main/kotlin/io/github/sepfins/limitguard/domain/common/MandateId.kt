@@ -3,8 +3,10 @@ package io.github.sepfins.limitguard.domain.common
 import java.util.UUID
 
 @JvmInline
-value class MandateId(val id: UUID) {
+value class MandateId(val value: UUID) {
     companion object {
-        fun of(id: String): MandateId = MandateId(UUID.fromString(id))
+        fun of(value: UUID): MandateId = MandateId(value)
+
+        fun of(value: String): MandateId = of(UUID.fromString(value))
     }
 }

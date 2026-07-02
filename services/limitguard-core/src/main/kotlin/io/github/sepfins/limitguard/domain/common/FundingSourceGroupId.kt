@@ -3,8 +3,10 @@ package io.github.sepfins.limitguard.domain.common
 import java.util.UUID
 
 @JvmInline
-value class FundingSourceGroupId(val id: UUID) {
+value class FundingSourceGroupId(val value: UUID) {
     companion object {
-        fun of(id: String) : FundingSourceGroupId = FundingSourceGroupId(UUID.fromString(id))
+        fun of(value: UUID): FundingSourceGroupId = FundingSourceGroupId(value)
+
+        fun of(value: String): FundingSourceGroupId = of(UUID.fromString(value))
     }
 }

@@ -3,8 +3,10 @@ package io.github.sepfins.limitguard.domain.common
 import java.util.UUID
 
 @JvmInline
-value class LimitChangeRequestId(val id: UUID) {
+value class LimitChangeRequestId(val value: UUID) {
     companion object {
-        fun of(id: String): LimitChangeRequestId = LimitChangeRequestId(UUID.fromString(id))
+        fun of(value: UUID): LimitChangeRequestId = LimitChangeRequestId(value)
+
+        fun of(value: String): LimitChangeRequestId = of(UUID.fromString(value))
     }
 }

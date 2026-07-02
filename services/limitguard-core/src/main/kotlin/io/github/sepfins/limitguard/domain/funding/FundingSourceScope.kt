@@ -4,9 +4,9 @@ import io.github.sepfins.limitguard.domain.common.FundingSourceGroupId
 import io.github.sepfins.limitguard.domain.common.FundingSourceId
 
 sealed interface FundingSourceScope {
-    data object Global : FundingSourceScope
+    data object AllOwnerSources : FundingSourceScope
 
-    data class SourceSpecific(val fundingSourceId: FundingSourceId) : FundingSourceScope
+    data class FundingSourceSpecific(val fundingSourceId: FundingSourceId) : FundingSourceScope
 
-    data class SourceGroupSpecific(val fundingSourceGroupId: FundingSourceGroupId) : FundingSourceScope
+    data class FundingSourceGroupSpecific(val fundingSourceGroupId: FundingSourceGroupId) : FundingSourceScope
 }
