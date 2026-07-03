@@ -31,4 +31,7 @@ data class Mandate(
             "ownerPartyProfileId and assigneePartyProfileId must differ"
         }
     }
+
+    fun isApplicableAt(instant: Instant): Boolean =
+        isActive && effectiveWindow.contains(instant)
 }

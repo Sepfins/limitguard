@@ -28,7 +28,13 @@ data class LimitConfiguration(
     val updatedAt: Instant? = null
 ) {
     init {
+        require(maxAssignableAmount.isPositive) {
+            "maxAssignableAmount must be positive"
+        }
         if (defaultAmount != null) {
+            require(defaultAmount.isPositive) {
+                "defaultAmount must be positive"
+            }
             require(defaultAmount.currency == maxAssignableAmount.currency) {
                 "defaultAmount currency must match maxAssignableAmount currency"
             }
@@ -37,4 +43,7 @@ data class LimitConfiguration(
             }
         }
     }
+
+    fun isEffectiveAt(instant: Instant): Boolean =
+        isActive && effectiveWindow.contains(instant)
 }

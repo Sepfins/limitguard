@@ -11,4 +11,10 @@ data class OperationType(
     val name: OperationTypeName,
     val isLeaf: Boolean,
     val createdAt: Instant? = null
-)
+) {
+    init {
+        require(parentId == null || parentId != id) {
+            "parentId must not point to the same operation type"
+        }
+    }
+}

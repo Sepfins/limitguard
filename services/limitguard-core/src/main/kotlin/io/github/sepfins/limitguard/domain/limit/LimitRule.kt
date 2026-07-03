@@ -31,4 +31,34 @@ data class LimitRule(
     val metadata: Metadata = Metadata.EMPTY,
     val createdAt: Instant? = null,
     val updatedAt: Instant? = null
-)
+) {
+    init {
+        require(amount.isPositive) {
+            "amount must be positive"
+        }
+    }
+
+    fun isEffectiveAt(instant: Instant): Boolean =
+        isActive && effectiveWindow.contains(instant)
+
+    fun validateAgainst(configuration: LimitConfiguration): LimitRule {
+        require(configuration.tenantId == tenantId) {
+            "configuration tenant must match rule tenant"
+        }
+        if (configurationId != null) {
+            require(configuration.id == configurationId) {
+                "configuration id must match rule configurationId"
+            }
+        }
+        require(configuration.limitKind == limitKind) {
+            "configuration limit kind must match rule limit kind"
+        }
+        require(configuration.maxAssignableAmount.currency == amount.currency) {
+            "configuration currency must match rule currency"
+        }
+        require(amount <= configuration.maxAssignableAmount) {
+            "rule amount must be less than or equal to configuration maxAssignableAmount"
+        }
+        return this
+    }
+}

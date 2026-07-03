@@ -17,4 +17,10 @@ data class FundingSourceProduct(
     val isActive: Boolean,
     val metadata: Metadata = Metadata.EMPTY,
     val createdAt: Instant? = null
-)
+) {
+    init {
+        require(parentId == null || parentId != id) {
+            "parentId must not point to the same funding source product"
+        }
+    }
+}
