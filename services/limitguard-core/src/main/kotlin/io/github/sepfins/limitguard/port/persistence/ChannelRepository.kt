@@ -7,7 +7,7 @@ import io.github.sepfins.limitguard.domain.common.TenantId
 import kotlin.time.Instant
 
 interface ChannelRepository {
-    fun findActive(tenantId: TenantId, at: Instant): List<Channel>
+    fun findActive(tenantId: TenantId): List<Channel>
     fun findById(tenantId: TenantId, channelId: ChannelId): Channel?
     fun findByCode(tenantId: TenantId, code: ChannelCode): Channel?
     fun insert(tenantId: TenantId, channel: Channel): Channel

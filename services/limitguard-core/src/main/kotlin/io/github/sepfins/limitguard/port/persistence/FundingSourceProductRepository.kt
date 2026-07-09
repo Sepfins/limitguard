@@ -8,7 +8,7 @@ import io.github.sepfins.limitguard.domain.funding.FundingSourceProductCode
 import kotlin.time.Instant
 
 interface FundingSourceProductRepository {
-    fun findActive(tenantId: TenantId, at: Instant): List<FundingSourceProduct>
+    fun findActive(tenantId: TenantId): List<FundingSourceProduct>
     fun findByParent(tenantId: TenantId, parentId: FundingSourceProductId): List<FundingSourceProduct>
     fun findByAccountCategory(tenantId: TenantId, accountCategory: FundingSourceCategory): List<FundingSourceProduct>
     fun findByCode(tenantId: TenantId, code: FundingSourceProductCode): FundingSourceProduct?

@@ -6,6 +6,7 @@ import io.github.sepfins.limitguard.domain.common.TransactionEventId
 import io.github.sepfins.limitguard.domain.common.UsageBucketId
 import io.github.sepfins.limitguard.domain.common.UsageEventId
 import io.github.sepfins.limitguard.domain.usage.LimitUsageEvent
+import io.github.sepfins.limitguard.domain.usage.LimitUsageEventType
 
 interface UsageEventRepository {
     fun findById(tenantId: TenantId, id: UsageEventId): LimitUsageEvent?
@@ -16,5 +17,11 @@ interface UsageEventRepository {
         limitRuleId: LimitRuleId,
         transactionEventId: TransactionEventId,
     ): List<LimitUsageEvent>
+    fun findByLimitRuleTransactionEventAndType(
+        tenantId: TenantId,
+        limitRuleId: LimitRuleId,
+        transactionEventId: TransactionEventId,
+        type: LimitUsageEventType
+    ): LimitUsageEvent?
     fun insert(tenantId: TenantId, event: LimitUsageEvent): LimitUsageEvent
 }

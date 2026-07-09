@@ -16,6 +16,7 @@ interface TransactionRepository {
         fundingSourceId: FundingSourceId,
     ): List<PaymentTransaction>
     fun findById(tenantId: TenantId, id: PaymentTransactionId): PaymentTransaction?
+    fun findByIdForUpdate(tenantId: TenantId, id: PaymentTransactionId): PaymentTransaction?
     fun findByIdempotencyKey(tenantId: TenantId, key: IdempotencyKey): PaymentTransaction?
     fun insert(tenantId: TenantId, transaction: PaymentTransaction): PaymentTransaction
     fun update(tenantId: TenantId, transaction: PaymentTransaction): PaymentTransaction
