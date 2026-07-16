@@ -12,7 +12,7 @@ import io.github.sepfins.limitguard.domain.mandate.MandateScope
 import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertFailsWith
-import kotlin.time.Instant
+import java.time.Instant
 
 class LimitRuleTest {
     private val tenantId = TenantId.of(UUID.fromString("00000000-0000-0000-0000-000000000001"))

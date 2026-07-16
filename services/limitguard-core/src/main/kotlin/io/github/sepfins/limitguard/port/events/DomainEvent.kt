@@ -2,7 +2,7 @@ package io.github.sepfins.limitguard.port.events
 
 import io.github.sepfins.limitguard.domain.common.TenantId
 import java.util.UUID
-import kotlin.time.Instant
+import java.time.Instant
 
 interface DomainEvent {
     val eventId: UUID

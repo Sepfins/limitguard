@@ -1,7 +1,7 @@
 package io.github.sepfins.limitguard.domain.operation
 
 import io.github.sepfins.limitguard.domain.common.OperationTypeId
-import kotlin.time.Instant
+import java.time.Instant
 
 data class OperationType(
     val id: OperationTypeId,

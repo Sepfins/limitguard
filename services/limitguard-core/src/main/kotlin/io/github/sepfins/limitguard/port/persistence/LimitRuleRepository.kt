@@ -4,7 +4,7 @@ import io.github.sepfins.limitguard.domain.common.LimitRuleId
 import io.github.sepfins.limitguard.domain.common.PartyProfileId
 import io.github.sepfins.limitguard.domain.common.TenantId
 import io.github.sepfins.limitguard.domain.limit.LimitRule
-import kotlin.time.Instant
+import java.time.Instant
 
 interface LimitRuleRepository {
     fun findById(tenantId: TenantId, id: LimitRuleId): LimitRule?

@@ -4,7 +4,7 @@ import io.github.sepfins.limitguard.domain.common.BankWorkerId
 import io.github.sepfins.limitguard.domain.common.ExternalReference
 import io.github.sepfins.limitguard.domain.common.Metadata
 import io.github.sepfins.limitguard.domain.common.TenantId
-import kotlin.time.Instant
+import java.time.Instant
 
 // Tenant-scoped bank staff who can perform assisted limit changes for customers.
 data class BankWorker(

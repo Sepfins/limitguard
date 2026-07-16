@@ -4,7 +4,7 @@ import io.github.sepfins.limitguard.domain.channel.Channel
 import io.github.sepfins.limitguard.domain.channel.ChannelCode
 import io.github.sepfins.limitguard.domain.common.ChannelId
 import io.github.sepfins.limitguard.domain.common.TenantId
-import kotlin.time.Instant
+import java.time.Instant
 
 interface ChannelRepository {
     fun findActive(tenantId: TenantId): List<Channel>

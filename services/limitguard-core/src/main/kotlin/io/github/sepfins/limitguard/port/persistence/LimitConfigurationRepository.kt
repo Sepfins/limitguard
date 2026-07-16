@@ -8,7 +8,7 @@ import io.github.sepfins.limitguard.domain.limit.LimitConfigurationCode
 import io.github.sepfins.limitguard.domain.limit.LimitConfigurationFundingScope
 import io.github.sepfins.limitguard.domain.limit.LimitKind
 import io.github.sepfins.limitguard.domain.limit.LimitOperationScope
-import kotlin.time.Instant
+import java.time.Instant
 
 interface LimitConfigurationRepository {
     fun findAllActive(tenantId: TenantId, at: Instant): List<LimitConfiguration>

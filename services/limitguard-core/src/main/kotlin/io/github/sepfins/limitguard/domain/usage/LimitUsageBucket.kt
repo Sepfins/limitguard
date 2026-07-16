@@ -7,7 +7,7 @@ import io.github.sepfins.limitguard.domain.common.TenantId
 import io.github.sepfins.limitguard.domain.common.UsageBucketId
 import io.github.sepfins.limitguard.domain.common.UsageWindow
 import java.math.BigDecimal
-import kotlin.time.Instant
+import java.time.Instant
 
 // Derived per-period counter for one matched limit rule, one assignee, and one
 // window. `currency` from the schema is carried by the Money amounts (which are

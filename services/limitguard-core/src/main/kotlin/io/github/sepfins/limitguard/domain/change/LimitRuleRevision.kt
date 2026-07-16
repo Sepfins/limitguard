@@ -5,7 +5,7 @@ import io.github.sepfins.limitguard.domain.common.LimitRuleId
 import io.github.sepfins.limitguard.domain.common.LimitRuleRevisionId
 import io.github.sepfins.limitguard.domain.common.Metadata
 import io.github.sepfins.limitguard.domain.common.TenantId
-import kotlin.time.Instant
+import java.time.Instant
 
 data class LimitRuleRevision(
     val id: LimitRuleRevisionId,

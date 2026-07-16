@@ -2,7 +2,7 @@ package io.github.sepfins.limitguard.domain.identifier
 
 import io.github.sepfins.limitguard.domain.common.IdentifierSchemeId
 import io.github.sepfins.limitguard.domain.common.TenantId
-import kotlin.time.Instant
+import java.time.Instant
 
 // Tenant-defined naming/format scheme for identifiers of a given entity type.
 data class IdentifierScheme(

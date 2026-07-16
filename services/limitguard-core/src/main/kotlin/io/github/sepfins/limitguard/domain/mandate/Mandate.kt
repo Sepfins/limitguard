@@ -8,7 +8,7 @@ import io.github.sepfins.limitguard.domain.common.TenantId
 import io.github.sepfins.limitguard.domain.common.Version
 import io.github.sepfins.limitguard.domain.funding.FundingSourceScope
 import io.github.sepfins.limitguard.domain.common.Metadata
-import kotlin.time.Instant
+import java.time.Instant
 
 data class Mandate(
     val id: MandateId,

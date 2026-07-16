@@ -9,7 +9,7 @@ import io.github.sepfins.limitguard.domain.common.PartyProfileId
 import io.github.sepfins.limitguard.domain.common.TenantId
 import io.github.sepfins.limitguard.domain.common.Version
 import io.github.sepfins.limitguard.domain.mandate.MandateScope
-import kotlin.time.Instant
+import java.time.Instant
 
 data class LimitRule(
     val id: LimitRuleId,

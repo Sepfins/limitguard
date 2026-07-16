@@ -1,6 +1,6 @@
 package io.github.sepfins.limitguard.domain.common
 
-import kotlin.time.Instant
+import java.time.Instant
 
 data class UsageWindow(val periodStartsAt: Instant, val periodEndsAt: Instant) {
     init {

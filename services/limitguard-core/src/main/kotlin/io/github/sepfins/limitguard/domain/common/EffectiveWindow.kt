@@ -1,6 +1,6 @@
 package io.github.sepfins.limitguard.domain.common
 
-import kotlin.time.Instant
+import java.time.Instant
 
 data class EffectiveWindow(val startsAt: Instant, val endsAt: Instant?) {
     init {

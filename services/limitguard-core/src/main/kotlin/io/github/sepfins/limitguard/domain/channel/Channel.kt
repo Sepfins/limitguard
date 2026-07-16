@@ -3,7 +3,7 @@ package io.github.sepfins.limitguard.domain.channel
 import io.github.sepfins.limitguard.domain.common.ChannelId
 import io.github.sepfins.limitguard.domain.common.Metadata
 import io.github.sepfins.limitguard.domain.common.TenantId
-import kotlin.time.Instant
+import java.time.Instant
 
 data class Channel(
     val id: ChannelId,

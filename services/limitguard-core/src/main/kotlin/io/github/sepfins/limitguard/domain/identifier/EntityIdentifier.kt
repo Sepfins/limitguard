@@ -3,7 +3,7 @@ package io.github.sepfins.limitguard.domain.identifier
 import io.github.sepfins.limitguard.domain.common.EntityIdentifierId
 import io.github.sepfins.limitguard.domain.common.IdentifierSchemeId
 import java.util.UUID
-import kotlin.time.Instant
+import java.time.Instant
 
 // A concrete external identifier for some entity, validated by its scheme.
 data class EntityIdentifier(

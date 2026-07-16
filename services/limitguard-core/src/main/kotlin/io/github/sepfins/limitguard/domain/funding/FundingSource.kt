@@ -5,7 +5,7 @@ import io.github.sepfins.limitguard.domain.common.FundingSourceId
 import io.github.sepfins.limitguard.domain.common.FundingSourceProductId
 import io.github.sepfins.limitguard.domain.common.Metadata
 import io.github.sepfins.limitguard.domain.common.TenantId
-import kotlin.time.Instant
+import java.time.Instant
 
 data class FundingSource(
     val id: FundingSourceId,

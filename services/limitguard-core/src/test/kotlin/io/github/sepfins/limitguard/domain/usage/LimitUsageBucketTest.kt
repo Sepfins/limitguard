@@ -13,7 +13,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
-import kotlin.time.Instant
+import java.time.Instant
 
 class LimitUsageBucketTest {
     private val eur = CurrencyCode.of("EUR")

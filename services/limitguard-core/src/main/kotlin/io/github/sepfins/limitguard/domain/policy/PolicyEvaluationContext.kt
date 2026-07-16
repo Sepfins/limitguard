@@ -4,7 +4,7 @@ import io.github.sepfins.limitguard.domain.change.LimitChangePolicyPhase
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeRequest
 import io.github.sepfins.limitguard.domain.common.TenantId
 import io.github.sepfins.limitguard.domain.common.Metadata
-import kotlin.time.Instant
+import java.time.Instant
 
 data class PolicyEvaluationContext(
     val tenantId: TenantId,

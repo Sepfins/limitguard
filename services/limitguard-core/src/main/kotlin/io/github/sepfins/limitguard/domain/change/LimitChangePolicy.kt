@@ -6,7 +6,7 @@ import io.github.sepfins.limitguard.domain.common.LimitConfigurationId
 import io.github.sepfins.limitguard.domain.common.Metadata
 import io.github.sepfins.limitguard.domain.common.TenantId
 import io.github.sepfins.limitguard.domain.limit.LimitPriority
-import kotlin.time.Instant
+import java.time.Instant
 
 data class LimitChangePolicy(
     val id: LimitChangePolicyId,

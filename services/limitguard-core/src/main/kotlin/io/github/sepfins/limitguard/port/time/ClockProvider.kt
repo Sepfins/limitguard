@@ -1,6 +1,6 @@
 package io.github.sepfins.limitguard.port.time
 
-import kotlin.time.Instant
+import java.time.Instant
 
 interface ClockProvider {
     fun now(): Instant

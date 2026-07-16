@@ -5,7 +5,7 @@ import io.github.sepfins.limitguard.domain.common.TenantId
 import io.github.sepfins.limitguard.domain.funding.FundingSourceCategory
 import io.github.sepfins.limitguard.domain.funding.FundingSourceProduct
 import io.github.sepfins.limitguard.domain.funding.FundingSourceProductCode
-import kotlin.time.Instant
+import java.time.Instant
 
 interface FundingSourceProductRepository {
     fun findActive(tenantId: TenantId): List<FundingSourceProduct>

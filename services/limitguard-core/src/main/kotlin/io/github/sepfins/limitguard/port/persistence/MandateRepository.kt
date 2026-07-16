@@ -5,7 +5,7 @@ import io.github.sepfins.limitguard.domain.common.PartyProfileId
 import io.github.sepfins.limitguard.domain.common.TenantId
 import io.github.sepfins.limitguard.domain.funding.FundingSourceScope
 import io.github.sepfins.limitguard.domain.mandate.Mandate
-import kotlin.time.Instant
+import java.time.Instant
 
 interface MandateRepository {
     fun findActiveForAssignee(tenantId: TenantId, assignee: PartyProfileId, at: Instant): List<Mandate>

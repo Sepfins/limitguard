@@ -2,7 +2,7 @@ package io.github.sepfins.limitguard.domain.tenant
 
 import io.github.sepfins.limitguard.domain.common.Metadata
 import io.github.sepfins.limitguard.domain.common.TenantId
-import kotlin.time.Instant
+import java.time.Instant
 
 data class Tenant(
     val id: TenantId,

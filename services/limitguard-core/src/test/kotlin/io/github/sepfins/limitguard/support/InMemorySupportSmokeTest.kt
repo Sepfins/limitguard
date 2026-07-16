@@ -21,7 +21,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
-import kotlin.time.Instant
+import java.time.Instant
 
 class InMemorySupportSmokeTest {
     @Test

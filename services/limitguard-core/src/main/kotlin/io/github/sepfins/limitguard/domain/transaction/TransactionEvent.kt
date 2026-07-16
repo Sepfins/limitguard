@@ -5,7 +5,7 @@ import io.github.sepfins.limitguard.domain.common.Money
 import io.github.sepfins.limitguard.domain.common.PaymentTransactionId
 import io.github.sepfins.limitguard.domain.common.TenantId
 import io.github.sepfins.limitguard.domain.common.TransactionEventId
-import kotlin.time.Instant
+import java.time.Instant
 
 data class TransactionEvent(
     val id: TransactionEventId,

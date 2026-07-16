@@ -1,8 +1,8 @@
 package io.github.sepfins.limitguard.support
 
 import io.github.sepfins.limitguard.port.time.ClockProvider
-import kotlin.time.Duration
-import kotlin.time.Instant
+import java.time.Duration
+import java.time.Instant
 
 // A clock tests can freeze at a fixed instant and advance explicitly, to reach
 // window, expiry, and period-rollover boundaries.
@@ -14,6 +14,6 @@ class FixedClockProvider(var instant: Instant) : ClockProvider {
     }
 
     fun advanceBy(duration: Duration) {
-        instant += duration
+        instant = instant.plus(duration)
     }
 }

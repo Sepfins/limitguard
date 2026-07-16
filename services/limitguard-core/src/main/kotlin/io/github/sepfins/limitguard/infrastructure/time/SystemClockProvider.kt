@@ -1,9 +1,9 @@
 package io.github.sepfins.limitguard.infrastructure.time
 
 import io.github.sepfins.limitguard.port.time.ClockProvider
-import kotlin.time.Clock
-import kotlin.time.Instant
+import java.time.Clock
+import java.time.Instant
 
-class SystemClockProvider(private val clock: Clock = Clock.System) : ClockProvider {
-    override fun now(): Instant = clock.now()
+class SystemClockProvider(private val clock: Clock = Clock.systemUTC()) : ClockProvider {
+    override fun now(): Instant = clock.instant()
 }

@@ -9,7 +9,7 @@ import io.github.sepfins.limitguard.domain.common.TransactionEventId
 import io.github.sepfins.limitguard.domain.common.UsageBucketId
 import io.github.sepfins.limitguard.domain.common.UsageEventId
 import java.math.BigDecimal
-import kotlin.time.Instant
+import java.time.Instant
 
 // Per-rule audit trail of how a transaction event changed limit usage.
 data class LimitUsageEvent(

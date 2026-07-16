@@ -5,7 +5,7 @@ import io.github.sepfins.limitguard.domain.common.PartyProfileDelegationId
 import io.github.sepfins.limitguard.domain.common.PartyProfileId
 import io.github.sepfins.limitguard.domain.common.TenantId
 import io.github.sepfins.limitguard.domain.common.Metadata
-import kotlin.time.Instant
+import java.time.Instant
 
 
 data class PartyProfileDelegation(

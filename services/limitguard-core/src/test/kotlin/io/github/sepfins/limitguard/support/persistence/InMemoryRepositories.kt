@@ -77,7 +77,7 @@ import io.github.sepfins.limitguard.port.persistence.TransactionRepository
 import io.github.sepfins.limitguard.port.persistence.UsageBucketRepository
 import io.github.sepfins.limitguard.port.persistence.UsageEventRepository
 import java.util.concurrent.ConcurrentHashMap
-import kotlin.time.Instant
+import java.time.Instant
 
 class InMemoryLimitguardRepositories(
     val tenants: InMemoryTenantRepository = InMemoryTenantRepository(),
