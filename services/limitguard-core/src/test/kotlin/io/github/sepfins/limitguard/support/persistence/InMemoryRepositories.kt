@@ -25,6 +25,7 @@ import io.github.sepfins.limitguard.domain.common.LimitRuleRevisionId
 import io.github.sepfins.limitguard.domain.common.MandateId
 import io.github.sepfins.limitguard.domain.common.OperationTypeId
 import io.github.sepfins.limitguard.domain.common.PartyId
+import io.github.sepfins.limitguard.domain.common.PartyLegalIdentifierId
 import io.github.sepfins.limitguard.domain.common.PartyProfileId
 import io.github.sepfins.limitguard.domain.common.PaymentTransactionId
 import io.github.sepfins.limitguard.domain.common.TenantId
@@ -49,7 +50,13 @@ import io.github.sepfins.limitguard.domain.mandate.Mandate
 import io.github.sepfins.limitguard.domain.operation.OperationType
 import io.github.sepfins.limitguard.domain.operation.OperationTypeCode
 import io.github.sepfins.limitguard.domain.operation.OperationTypeScope
+import io.github.sepfins.limitguard.domain.party.Individual
+import io.github.sepfins.limitguard.domain.party.JurisdictionCountry
+import io.github.sepfins.limitguard.domain.party.LegalEntity
+import io.github.sepfins.limitguard.domain.party.LegalIdentifierType
+import io.github.sepfins.limitguard.domain.party.LegalIdentifierValue
 import io.github.sepfins.limitguard.domain.party.Party
+import io.github.sepfins.limitguard.domain.party.PartyLegalIdentifier
 import io.github.sepfins.limitguard.domain.party.PartyProfile
 import io.github.sepfins.limitguard.domain.tenant.Tenant
 import io.github.sepfins.limitguard.domain.tenant.TenantName
@@ -62,6 +69,8 @@ import io.github.sepfins.limitguard.port.persistence.ChannelRepository
 import io.github.sepfins.limitguard.port.persistence.FundingSourceOwnerRepository
 import io.github.sepfins.limitguard.port.persistence.FundingSourceProductRepository
 import io.github.sepfins.limitguard.port.persistence.FundingSourceRepository
+import io.github.sepfins.limitguard.port.persistence.IndividualRepository
+import io.github.sepfins.limitguard.port.persistence.LegalEntityRepository
 import io.github.sepfins.limitguard.port.persistence.LimitChangeRequestRepository
 import io.github.sepfins.limitguard.port.persistence.LimitConfigurationRepository
 import io.github.sepfins.limitguard.port.persistence.LimitRuleChangeEventRepository
@@ -69,6 +78,7 @@ import io.github.sepfins.limitguard.port.persistence.LimitRuleRepository
 import io.github.sepfins.limitguard.port.persistence.LimitRuleRevisionRepository
 import io.github.sepfins.limitguard.port.persistence.MandateRepository
 import io.github.sepfins.limitguard.port.persistence.OperationTypeRepository
+import io.github.sepfins.limitguard.port.persistence.PartyLegalIdentifierRepository
 import io.github.sepfins.limitguard.port.persistence.PartyProfileRepository
 import io.github.sepfins.limitguard.port.persistence.PartyRepository
 import io.github.sepfins.limitguard.port.persistence.TenantRepository
@@ -82,6 +92,9 @@ import java.time.Instant
 class InMemoryLimitguardRepositories(
     val tenants: InMemoryTenantRepository = InMemoryTenantRepository(),
     val parties: InMemoryPartyRepository = InMemoryPartyRepository(),
+    val individuals: InMemoryIndividualRepository = InMemoryIndividualRepository(),
+    val legalEntities: InMemoryLegalEntityRepository = InMemoryLegalEntityRepository(),
+    val partyLegalIdentifiers: InMemoryPartyLegalIdentifierRepository = InMemoryPartyLegalIdentifierRepository(),
     val partyProfiles: InMemoryPartyProfileRepository = InMemoryPartyProfileRepository(),
     val channels: InMemoryChannelRepository = InMemoryChannelRepository(),
     val operationTypes: InMemoryOperationTypeRepository = InMemoryOperationTypeRepository(),
@@ -337,6 +350,8 @@ class InMemoryPartyRepository : PartyRepository {
     private val lock = Any()
     private val parties = ConcurrentHashMap<PartyId, Party>()
 
+    fun count(): Int = parties.size
+
     override fun findById(id: PartyId): Party? = parties[id]
 
     override fun insert(party: Party): Party = synchronized(lock) {
@@ -349,6 +364,124 @@ class InMemoryPartyRepository : PartyRepository {
         requirePresent(parties.containsKey(party.id), "party not found: ${party.id.value}")
         parties[party.id] = party
         party
+    }
+}
+
+class InMemoryIndividualRepository : IndividualRepository {
+    private val lock = Any()
+    private val individuals = ConcurrentHashMap<PartyId, Individual>()
+
+    override fun findByPartyId(partyId: PartyId): Individual? = individuals[partyId]
+
+    override fun insert(individual: Individual): Individual = synchronized(lock) {
+        requireAbsent(
+            individuals.containsKey(individual.partyId),
+            "individual already exists for party: ${individual.partyId.value}",
+        )
+        individuals[individual.partyId] = individual
+        individual
+    }
+
+    override fun update(individual: Individual): Individual = synchronized(lock) {
+        requirePresent(
+            individuals.containsKey(individual.partyId),
+            "individual not found for party: ${individual.partyId.value}",
+        )
+        individuals[individual.partyId] = individual
+        individual
+    }
+}
+
+class InMemoryLegalEntityRepository : LegalEntityRepository {
+    private val lock = Any()
+    private val legalEntities = ConcurrentHashMap<PartyId, LegalEntity>()
+
+    override fun findByPartyId(partyId: PartyId): LegalEntity? = legalEntities[partyId]
+
+    override fun insert(legalEntity: LegalEntity): LegalEntity = synchronized(lock) {
+        requireAbsent(
+            legalEntities.containsKey(legalEntity.partyId),
+            "legal entity already exists for party: ${legalEntity.partyId.value}",
+        )
+        legalEntities[legalEntity.partyId] = legalEntity
+        legalEntity
+    }
+
+    override fun update(legalEntity: LegalEntity): LegalEntity = synchronized(lock) {
+        requirePresent(
+            legalEntities.containsKey(legalEntity.partyId),
+            "legal entity not found for party: ${legalEntity.partyId.value}",
+        )
+        legalEntities[legalEntity.partyId] = legalEntity
+        legalEntity
+    }
+}
+
+class InMemoryPartyLegalIdentifierRepository : PartyLegalIdentifierRepository {
+    private val lock = Any()
+    private val identifiers = ConcurrentHashMap<PartyLegalIdentifierId, PartyLegalIdentifier>()
+
+    override fun findById(id: PartyLegalIdentifierId): PartyLegalIdentifier? = identifiers[id]
+
+    override fun findByPartyId(partyId: PartyId): List<PartyLegalIdentifier> =
+        identifiers.values.filter { it.partyId == partyId }
+
+    override fun findByValue(
+        jurisdictionCountry: JurisdictionCountry,
+        identifierType: LegalIdentifierType,
+        normalizedIdentifier: LegalIdentifierValue
+    ): PartyLegalIdentifier? =
+        identifiers.values.firstOrNull {
+            it.jurisdictionCountry == jurisdictionCountry &&
+                it.identifierType == identifierType &&
+                it.normalizedIdentifier == normalizedIdentifier
+        }
+
+    override fun insert(identifier: PartyLegalIdentifier): PartyLegalIdentifier = synchronized(lock) {
+        requireAbsent(
+            identifiers.containsKey(identifier.id),
+            "party legal identifier id already exists: ${identifier.id.value}",
+        )
+        requireLegalIdentifierValueUnique(identifier)
+        requirePartyLegalIdentifierTypeUnique(identifier)
+        identifiers[identifier.id] = identifier
+        identifier
+    }
+
+    override fun update(identifier: PartyLegalIdentifier): PartyLegalIdentifier = synchronized(lock) {
+        requirePresent(
+            identifiers.containsKey(identifier.id),
+            "party legal identifier not found: ${identifier.id.value}",
+        )
+        requireLegalIdentifierValueUnique(identifier)
+        requirePartyLegalIdentifierTypeUnique(identifier)
+        identifiers[identifier.id] = identifier
+        identifier
+    }
+
+    private fun requireLegalIdentifierValueUnique(identifier: PartyLegalIdentifier) {
+        requireAbsent(
+            identifiers.values.any {
+                it.id != identifier.id &&
+                    it.jurisdictionCountry == identifier.jurisdictionCountry &&
+                    it.identifierType == identifier.identifierType &&
+                    it.normalizedIdentifier == identifier.normalizedIdentifier
+            },
+            "party legal identifier value already exists: " +
+                "${identifier.jurisdictionCountry.value}/${identifier.identifierType.value}/${identifier.normalizedIdentifier.value}",
+        )
+    }
+
+    private fun requirePartyLegalIdentifierTypeUnique(identifier: PartyLegalIdentifier) {
+        requireAbsent(
+            identifiers.values.any {
+                it.id != identifier.id &&
+                    it.partyId == identifier.partyId &&
+                    it.jurisdictionCountry == identifier.jurisdictionCountry &&
+                    it.identifierType == identifier.identifierType
+            },
+            "party legal identifier already exists for party, country, and type",
+        )
     }
 }
 

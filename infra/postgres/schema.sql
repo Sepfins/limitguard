@@ -54,6 +54,38 @@ CREATE TABLE party (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE party_legal_identifier (
+    id UUID PRIMARY KEY DEFAULT uuidv7(),
+    party_id UUID NOT NULL REFERENCES party(id) ON DELETE CASCADE,
+    jurisdiction_country CHAR(2) NOT NULL,
+    identifier_type VARCHAR(100) NOT NULL,
+    normalized_identifier VARCHAR(100) NOT NULL,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (jurisdiction_country, identifier_type, normalized_identifier),
+    UNIQUE (party_id, jurisdiction_country, identifier_type),
+    CONSTRAINT chk_party_legal_identifier_country CHECK (
+        jurisdiction_country ~ '^[A-Z]{2}$'
+    ),
+    CONSTRAINT chk_party_legal_identifier_type CHECK (
+        identifier_type ~ '^[A-Z][A-Z0-9_]{0,99}$'
+    ),
+    CONSTRAINT chk_party_legal_identifier_value CHECK (
+        length(normalized_identifier) > 0 AND
+        normalized_identifier = btrim(normalized_identifier) AND
+        normalized_identifier = upper(normalized_identifier)
+    )
+);
+
+COMMENT ON TABLE party_legal_identifier IS
+    'Globally unique legal/national identifiers for a canonical party, such as IT CODICE_FISCALE or IT PARTITA_IVA. These identify the party independently of tenant registration.';
+
+COMMENT ON COLUMN party_legal_identifier.normalized_identifier IS
+    'Canonicalized identifier value used for uniqueness and lookup. Applications should strip formatting and apply jurisdiction/type-specific normalization before persistence.';
+
+CREATE INDEX idx_party_legal_identifier_party
+    ON party_legal_identifier (party_id);
+
 CREATE TABLE individual (
     party_id UUID PRIMARY KEY REFERENCES party(id) ON DELETE CASCADE,
     first_name VARCHAR(255) NOT NULL,

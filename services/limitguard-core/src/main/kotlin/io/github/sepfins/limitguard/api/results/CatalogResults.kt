@@ -47,11 +47,23 @@ data class PartyProfileResult(
     val tenantId: UUID,
     val partyId: UUID,
     val partyType: PartyType,
+    val partyCreated: Boolean = false,
     val firstName: String? = null,
     val lastName: String? = null,
     val birthDate: LocalDate? = null,
     val legalName: String? = null,
     val legalForm: String? = null,
+    val legalIdentifiers: List<PartyLegalIdentifierResult> = emptyList(),
+    val createdAt: Instant,
+)
+
+data class PartyLegalIdentifierResult(
+    val id: UUID,
+    val partyId: UUID,
+    val jurisdictionCountry: String,
+    val identifierType: String,
+    val normalizedIdentifier: String,
+    val metadata: Map<String, Any?>,
     val createdAt: Instant,
 )
 

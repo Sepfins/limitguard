@@ -40,12 +40,22 @@ data class RegisterOperationTypeCommand(
 data class RegisterPartyProfileCommand(
     val tenantId: UUID,
     val partyType: PartyType,
+    val partyId: UUID? = null,
+    val createPartyIfMissing: Boolean = true,
     val firstName: String? = null,
     val lastName: String? = null,
     val birthDate: LocalDate? = null,
     val legalName: String? = null,
     val legalForm: String? = null,
+    val legalIdentifiers: List<PartyLegalIdentifierCommand> = emptyList(),
     val externalIdentifiers: List<EntityIdentifierCommand> = emptyList(),
+    val metadata: Map<String, Any?> = emptyMap(),
+)
+
+data class PartyLegalIdentifierCommand(
+    val jurisdictionCountry: String,
+    val identifierType: String,
+    val normalizedIdentifier: String,
     val metadata: Map<String, Any?> = emptyMap(),
 )
 
