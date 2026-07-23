@@ -29,9 +29,9 @@ data class RegisterChannelCommand(
 )
 
 data class RegisterOperationTypeCommand(
+    val tenantId: UUID,
     val code: String,
     val name: String,
-    val tenantId: UUID? = null,
     val parentId: UUID? = null,
     val isLeaf: Boolean = false,
     val isGlobal: Boolean = false,
