@@ -126,10 +126,7 @@ class DefaultTenantCatalogService(
     private val transactionRunner: TransactionRunner
 ) : TenantCatalogService {
 
-    // in-memory cache for idempotency resolution
-    //private val
-
-    override fun registerTenant(command: RegisterTenantCommand): TenantResult {
+    override fun registerTenant(command: RegisterTenantCommand): TenantResult = mapValidation {
         val tenant = Tenant(
             id = TenantId.of(idGenerator.newId()),
             name = TenantName.of(command.name),
@@ -140,8 +137,9 @@ class DefaultTenantCatalogService(
         return tenantRepository.insert(tenant).toResult()
     }
 
-    override fun registerChannel(command: RegisterChannelCommand): ChannelResult {
+    override fun registerChannel(command: RegisterChannelCommand): ChannelResult = mapValidation {
         val tenantId = TenantId.of(command.tenantId)
+        requireTenantExists(tenantId)
         val channel = Channel(
             id = ChannelId.of(idGenerator.newId()),
             tenantId = tenantId,
@@ -155,12 +153,17 @@ class DefaultTenantCatalogService(
         return channelRepository.insert(tenantId, channel).toResult()
     }
 
-    override fun registerOperationType(command: RegisterOperationTypeCommand): OperationTypeResult {
+    override fun registerOperationType(command: RegisterOperationTypeCommand): OperationTypeResult = mapValidation {
         val tenantId = TenantId.of(command.tenantId)
+        requireTenantExists(tenantId)
+        val parentId = command.parentId?.let { OperationTypeId.of(it) }
+        if (parentId != null) {
+            requireOperationTypeVisible(tenantId, parentId)
+        }
         val operationType = OperationType(
             id = OperationTypeId.of(idGenerator.newId()),
             scope = if (command.isGlobal) OperationTypeScope.Global else OperationTypeScope.TenantSpecific(tenantId),
-            parentId = command.parentId?.let { OperationTypeId.of(it) },
+            parentId = parentId,
             code = OperationTypeCode.of(command.code),
             name = OperationTypeName.of(command.name),
             isLeaf = command.isLeaf,
@@ -170,8 +173,9 @@ class DefaultTenantCatalogService(
         return operationTypeRepository.insert(tenantId, operationType).toResult()
     }
 
-    override fun registerPartyProfile(command: RegisterPartyProfileCommand): PartyProfileResult {
+    override fun registerPartyProfile(command: RegisterPartyProfileCommand): PartyProfileResult = mapValidation {
         val tenantId = TenantId.of(command.tenantId)
+        requireTenantExists(tenantId)
         val now = clockProvider.now()
         val partyType = command.partyType.toDomain()
         val legalIdentifierInputs = command.legalIdentifiers.map { legalIdentifier ->
@@ -205,12 +209,17 @@ class DefaultTenantCatalogService(
         }
     }
 
-    override fun registerFundingSourceProduct(command: RegisterFundingSourceProductCommand): FundingSourceProductResult {
+    override fun registerFundingSourceProduct(command: RegisterFundingSourceProductCommand): FundingSourceProductResult = mapValidation {
         val tenantId = TenantId.of(command.tenantId)
+        requireTenantExists(tenantId)
+        val parentId = command.parentId?.let { FundingSourceProductId.of(it) }
+        if (parentId != null) {
+            requireFundingSourceProductExists(tenantId, parentId)
+        }
         val fundingSourceProduct = FundingSourceProduct(
             id = FundingSourceProductId.of(idGenerator.newId()),
             tenantId = tenantId,
-            parentId = command.parentId?.let { FundingSourceProductId.of(it) },
+            parentId = parentId,
             accountCategory = FundingSourceCategory.valueOf(command.category.name),
             nodeType = ProductNodeType.valueOf(command.nodeType.name),
             code = FundingSourceProductCode.of(command.code),
@@ -224,12 +233,18 @@ class DefaultTenantCatalogService(
         return fundingSourceProductRepository.insert(tenantId, fundingSourceProduct).toResult()
     }
 
-    override fun registerFundingSource(command: RegisterFundingSourceCommand): FundingSourceResult {
+    override fun registerFundingSource(command: RegisterFundingSourceCommand): FundingSourceResult = mapValidation {
         val tenantId = TenantId.of(command.tenantId)
+        requireTenantExists(tenantId)
+        val productId = FundingSourceProductId.of(command.productId)
+        val product = requireFundingSourceProductExists(tenantId, productId)
+        if (!product.isLeaf) {
+            throw ValidationException("funding source product must be a leaf product: ${product.id.value}")
+        }
         val fundingSource = FundingSource(
             id = FundingSourceId.of(idGenerator.newId()),
             tenantId = tenantId,
-            productId = FundingSourceProductId.of(command.productId),
+            productId = productId,
             externalReference = command.externalReference?.let { ExternalReference.of(it) },
             isActive = command.isActive,
             metadata = Metadata(command.metadata),
@@ -239,13 +254,18 @@ class DefaultTenantCatalogService(
         return fundingSourceRepository.insert(tenantId, fundingSource).toResult()
     }
 
-    override fun assignFundingSourceOwner(command: AssignFundingSourceOwnerCommand): FundingSourceOwnerResult {
+    override fun assignFundingSourceOwner(command: AssignFundingSourceOwnerCommand): FundingSourceOwnerResult = mapValidation {
         val tenantId = TenantId.of(command.tenantId)
+        requireTenantExists(tenantId)
+        val partyProfileId = PartyProfileId.of(command.partyProfileId)
+        val fundingSourceId = FundingSourceId.of(command.fundingSourceId)
+        requirePartyProfileExists(tenantId, partyProfileId)
+        requireFundingSourceExists(tenantId, fundingSourceId)
         val fundingSourceOwner = FundingSourceOwner(
             id = FundingSourceOwnerId.of(idGenerator.newId()),
             tenantId = tenantId,
-            partyProfileId = PartyProfileId.of(command.partyProfileId),
-            fundingSourceId = FundingSourceId.of(command.fundingSourceId),
+            partyProfileId = partyProfileId,
+            fundingSourceId = fundingSourceId,
             ownerRole = FundingSourceOwnerRole.valueOf(command.ownerRole.name),
             createdAt = clockProvider.now()
         )
@@ -253,8 +273,13 @@ class DefaultTenantCatalogService(
         return fundingSourceOwnerRepository.insert(tenantId, fundingSourceOwner).toResult()
     }
 
-    override fun createMandate(command: CreateMandateCommand): MandateResult {
+    override fun createMandate(command: CreateMandateCommand): MandateResult = mapValidation {
         val tenantId = TenantId.of(command.tenantId)
+        requireTenantExists(tenantId)
+        val ownerPartyProfileId = PartyProfileId.of(command.ownerPartyProfileId)
+        val assigneePartyProfileId = PartyProfileId.of(command.assigneePartyProfileId)
+        requirePartyProfileExists(tenantId, ownerPartyProfileId)
+        requirePartyProfileExists(tenantId, assigneePartyProfileId)
         val now = clockProvider.now()
         val effectiveWindow = EffectiveWindow(
             command.startsAt ?: now,
@@ -263,8 +288,8 @@ class DefaultTenantCatalogService(
         val mandate = Mandate(
             id = MandateId.of(idGenerator.newId()),
             tenantId = tenantId,
-            ownerPartyProfileId = PartyProfileId.of(command.ownerPartyProfileId),
-            assigneePartyProfileId = PartyProfileId.of(command.assigneePartyProfileId),
+            ownerPartyProfileId = ownerPartyProfileId,
+            assigneePartyProfileId = assigneePartyProfileId,
             authorityDelegationId = command.authorityDelegationId?.let { PartyProfileDelegationId.of(it) },
             name = MandateName.of(command.name),
             description = command.description,
@@ -279,11 +304,11 @@ class DefaultTenantCatalogService(
                     if (command.fundingSourceGroupId != null) {
                         throw ValidationException("FundingSourceGroupId must be null for LimitFundingScope.FUNDING_SOURCE")
                     }
-                    FundingSourceScope.FundingSourceSpecific(
-                        FundingSourceId.of(
-                            command.fundingSourceId ?: throw ValidationException("FundingSourceId must not be null for LimitFundingScope.FUNDING_SOURCE"),
-                        ),
+                    val fundingSourceId = FundingSourceId.of(
+                        command.fundingSourceId ?: throw ValidationException("FundingSourceId must not be null for LimitFundingScope.FUNDING_SOURCE"),
                     )
+                    requireFundingSourceOwnedBy(tenantId, ownerPartyProfileId, fundingSourceId)
+                    FundingSourceScope.FundingSourceSpecific(fundingSourceId)
                 }
                 LimitFundingScope.FUNDING_SOURCE_GROUP -> {
                     if (command.fundingSourceId != null) {
@@ -306,13 +331,18 @@ class DefaultTenantCatalogService(
         return mandateRepository.insert(tenantId, mandate).toResult()
     }
 
-    override fun createLimitConfiguration(command: CreateLimitConfigurationCommand): LimitConfigurationResult {
+    override fun createLimitConfiguration(command: CreateLimitConfigurationCommand): LimitConfigurationResult = mapValidation {
         val tenantId = TenantId.of(command.tenantId)
+        requireTenantExists(tenantId)
+        val parentConfigurationId = command.parentConfigurationId?.let { LimitConfigurationId.of(it) }
+        if (parentConfigurationId != null) {
+            requireLimitConfigurationExists(tenantId, parentConfigurationId)
+        }
         val now = clockProvider.now()
         val limitConfiguration = LimitConfiguration(
             id = LimitConfigurationId.of(idGenerator.newId()),
             tenantId = tenantId,
-            parentConfigurationId = command.parentConfigurationId?.let { LimitConfigurationId.of(it) },
+            parentConfigurationId = parentConfigurationId,
             code = LimitConfigurationCode.of(command.code),
             name = LimitConfigurationName.of(command.name),
             description = command.description,
@@ -338,11 +368,11 @@ class DefaultTenantCatalogService(
                     if (command.fundingSourceCategory != null) {
                         throw ValidationException("Category must be null for LimitConfigurationFundingScope.FUNDING_SOURCE_PRODUCT.")
                     }
-                    DomainLimitConfigurationFundingScope.FundingSourceProductSpecific(
-                        FundingSourceProductId.of(
-                            command.fundingSourceProductId ?: throw ValidationException("ProductId must not be null for LimitConfigurationFundingScope.FUNDING_SOURCE_PRODUCT"),
-                        ),
+                    val productId = FundingSourceProductId.of(
+                        command.fundingSourceProductId ?: throw ValidationException("ProductId must not be null for LimitConfigurationFundingScope.FUNDING_SOURCE_PRODUCT"),
                     )
+                    requireFundingSourceProductExists(tenantId, productId)
+                    DomainLimitConfigurationFundingScope.FundingSourceProductSpecific(productId)
                 }
                 ApiLimitConfigurationFundingScope.FUNDING_SOURCE_CATEGORY -> {
                     if (command.fundingSourceProductId != null) {
@@ -376,15 +406,21 @@ class DefaultTenantCatalogService(
                     if (command.channelGroupId != null) {
                         throw ValidationException("ChannelGroupId must be null for LimitChannelScope.CHANNEL.")
                     }
+                    val channelId = ChannelId.of(
+                        command.channelId ?: throw ValidationException("ChannelId must not be null for LimitChannelScope.CHANNEL"),
+                    )
+                    requireChannelExists(tenantId, channelId)
                     DomainLimitChannelScope.ChannelSpecific(
-                        ChannelId.of(
-                            command.channelId ?: throw ValidationException("ChannelId must not be null for LimitChannelScope.CHANNEL"),
-                        )
+                        channelId
                     )
                 }
             },
             operationScope = command.operationTypeId
-                ?.let { LimitOperationScope.OperationTypeSpecific(OperationTypeId.of(it)) }
+                ?.let {
+                    val operationTypeId = OperationTypeId.of(it)
+                    requireOperationTypeVisible(tenantId, operationTypeId)
+                    LimitOperationScope.OperationTypeSpecific(operationTypeId)
+                }
                 ?: LimitOperationScope.AllOperations,
             maxAssignableAmount = Money.of(command.maxAssignableAmount, CurrencyCode.of(command.currency)),
             defaultAmount = command.defaultAmount?.let { Money.of(it, CurrencyCode.of(command.currency)) },
@@ -534,6 +570,70 @@ class DefaultTenantCatalogService(
     private fun requirePartyType(party: Party, expected: DomainPartyType) {
         if (party.partyType != expected) {
             throw ConflictException("party type mismatch: expected $expected, found ${party.partyType}")
+        }
+    }
+
+    private inline fun <T> mapValidation(block: () -> T): T =
+        try {
+            block()
+        } catch (exception: IllegalArgumentException) {
+            throw ValidationException(
+                message = exception.message ?: "catalog command validation failed",
+                cause = exception,
+            )
+        }
+
+    private fun requireTenantExists(tenantId: TenantId) {
+        if (!tenantRepository.exists(tenantId)) {
+            throw NotFoundException("tenant not found: ${tenantId.value}")
+        }
+    }
+
+    private fun requireChannelExists(tenantId: TenantId, channelId: ChannelId): Channel =
+        channelRepository.findById(tenantId, channelId)
+            ?: throw NotFoundException("channel not found: ${channelId.value}")
+
+    private fun requireOperationTypeVisible(tenantId: TenantId, operationTypeId: OperationTypeId): OperationType =
+        operationTypeRepository.findById(tenantId, operationTypeId)
+            ?: throw NotFoundException("operation type not found: ${operationTypeId.value}")
+
+    private fun requirePartyProfileExists(tenantId: TenantId, partyProfileId: PartyProfileId): PartyProfile =
+        partyProfileRepository.findById(tenantId, partyProfileId)
+            ?: throw NotFoundException("party profile not found: ${partyProfileId.value}")
+
+    private fun requireFundingSourceProductExists(
+        tenantId: TenantId,
+        productId: FundingSourceProductId,
+    ): FundingSourceProduct =
+        fundingSourceProductRepository.findById(tenantId, productId)
+            ?: throw NotFoundException("funding source product not found: ${productId.value}")
+
+    private fun requireFundingSourceExists(tenantId: TenantId, fundingSourceId: FundingSourceId): FundingSource =
+        fundingSourceRepository.findById(tenantId, fundingSourceId)
+            ?: throw NotFoundException("funding source not found: ${fundingSourceId.value}")
+
+    private fun requireLimitConfigurationExists(
+        tenantId: TenantId,
+        configurationId: LimitConfigurationId,
+    ): LimitConfiguration =
+        limitConfigurationRepository.findById(tenantId, configurationId)
+            ?: throw NotFoundException("limit configuration not found: ${configurationId.value}")
+
+    private fun requireFundingSourceOwnedBy(
+        tenantId: TenantId,
+        ownerPartyProfileId: PartyProfileId,
+        fundingSourceId: FundingSourceId,
+    ) {
+        requireFundingSourceExists(tenantId, fundingSourceId)
+        val ownerHasSource = fundingSourceOwnerRepository
+            .findByFundingSource(tenantId, fundingSourceId)
+            .any { it.partyProfileId == ownerPartyProfileId }
+
+        if (!ownerHasSource) {
+            throw NotFoundException(
+                "funding source ownership not found: " +
+                    "owner=${ownerPartyProfileId.value}, fundingSource=${fundingSourceId.value}"
+            )
         }
     }
 
