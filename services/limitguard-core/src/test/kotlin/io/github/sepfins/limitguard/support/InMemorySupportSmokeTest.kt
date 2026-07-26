@@ -1,10 +1,7 @@
 package io.github.sepfins.limitguard.support
 
-import io.github.sepfins.limitguard.api.LimitChangeService
-import io.github.sepfins.limitguard.api.LimitEvaluationService
-import io.github.sepfins.limitguard.api.Limitguard
-import io.github.sepfins.limitguard.api.TenantCatalogService
 import io.github.sepfins.limitguard.api.errors.ConflictException
+import io.github.sepfins.limitguard.application.DefaultLimitguard
 import io.github.sepfins.limitguard.domain.channel.Channel
 import io.github.sepfins.limitguard.domain.channel.ChannelCode
 import io.github.sepfins.limitguard.domain.channel.ChannelName
@@ -14,8 +11,6 @@ import io.github.sepfins.limitguard.domain.common.TenantId
 import io.github.sepfins.limitguard.domain.tenant.Tenant
 import io.github.sepfins.limitguard.domain.tenant.TenantName
 import io.github.sepfins.limitguard.support.persistence.InMemoryLimitguardRepositories
-import java.lang.reflect.InvocationHandler
-import java.lang.reflect.Proxy
 import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -31,11 +26,24 @@ class InMemorySupportSmokeTest {
         val ids = SequentialIdGenerator(startAt = 42L)
         val transactions = DirectTransactionRunner()
 
-        val limitguard = object : Limitguard {
-            override val tenantCatalogService: TenantCatalogService = deferredService()
-            override val limitChangeService: LimitChangeService = deferredService()
-            override val limitEvaluationService: LimitEvaluationService = deferredService()
-        }
+        val limitguard = DefaultLimitguard(
+            tenantRepository = repositories.tenants,
+            channelRepository = repositories.channels,
+            operationTypeRepository = repositories.operationTypes,
+            partyRepository = repositories.parties,
+            individualRepository = repositories.individuals,
+            legalEntityRepository = repositories.legalEntities,
+            partyLegalIdentifierRepository = repositories.partyLegalIdentifiers,
+            partyProfileRepository = repositories.partyProfiles,
+            fundingSourceRepository = repositories.fundingSources,
+            fundingSourceProductRepository = repositories.fundingSourceProducts,
+            fundingSourceOwnerRepository = repositories.fundingSourceOwners,
+            mandateRepository = repositories.mandates,
+            limitConfigurationRepository = repositories.limitConfigurations,
+            idGenerator = ids,
+            clockProvider = clock,
+            transactionRunner = transactions,
+        )
 
         assertNotNull(repositories.tenants)
         assertEquals(Instant.parse("2026-06-14T00:00:00Z"), clock.now())
@@ -96,17 +104,5 @@ class InMemorySupportSmokeTest {
 
         assertEquals(1, repositories.channels.findActive(tenantId).size)
         assertEquals(1, repositories.channels.findActive(otherTenantId).size)
-    }
-
-    private inline fun <reified T : Any> deferredService(): T {
-        val handler = InvocationHandler { proxy, method, args ->
-            when (method.name) {
-                "equals" -> proxy === args?.firstOrNull()
-                "hashCode" -> System.identityHashCode(proxy)
-                "toString" -> "Deferred${T::class.simpleName}"
-                else -> throw UnsupportedOperationException("deferred to the application phase")
-            }
-        }
-        return Proxy.newProxyInstance(T::class.java.classLoader, arrayOf(T::class.java), handler) as T
     }
 }
