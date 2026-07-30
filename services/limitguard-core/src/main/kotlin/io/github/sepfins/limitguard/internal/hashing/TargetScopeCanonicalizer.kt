@@ -31,9 +31,9 @@ internal object TargetScopeCanonicalizer : Canonicalizer<LimitRuleTargetScope> {
             LimitChannelScope.AllChannels ->
                 CanonicalChannelScope("ALL_CHANNELS", null, null)
             is LimitChannelScope.ChannelGroupSpecific ->
-                CanonicalChannelScope("CHANNEL_GROUP", channelScope.channelGroupId.toString(), null)
+                CanonicalChannelScope("CHANNEL_GROUP", channelScope.channelGroupId.value.toString(), null)
             is LimitChannelScope.ChannelSpecific ->
-                CanonicalChannelScope("CHANNEL", null, channelScope.channelId.toString())
+                CanonicalChannelScope("CHANNEL", null, channelScope.channelId.value.toString())
         }
 
         val canonicalOperationScope = when (operationScope) {
