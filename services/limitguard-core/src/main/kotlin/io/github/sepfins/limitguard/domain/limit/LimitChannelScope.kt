@@ -9,4 +9,14 @@ sealed interface LimitChannelScope {
     data class ChannelSpecific(val channelId: ChannelId) : LimitChannelScope
 
     data class ChannelGroupSpecific(val channelGroupId: ChannelGroupId) : LimitChannelScope
+
+    fun includes(
+        channelId: ChannelId,
+        containingGroupIds: Set<ChannelGroupId>,
+    ): Boolean =
+        when (this) {
+            AllChannels -> true
+            is ChannelSpecific -> this.channelId == channelId
+            is ChannelGroupSpecific -> channelGroupId in containingGroupIds
+        }
 }

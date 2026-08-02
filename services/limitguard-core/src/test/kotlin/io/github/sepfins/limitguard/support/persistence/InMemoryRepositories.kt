@@ -10,9 +10,12 @@ import io.github.sepfins.limitguard.domain.change.RequestActorContext
 import io.github.sepfins.limitguard.domain.change.ScopeHash
 import io.github.sepfins.limitguard.domain.channel.Channel
 import io.github.sepfins.limitguard.domain.channel.ChannelCode
+import io.github.sepfins.limitguard.domain.channel.ChannelGroupMember
+import io.github.sepfins.limitguard.domain.common.ChannelGroupId
 import io.github.sepfins.limitguard.domain.common.CurrencyCode
 import io.github.sepfins.limitguard.domain.common.ChannelId
 import io.github.sepfins.limitguard.domain.common.ExternalReference
+import io.github.sepfins.limitguard.domain.common.FundingSourceGroupId
 import io.github.sepfins.limitguard.domain.common.FundingSourceId
 import io.github.sepfins.limitguard.domain.common.FundingSourceOwnerId
 import io.github.sepfins.limitguard.domain.common.FundingSourceProductId
@@ -35,6 +38,7 @@ import io.github.sepfins.limitguard.domain.common.UsageEventId
 import io.github.sepfins.limitguard.domain.common.UsageWindow
 import io.github.sepfins.limitguard.domain.funding.FundingSource
 import io.github.sepfins.limitguard.domain.funding.FundingSourceCategory
+import io.github.sepfins.limitguard.domain.funding.FundingSourceGroupMember
 import io.github.sepfins.limitguard.domain.funding.FundingSourceOwner
 import io.github.sepfins.limitguard.domain.funding.FundingSourceProduct
 import io.github.sepfins.limitguard.domain.funding.FundingSourceProductCode
@@ -66,6 +70,8 @@ import io.github.sepfins.limitguard.domain.usage.LimitUsageBucket
 import io.github.sepfins.limitguard.domain.usage.LimitUsageEvent
 import io.github.sepfins.limitguard.domain.usage.LimitUsageEventType
 import io.github.sepfins.limitguard.port.persistence.ChannelRepository
+import io.github.sepfins.limitguard.port.persistence.ChannelGroupMemberRepository
+import io.github.sepfins.limitguard.port.persistence.FundingSourceGroupMemberRepository
 import io.github.sepfins.limitguard.port.persistence.FundingSourceOwnerRepository
 import io.github.sepfins.limitguard.port.persistence.FundingSourceProductRepository
 import io.github.sepfins.limitguard.port.persistence.FundingSourceRepository
@@ -97,10 +103,13 @@ class InMemoryLimitguardRepositories(
     val partyLegalIdentifiers: InMemoryPartyLegalIdentifierRepository = InMemoryPartyLegalIdentifierRepository(),
     val partyProfiles: InMemoryPartyProfileRepository = InMemoryPartyProfileRepository(),
     val channels: InMemoryChannelRepository = InMemoryChannelRepository(),
+    val channelGroupMembers: InMemoryChannelGroupMemberRepository = InMemoryChannelGroupMemberRepository(),
     val operationTypes: InMemoryOperationTypeRepository = InMemoryOperationTypeRepository(),
     val fundingSourceProducts: InMemoryFundingSourceProductRepository = InMemoryFundingSourceProductRepository(),
     val fundingSources: InMemoryFundingSourceRepository = InMemoryFundingSourceRepository(),
     val fundingSourceOwners: InMemoryFundingSourceOwnerRepository = InMemoryFundingSourceOwnerRepository(),
+    val fundingSourceGroupMembers: InMemoryFundingSourceGroupMemberRepository =
+        InMemoryFundingSourceGroupMemberRepository(),
     val mandates: InMemoryMandateRepository = InMemoryMandateRepository(),
     val limitConfigurations: InMemoryLimitConfigurationRepository = InMemoryLimitConfigurationRepository(),
     val limitRules: InMemoryLimitRuleRepository = InMemoryLimitRuleRepository(),
@@ -172,6 +181,31 @@ class InMemoryChannelRepository : ChannelRepository {
         )
         channels[TenantScopedKey(tenantId, channel.id)] = channel
         channel
+    }
+}
+
+class InMemoryChannelGroupMemberRepository : ChannelGroupMemberRepository {
+    private val lock = Any()
+    private val members = ConcurrentHashMap<ChannelGroupMemberKey, ChannelGroupMember>()
+
+    override fun findGroupIdsContaining(
+        tenantId: TenantId,
+        channelId: ChannelId,
+    ): Set<ChannelGroupId> =
+        members.values
+            .asSequence()
+            .filter { it.tenantId == tenantId && it.channelId == channelId }
+            .mapTo(linkedSetOf()) { it.groupId }
+
+    fun add(
+        tenantId: TenantId,
+        member: ChannelGroupMember,
+    ): ChannelGroupMember = synchronized(lock) {
+        requireSameTenant(tenantId, member.tenantId)
+        val key = ChannelGroupMemberKey(tenantId, member.groupId, member.channelId)
+        requireAbsent(members.containsKey(key), "channel is already a member of the group")
+        members[key] = member
+        member
     }
 }
 
@@ -343,6 +377,36 @@ class InMemoryFundingSourceOwnerRepository : FundingSourceOwnerRepository {
         )
         owners[TenantScopedKey(tenantId, fundingSourceOwner.id)] = fundingSourceOwner
         fundingSourceOwner
+    }
+}
+
+class InMemoryFundingSourceGroupMemberRepository : FundingSourceGroupMemberRepository {
+    private val lock = Any()
+    private val members = ConcurrentHashMap<FundingSourceGroupMemberKey, FundingSourceGroupMember>()
+
+    override fun findGroupIdsContaining(
+        tenantId: TenantId,
+        owner: PartyProfileId,
+        fundingSourceId: FundingSourceId,
+    ): Set<FundingSourceGroupId> =
+        members.values
+            .asSequence()
+            .filter {
+                it.tenantId == tenantId &&
+                    it.ownerPartyProfileId == owner &&
+                    it.fundingSourceId == fundingSourceId
+            }
+            .mapTo(linkedSetOf()) { it.groupId }
+
+    fun add(
+        tenantId: TenantId,
+        member: FundingSourceGroupMember,
+    ): FundingSourceGroupMember = synchronized(lock) {
+        requireSameTenant(tenantId, member.tenantId)
+        val key = FundingSourceGroupMemberKey(tenantId, member.groupId, member.fundingSourceId)
+        requireAbsent(members.containsKey(key), "funding source is already a member of the group")
+        members[key] = member
+        member
     }
 }
 
@@ -978,6 +1042,18 @@ class InMemoryUsageEventRepository : UsageEventRepository {
 private data class TenantScopedKey<ID : Any>(
     val tenantId: TenantId,
     val id: ID,
+)
+
+private data class ChannelGroupMemberKey(
+    val tenantId: TenantId,
+    val groupId: ChannelGroupId,
+    val channelId: ChannelId,
+)
+
+private data class FundingSourceGroupMemberKey(
+    val tenantId: TenantId,
+    val groupId: FundingSourceGroupId,
+    val fundingSourceId: FundingSourceId,
 )
 
 private val PENDING_CHANGE_STATUSES = setOf(

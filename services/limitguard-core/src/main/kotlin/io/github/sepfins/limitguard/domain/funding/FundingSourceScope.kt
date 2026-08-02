@@ -9,4 +9,14 @@ sealed interface FundingSourceScope {
     data class FundingSourceSpecific(val fundingSourceId: FundingSourceId) : FundingSourceScope
 
     data class FundingSourceGroupSpecific(val fundingSourceGroupId: FundingSourceGroupId) : FundingSourceScope
+
+    fun includes(
+        fundingSourceId: FundingSourceId,
+        containingGroupIds: Set<FundingSourceGroupId>,
+    ): Boolean =
+        when (this) {
+            AllOwnerSources -> true
+            is FundingSourceSpecific -> this.fundingSourceId == fundingSourceId
+            is FundingSourceGroupSpecific -> fundingSourceGroupId in containingGroupIds
+        }
 }
