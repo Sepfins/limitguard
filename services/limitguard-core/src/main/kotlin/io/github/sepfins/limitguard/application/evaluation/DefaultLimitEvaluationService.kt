@@ -34,6 +34,7 @@ internal class DefaultLimitEvaluationService(
     private val transactionFactory: TransactionFactory,
     private val mandateResolver: MandateResolver,
     private val limitRuleMatcher: LimitRuleMatcher,
+    private val authorizationEvaluator: AuthorizationEvaluator,
     private val transactionRecorder: TransactionRecorder,
     private val clockProvider: ClockProvider,
     private val transactionRunner: TransactionRunner,
@@ -78,7 +79,7 @@ internal class DefaultLimitEvaluationService(
             )
             if (authorities.isEmpty()) {
                 return@inTransaction requestedTransaction.toAuthorizationResult(
-                    LimitDecisionEngine.actorNotAuthorized(requestedTransaction.authorizedAmount),
+                    AuthorizationEvaluator.actorNotAuthorized(requestedTransaction.authorizedAmount),
                 )
             }
 
@@ -87,38 +88,43 @@ internal class DefaultLimitEvaluationService(
                 authorities = authorities,
                 at = now,
             )
-            val decision = LimitDecisionEngine.decide(
-                attemptedAmount = requestedTransaction.authorizedAmount,
-                rules = matchingRules,
+
+            val evaluation = authorizationEvaluator.evaluate(
+                transaction = requestedTransaction,
+                matchedRules = matchingRules,
+                now = now,
             )
-            if (!decision.allowed) {
-                return@inTransaction requestedTransaction.toAuthorizationResult(decision)
+
+            if (!evaluation.decision.allowed) {
+                return@inTransaction requestedTransaction.toAuthorizationResult(evaluation.decision)
             }
 
             val recorded = transactionRecorder.recordAuthorization(
                 transaction = requestedTransaction,
-                matchedRules = decision.matchedRules,
+                matchedRules = evaluation.decision.matchedRules,
                 authorities = authorities,
                 recordedAt = now,
             )
+
+            authorizationEvaluator.reserve(
+                evaluation = evaluation,
+                transactionEventId = recorded.event.id,
+                now = now,
+            )
+
             recorded.transaction.toAuthorizationResult(
-                decision = decision,
+                decision = evaluation.decision,
                 transactionEventId = recorded.event.id,
             )
         }
     }
 
-    override fun captureTransaction(command: CaptureTransactionCommand): UsageMutationResult {
-        TODO("Not yet implemented")
-    }
-
-    override fun releaseAuthorization(command: ReleaseAuthorizationCommand): UsageMutationResult {
-        TODO("Not yet implemented")
-    }
-
-    override fun reverseTransaction(command: ReverseTransactionCommand): UsageMutationResult {
-        TODO("Not yet implemented")
-    }
+    override fun captureTransaction(command: CaptureTransactionCommand): UsageMutationResult =
+        TODO()
+    override fun releaseAuthorization(command: ReleaseAuthorizationCommand): UsageMutationResult =
+        TODO()
+    override fun reverseTransaction(command: ReverseTransactionCommand): UsageMutationResult =
+        TODO()
 
     private fun requireAuthorizationReferences(transaction: PaymentTransaction) {
         tenantRepository.findById(transaction.tenantId)

@@ -1,6 +1,5 @@
 package io.github.sepfins.limitguard.application.evaluation
 
-import io.github.sepfins.limitguard.domain.limit.LimitKind
 import io.github.sepfins.limitguard.domain.limit.LimitRule
 import io.github.sepfins.limitguard.domain.transaction.PaymentTransaction
 import io.github.sepfins.limitguard.port.persistence.ChannelGroupMemberRepository
@@ -31,11 +30,14 @@ internal class LimitRuleMatcher(
                         at = at,
                     )
                     .asSequence()
-                    .filter { rule -> rule.mandateScope.includes(authority.mandateIds) } //TODO: is it not skipping rules that owner put onto himself, since he does not have a mandate, hence the response is always false? || authrority.directOwnership might be needed
+                    .filter { rule ->
+                        rule.mandateScope.appliesTo(
+                            directOwner = authority.directOwnership,
+                            applicableMandateIds = authority.mandateIds,
+                        )
+                    }
             }
             .distinctBy { it.id }
-            .filter { it.limitKind == LimitKind.PerTransaction }
-            .filter { it.amount.currency == transaction.authorizedAmount.currency } // TODO: i'm not sure it's the logic I want to apply. For instance, if the actor has limit for a "BONIFICO" of 1000€, it's enough to switch the bonifico to something like USD to just skip the limit; should there not instead be a currency conversion baked in somewhere?
             .filter {
                 it.channelScope.includes(
                     channelId = transaction.channelId,

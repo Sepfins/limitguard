@@ -8,6 +8,10 @@ import io.github.sepfins.limitguard.api.LimitRuleChangeType
 import io.github.sepfins.limitguard.api.LimitUsageConsumptionMode
 import io.github.sepfins.limitguard.api.commands.LimitChangeActorCommand
 import io.github.sepfins.limitguard.api.commands.LimitRuleDraft
+import io.github.sepfins.limitguard.api.commands.ApplyDueLimitChangesCommand
+import io.github.sepfins.limitguard.api.commands.ApproveLimitRuleChangeCommand
+import io.github.sepfins.limitguard.api.commands.CancelLimitRuleChangeCommand
+import io.github.sepfins.limitguard.api.commands.RejectLimitRuleChangeCommand
 import io.github.sepfins.limitguard.api.commands.RequestLimitRuleChangeCommand
 import io.github.sepfins.limitguard.api.errors.ConflictException
 import io.github.sepfins.limitguard.api.errors.IdempotencyConflictException
@@ -111,6 +115,34 @@ class DefaultLimitChangeServiceTest {
 
         assertFailsWith<ConflictException> {
             service.requestLimitRuleChange(command(name = "Another name, same target scope"))
+        }
+    }
+
+    @Test
+    fun `non-create workflows fail explicitly while deferred`() {
+        val service = limitChangeService(repositoriesWithConfiguration())
+        val actor = LimitChangeActorCommand(
+            actorType = LimitChangeActorType.PARTY_PROFILE,
+            partyProfileId = requesterId,
+        )
+
+        assertFailsWith<UnsupportedOperationException> {
+            service.approveLimitRuleChange(
+                ApproveLimitRuleChangeCommand(tenantId.value, ownerId, actor),
+            )
+        }
+        assertFailsWith<UnsupportedOperationException> {
+            service.rejectLimitRuleChange(
+                RejectLimitRuleChangeCommand(tenantId.value, ownerId, actor, "not approved"),
+            )
+        }
+        assertFailsWith<UnsupportedOperationException> {
+            service.cancelLimitRuleChange(
+                CancelLimitRuleChangeCommand(tenantId.value, ownerId, actor),
+            )
+        }
+        assertFailsWith<UnsupportedOperationException> {
+            service.applyDueLimitChanges(ApplyDueLimitChangesCommand(tenantId.value))
         }
     }
 

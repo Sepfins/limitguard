@@ -39,6 +39,17 @@ class LimitRuleTest {
         }
     }
 
+    @Test
+    fun `isolated usage mode is invalid for per-transaction rule`() {
+        assertFailsWith<IllegalArgumentException> {
+            limitRule(
+                amount = "100",
+                limitKind = LimitKind.PerTransaction,
+                usageConsumptionMode = LimitUsageConsumptionMode.ISOLATED,
+            )
+        }
+    }
+
     private fun limitConfiguration(maxAmount: String): LimitConfiguration =
         LimitConfiguration(
             id = configurationId,
@@ -58,20 +69,24 @@ class LimitRuleTest {
             effectiveWindow = window,
         )
 
-    private fun limitRule(amount: String): LimitRule =
+    private fun limitRule(
+        amount: String,
+        limitKind: LimitKind = LimitKind.Periodic(LimitPeriod.DAILY),
+        usageConsumptionMode: LimitUsageConsumptionMode = LimitUsageConsumptionMode.CASCADING,
+    ): LimitRule =
         LimitRule(
             id = ruleId,
             tenantId = tenantId,
             ownerPartyProfileId = ownerId,
             name = LimitRuleName.of("Child ATM daily"),
             description = null,
-            limitKind = LimitKind.Periodic(LimitPeriod.DAILY),
+            limitKind = limitKind,
             amount = Money.of(amount, eur),
             mandateScope = MandateScope.AllOwnerMandates,
             configurationId = configurationId,
             channelScope = LimitChannelScope.AllChannels,
             operationScope = LimitOperationScope.AllOperations,
-            usageConsumptionMode = LimitUsageConsumptionMode.CASCADING,
+            usageConsumptionMode = usageConsumptionMode,
             priority = LimitPriority.of(100),
             isActive = true,
             version = Version.INITIAL,

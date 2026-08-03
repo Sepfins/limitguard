@@ -45,6 +45,8 @@ class InMemorySupportSmokeTest {
             limitRuleRepository = repositories.limitRules,
             transactionRepository = repositories.transactions,
             transactionEventRepository = repositories.transactionEvents,
+            usageBucketRepository = repositories.usageBuckets,
+            usageEventRepository = repositories.usageEvents,
             idGenerator = ids,
             clockProvider = clock,
             transactionRunner = transactions,

@@ -945,9 +945,15 @@ class InMemoryUsageBucketRepository : UsageBucketRepository {
         tenantId: TenantId,
         limitRuleId: LimitRuleId,
         assigneeId: PartyProfileId,
+        currency: CurrencyCode,
         window: UsageWindow,
-    ): List<LimitUsageBucket> =
-        findByLimitRuleInWindow(tenantId, limitRuleId, window).filter { it.assigneePartyProfileId == assigneeId }
+    ): LimitUsageBucket? =
+        buckets.tenantValues(tenantId).firstOrNull {
+            it.limitRuleId == limitRuleId &&
+                it.assigneePartyProfileId == assigneeId &&
+                it.currency == currency &&
+                it.window == window
+        }
 
     override fun findById(tenantId: TenantId, id: UsageBucketId): LimitUsageBucket? =
         buckets[TenantScopedKey(tenantId, id)]

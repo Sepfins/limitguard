@@ -12,11 +12,14 @@ import io.github.sepfins.limitguard.api.commands.RequestLimitRuleChangeCommand
 import io.github.sepfins.limitguard.api.results.ApplyDueChangesResult
 import io.github.sepfins.limitguard.api.results.LimitChangeRequestResult
 import io.github.sepfins.limitguard.application.catalog.DefaultTenantCatalogService
+import io.github.sepfins.limitguard.application.evaluation.AuthorizationEvaluator
 import io.github.sepfins.limitguard.application.evaluation.DefaultLimitEvaluationService
 import io.github.sepfins.limitguard.application.evaluation.LimitRuleMatcher
 import io.github.sepfins.limitguard.application.evaluation.MandateResolver
 import io.github.sepfins.limitguard.application.evaluation.TransactionFactory
 import io.github.sepfins.limitguard.application.transaction.TransactionRecorder
+import io.github.sepfins.limitguard.application.usage.UsageReservationService
+import io.github.sepfins.limitguard.application.usage.UsageWindowCalculator
 import io.github.sepfins.limitguard.port.ids.IdGenerator
 import io.github.sepfins.limitguard.port.persistence.ChannelGroupMemberRepository
 import io.github.sepfins.limitguard.port.persistence.ChannelRepository
@@ -36,6 +39,8 @@ import io.github.sepfins.limitguard.port.persistence.PartyRepository
 import io.github.sepfins.limitguard.port.persistence.TenantRepository
 import io.github.sepfins.limitguard.port.persistence.TransactionEventRepository
 import io.github.sepfins.limitguard.port.persistence.TransactionRepository
+import io.github.sepfins.limitguard.port.persistence.UsageBucketRepository
+import io.github.sepfins.limitguard.port.persistence.UsageEventRepository
 import io.github.sepfins.limitguard.port.time.ClockProvider
 import io.github.sepfins.limitguard.port.transactions.TransactionRunner
 
@@ -58,6 +63,8 @@ class DefaultLimitguard(
     limitRuleRepository: LimitRuleRepository,
     transactionRepository: TransactionRepository,
     transactionEventRepository: TransactionEventRepository,
+    usageBucketRepository: UsageBucketRepository,
+    usageEventRepository: UsageEventRepository,
     idGenerator: IdGenerator,
     clockProvider: ClockProvider,
     transactionRunner: TransactionRunner,
@@ -99,6 +106,14 @@ class DefaultLimitguard(
         limitRuleMatcher = LimitRuleMatcher(
             limitRuleRepository = limitRuleRepository,
             channelGroupMemberRepository = channelGroupMemberRepository,
+        ),
+        authorizationEvaluator = AuthorizationEvaluator(
+            UsageReservationService(
+                idGenerator = idGenerator,
+                usageBucketRepository = usageBucketRepository,
+                usageEventRepository = usageEventRepository,
+                usageWindowCalculator = UsageWindowCalculator(),
+            ),
         ),
         transactionRecorder = TransactionRecorder(
             transactionRepository = transactionRepository,

@@ -25,6 +25,7 @@ import io.github.sepfins.limitguard.domain.common.PartyId
 import io.github.sepfins.limitguard.domain.common.PartyProfileId
 import io.github.sepfins.limitguard.domain.common.PaymentTransactionId
 import io.github.sepfins.limitguard.domain.common.TenantId
+import io.github.sepfins.limitguard.domain.common.TransactionEventId
 import io.github.sepfins.limitguard.domain.common.Version
 import io.github.sepfins.limitguard.domain.funding.FundingSource
 import io.github.sepfins.limitguard.domain.funding.FundingSourceGroupMember
@@ -34,6 +35,7 @@ import io.github.sepfins.limitguard.domain.funding.FundingSourceScope
 import io.github.sepfins.limitguard.domain.limit.LimitChannelScope
 import io.github.sepfins.limitguard.domain.limit.LimitKind
 import io.github.sepfins.limitguard.domain.limit.LimitOperationScope
+import io.github.sepfins.limitguard.domain.limit.LimitPeriod
 import io.github.sepfins.limitguard.domain.limit.LimitPriority
 import io.github.sepfins.limitguard.domain.limit.LimitRule
 import io.github.sepfins.limitguard.domain.limit.LimitRuleName
@@ -49,6 +51,8 @@ import io.github.sepfins.limitguard.domain.party.PartyProfile
 import io.github.sepfins.limitguard.domain.tenant.Tenant
 import io.github.sepfins.limitguard.domain.tenant.TenantName
 import io.github.sepfins.limitguard.domain.transaction.TransactionEventType
+import io.github.sepfins.limitguard.application.usage.UsageReservationService
+import io.github.sepfins.limitguard.application.usage.UsageWindowCalculator
 import io.github.sepfins.limitguard.support.DirectTransactionRunner
 import io.github.sepfins.limitguard.support.FixedClockProvider
 import io.github.sepfins.limitguard.support.SequentialIdGenerator
@@ -313,6 +317,257 @@ class DefaultLimitEvaluationServiceTest {
         assertNotNull(result.paymentTransactionId)
     }
 
+    @Test
+    fun `all-owner rule applies to direct owner without a self-mandate`() {
+        val fixture = fixture(actorId)
+        val rule = fixture.addRule(
+            id = 200,
+            ownerId = actorId,
+            mandateScope = MandateScope.AllOwnerMandates,
+            amount = "5.00",
+        )
+
+        val result = fixture.service.authorizeTransaction(command(amount = "10.00"))
+
+        assertEquals(AuthorizationDecision.DENIED, result.decision)
+        assertEquals(rule.id.value, result.violations.single().limitRuleId)
+    }
+
+    @Test
+    fun `periodic reservations accumulate and crossing the cap leaves usage unchanged`() {
+        val fixture = fixture(firstOwnerId)
+        fixture.addMandate(
+            id = 100,
+            ownerId = firstOwnerId,
+            scope = FundingSourceScope.AllOwnerSources,
+        )
+        val rule = fixture.addRule(
+            id = 200,
+            ownerId = firstOwnerId,
+            mandateScope = MandateScope.AllOwnerMandates,
+            amount = "100.00",
+            limitKind = LimitKind.Periodic(LimitPeriod.DAILY),
+        )
+
+        assertEquals(
+            AuthorizationDecision.ALLOWED,
+            fixture.service.authorizeTransaction(command(amount = "60.00")).decision,
+        )
+        assertEquals(
+            AuthorizationDecision.ALLOWED,
+            fixture.service.authorizeTransaction(command(amount = "40.00")).decision,
+        )
+
+        val denied = fixture.service.authorizeTransaction(command(amount = "0.01"))
+
+        assertEquals(AuthorizationDecision.DENIED, denied.decision)
+        assertEquals("PERIODIC_LIMIT_EXCEEDED", denied.violations.single().code)
+        assertEquals(rule.id.value, denied.violations.single().limitRuleId)
+        val bucket = fixture.periodicBucket(rule, LimitPeriod.DAILY)
+        assertEquals(Money.positive("100.00", CurrencyCode.of("EUR")), bucket.reservedAmount)
+        assertEquals(2, fixture.repositories.usageEvents.findByBucket(tenantId, bucket.id).size)
+        assertEquals(2, fixture.repositories.transactions.findByFundingSourceId(tenantId, fundingSourceId).size)
+    }
+
+    @Test
+    fun `authorization replay does not reserve periodic usage twice`() {
+        val fixture = fixture(firstOwnerId)
+        fixture.addMandate(
+            id = 100,
+            ownerId = firstOwnerId,
+            scope = FundingSourceScope.AllOwnerSources,
+        )
+        val rule = fixture.addRule(
+            id = 200,
+            ownerId = firstOwnerId,
+            mandateScope = MandateScope.AllOwnerMandates,
+            amount = "100.00",
+            limitKind = LimitKind.Periodic(LimitPeriod.DAILY),
+        )
+
+        val first = fixture.service.authorizeTransaction(command(amount = "60.00", idempotencyKey = "periodic-1"))
+        val replay = fixture.service.authorizeTransaction(command(amount = "60.00", idempotencyKey = "periodic-1"))
+
+        assertEquals(first, replay)
+        val bucket = fixture.periodicBucket(rule, LimitPeriod.DAILY)
+        assertEquals(Money.positive("60.00", CurrencyCode.of("EUR")), bucket.reservedAmount)
+        assertEquals(1, fixture.repositories.usageEvents.findByBucket(tenantId, bucket.id).size)
+    }
+
+    @Test
+    fun `cascading periodic rules reserve every matched bucket`() {
+        val fixture = fixture(firstOwnerId)
+        fixture.addMandate(
+            id = 100,
+            ownerId = firstOwnerId,
+            scope = FundingSourceScope.AllOwnerSources,
+        )
+        val dailyRule = fixture.addRule(
+            id = 200,
+            ownerId = firstOwnerId,
+            mandateScope = MandateScope.AllOwnerMandates,
+            amount = "100.00",
+            priority = 10,
+            limitKind = LimitKind.Periodic(LimitPeriod.DAILY),
+        )
+        val monthlyRule = fixture.addRule(
+            id = 201,
+            ownerId = firstOwnerId,
+            mandateScope = MandateScope.AllOwnerMandates,
+            amount = "500.00",
+            priority = 20,
+            limitKind = LimitKind.Periodic(LimitPeriod.MONTHLY),
+        )
+
+        val result = fixture.service.authorizeTransaction(command(amount = "25.00"))
+
+        assertEquals(AuthorizationDecision.ALLOWED, result.decision)
+        val events = fixture.repositories.usageEvents.findByTransactionEvent(
+            tenantId,
+            TransactionEventId.of(requireNotNull(result.transactionEventId)),
+        )
+        assertEquals(setOf(dailyRule.id, monthlyRule.id), events.mapTo(mutableSetOf()) { it.limitRuleId })
+    }
+
+    @Test
+    fun `isolated periodic rule stops broader owner usage but not per-transaction checks`() {
+        val fixture = fixture(firstOwnerId)
+        fixture.addMandate(
+            id = 100,
+            ownerId = firstOwnerId,
+            scope = FundingSourceScope.AllOwnerSources,
+        )
+        val isolatedRule = fixture.addRule(
+            id = 200,
+            ownerId = firstOwnerId,
+            mandateScope = MandateScope.AllOwnerMandates,
+            amount = "1000.00",
+            priority = 10,
+            limitKind = LimitKind.Periodic(LimitPeriod.DAILY),
+            usageConsumptionMode = LimitUsageConsumptionMode.ISOLATED,
+        )
+        val peerRule = fixture.addRule(
+            id = 203,
+            ownerId = firstOwnerId,
+            mandateScope = MandateScope.AllOwnerMandates,
+            amount = "2000.00",
+            priority = 10,
+            limitKind = LimitKind.Periodic(LimitPeriod.MONTHLY),
+        )
+        val broaderRule = fixture.addRule(
+            id = 201,
+            ownerId = firstOwnerId,
+            mandateScope = MandateScope.AllOwnerMandates,
+            amount = "5000.00",
+            priority = 20,
+            limitKind = LimitKind.Periodic(LimitPeriod.MONTHLY),
+        )
+        val perTransactionRule = fixture.addRule(
+            id = 202,
+            ownerId = firstOwnerId,
+            mandateScope = MandateScope.AllOwnerMandates,
+            amount = "50.00",
+            priority = 30,
+        )
+
+        val allowed = fixture.service.authorizeTransaction(command(amount = "40.00"))
+
+        assertEquals(AuthorizationDecision.ALLOWED, allowed.decision)
+        assertEquals(
+            listOf(isolatedRule.id.value, peerRule.id.value, perTransactionRule.id.value),
+            allowed.matchedRules.map { it.id },
+        )
+        val allowedEvents = fixture.repositories.usageEvents.findByTransactionEvent(
+            tenantId,
+            TransactionEventId.of(
+                requireNotNull(allowed.transactionEventId),
+            ),
+        )
+        assertEquals(setOf(isolatedRule.id, peerRule.id), allowedEvents.mapTo(mutableSetOf()) { it.limitRuleId })
+        assertEquals(
+            emptyList(),
+            fixture.repositories.usageBuckets.findByLimitRuleInWindow(
+                tenantId,
+                broaderRule.id,
+                UsageWindowCalculator().calculateWindow(now, LimitPeriod.MONTHLY),
+            ),
+        )
+
+        val denied = fixture.service.authorizeTransaction(command(amount = "60.00"))
+
+        assertEquals(AuthorizationDecision.DENIED, denied.decision)
+        assertEquals("PER_TRANSACTION_LIMIT_EXCEEDED", denied.violations.single().code)
+        assertEquals(perTransactionRule.id.value, denied.violations.single().limitRuleId)
+        assertEquals(
+            Money.positive("40.00", CurrencyCode.of("EUR")),
+            fixture.periodicBucket(isolatedRule, LimitPeriod.DAILY).reservedAmount,
+        )
+    }
+
+    @Test
+    fun `isolated rule from one co-owner does not suppress another owners usage`() {
+        val fixture = fixture(firstOwnerId, secondOwnerId)
+        val firstMandate = fixture.addMandate(
+            id = 100,
+            ownerId = firstOwnerId,
+            scope = FundingSourceScope.AllOwnerSources,
+        )
+        val secondMandate = fixture.addMandate(
+            id = 101,
+            ownerId = secondOwnerId,
+            scope = FundingSourceScope.AllOwnerSources,
+        )
+        val isolatedRule = fixture.addRule(
+            id = 200,
+            ownerId = firstOwnerId,
+            mandateScope = MandateScope.MandateSpecific(firstMandate.id),
+            amount = "100.00",
+            priority = 10,
+            limitKind = LimitKind.Periodic(LimitPeriod.DAILY),
+            usageConsumptionMode = LimitUsageConsumptionMode.ISOLATED,
+        )
+        val otherOwnerRule = fixture.addRule(
+            id = 201,
+            ownerId = secondOwnerId,
+            mandateScope = MandateScope.MandateSpecific(secondMandate.id),
+            amount = "500.00",
+            priority = 20,
+            limitKind = LimitKind.Periodic(LimitPeriod.MONTHLY),
+        )
+
+        val result = fixture.service.authorizeTransaction(command(amount = "25.00"))
+
+        assertEquals(AuthorizationDecision.ALLOWED, result.decision)
+        val events = fixture.repositories.usageEvents.findByTransactionEvent(
+            tenantId,
+            TransactionEventId.of(requireNotNull(result.transactionEventId)),
+        )
+        assertEquals(setOf(isolatedRule.id, otherOwnerRule.id), events.mapTo(mutableSetOf()) { it.limitRuleId })
+    }
+
+    @Test
+    fun `different-currency rule fails closed instead of being skipped`() {
+        val fixture = fixture(firstOwnerId)
+        fixture.addMandate(
+            id = 100,
+            ownerId = firstOwnerId,
+            scope = FundingSourceScope.AllOwnerSources,
+        )
+        val rule = fixture.addRule(
+            id = 200,
+            ownerId = firstOwnerId,
+            mandateScope = MandateScope.AllOwnerMandates,
+            amount = "100.00",
+        )
+
+        val result = fixture.service.authorizeTransaction(command(amount = "10.00", currency = "USD"))
+
+        assertEquals(AuthorizationDecision.DENIED, result.decision)
+        assertEquals("LIMIT_CURRENCY_MISMATCH", result.violations.single().code)
+        assertEquals(rule.id.value, result.violations.single().limitRuleId)
+        assertEquals(emptyList(), fixture.repositories.transactions.findByFundingSourceId(tenantId, fundingSourceId))
+    }
+
     private fun fixture(
         ownerId: PartyProfileId,
         additionalOwnerId: PartyProfileId? = null,
@@ -322,6 +577,7 @@ class DefaultLimitEvaluationServiceTest {
     private fun command(
         amount: String,
         idempotencyKey: String? = null,
+        currency: String = "EUR",
     ): AuthorizeTransactionCommand =
         AuthorizeTransactionCommand(
             tenantId = tenantId.value,
@@ -330,7 +586,7 @@ class DefaultLimitEvaluationServiceTest {
             operationTypeId = operationTypeId.value,
             channelId = channelId.value,
             amount = BigDecimal(amount),
-            currency = "EUR",
+            currency = currency,
             idempotencyKey = idempotencyKey,
             metadata = mapOf("merchantCategory" to "GROCERY"),
         )
@@ -418,6 +674,14 @@ class DefaultLimitEvaluationServiceTest {
                     limitRuleRepository = repositories.limitRules,
                     channelGroupMemberRepository = repositories.channelGroupMembers,
                 ),
+                authorizationEvaluator = AuthorizationEvaluator(
+                    UsageReservationService(
+                        idGenerator = idGenerator,
+                        usageBucketRepository = repositories.usageBuckets,
+                        usageEventRepository = repositories.usageEvents,
+                        usageWindowCalculator = UsageWindowCalculator(),
+                    ),
+                ),
                 transactionRecorder = TransactionRecorder(
                     transactionRepository = repositories.transactions,
                     transactionEventRepository = repositories.transactionEvents,
@@ -458,6 +722,8 @@ class DefaultLimitEvaluationServiceTest {
             amount: String,
             priority: Int = 100,
             channelScope: LimitChannelScope = LimitChannelScope.AllChannels,
+            limitKind: LimitKind = LimitKind.PerTransaction,
+            usageConsumptionMode: LimitUsageConsumptionMode = LimitUsageConsumptionMode.CASCADING,
         ): LimitRule =
             LimitRule(
                 id = LimitRuleId.of(uuid(id)),
@@ -465,13 +731,13 @@ class DefaultLimitEvaluationServiceTest {
                 ownerPartyProfileId = ownerId,
                 name = LimitRuleName.of("Rule $id"),
                 description = null,
-                limitKind = LimitKind.PerTransaction,
+                limitKind = limitKind,
                 amount = Money.positive(amount, CurrencyCode.of("EUR")),
                 mandateScope = mandateScope,
                 configurationId = null,
                 channelScope = channelScope,
                 operationScope = LimitOperationScope.OperationTypeSpecific(operationTypeId),
-                usageConsumptionMode = LimitUsageConsumptionMode.CASCADING,
+                usageConsumptionMode = usageConsumptionMode,
                 priority = LimitPriority.of(priority),
                 isActive = true,
                 version = Version.INITIAL,
@@ -480,6 +746,15 @@ class DefaultLimitEvaluationServiceTest {
                 createdAt = now,
                 updatedAt = now,
             ).also { repositories.limitRules.insert(tenantId, it) }
+
+        fun periodicBucket(rule: LimitRule, period: LimitPeriod) =
+            repositories.usageBuckets.findByLimitRuleAndAssigneeInWindow(
+                tenantId = tenantId,
+                limitRuleId = rule.id,
+                assigneeId = actorId,
+                currency = rule.amount.currency,
+                window = UsageWindowCalculator().calculateWindow(now, period),
+            ).let(::assertNotNull)
 
         private fun addPartyProfile(profileId: PartyProfileId) {
             repositories.partyProfiles.insert(

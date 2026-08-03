@@ -7,9 +7,12 @@ sealed interface MandateScope {
 
     data class MandateSpecific(val mandateId: MandateId) : MandateScope
 
-    fun includes(applicableMandateIds: Set<MandateId>): Boolean =
+    fun appliesTo(
+        directOwner: Boolean,
+        applicableMandateIds: Set<MandateId>,
+    ): Boolean =
         when (this) {
-            AllOwnerMandates -> applicableMandateIds.isNotEmpty()
+            AllOwnerMandates -> directOwner || applicableMandateIds.isNotEmpty()
             is MandateSpecific -> mandateId in applicableMandateIds
         }
 }

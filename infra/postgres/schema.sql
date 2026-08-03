@@ -780,7 +780,7 @@ CREATE TABLE mandate (
 );
 
 COMMENT ON TABLE mandate IS
-    'Owner-to-assignee funding envelope. A mandate says which funding sources are delegated; limit rules attach to one mandate or all active mandates of an owner.';
+    'Owner-to-assignee funding envelope. A mandate says which funding sources are delegated; limit rules attach to one mandate or to the owner-wide scope shared by the direct owner and active mandates.';
 
 COMMENT ON COLUMN mandate.authority_delegation_id IS
     'Optional authority relationship that justifies the mandate. When present it must match this mandate owner and assignee.';
@@ -874,6 +874,9 @@ CREATE TABLE limit_rule (
             channel_group_id IS NOT NULL
         )
     ),
+    CONSTRAINT chk_limit_rule_usage_consumption_mode CHECK (
+        limit_kind = 'PERIODIC' OR usage_consumption_mode = 'CASCADING'
+    ),
     CONSTRAINT chk_limit_rule_priority CHECK (priority >= 0),
     CONSTRAINT chk_limit_rule_version CHECK (version > 0),
     CONSTRAINT chk_limit_rule_effective_window CHECK (
@@ -888,13 +891,13 @@ COMMENT ON COLUMN limit_rule.owner_party_profile_id IS
     'The party profile that owns the funding sources governed by this rule.';
 
 COMMENT ON COLUMN limit_rule.mandate_scope IS
-    'ALL_OWNER_MANDATES applies to every active mandate of the owner; MANDATE applies to one owner-to-assignee funding envelope.';
+    'ALL_OWNER_MANDATES applies to the direct owner and every active mandate of the owner; MANDATE applies only to one owner-to-assignee funding envelope.';
 
 COMMENT ON COLUMN limit_rule.configuration_id IS
     'Configuration row that supplied or constrained this rule amount, when the rule was created from tenant configuration.';
 
 COMMENT ON COLUMN limit_rule.usage_consumption_mode IS
-    'CASCADING writes usage to every matched periodic rule; ISOLATED makes this rule a terminal bucket that can suppress broader matched buckets.';
+    'For periodic rules, CASCADING continues to broader priority tiers while ISOLATED includes its peer tier and terminates the usage-bucket cascade for this owner. Per-transaction rules must use CASCADING and are always evaluated.';
 
 CREATE INDEX idx_limit_rule_active_owner
     ON limit_rule (tenant_id, owner_party_profile_id, is_active, starts_at, ends_at);

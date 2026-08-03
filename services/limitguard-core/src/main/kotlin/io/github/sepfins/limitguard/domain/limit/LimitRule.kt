@@ -36,6 +36,9 @@ data class LimitRule(
         require(amount.isPositive) {
             "amount must be positive"
         }
+        require(limitKind is LimitKind.Periodic || usageConsumptionMode == LimitUsageConsumptionMode.CASCADING) {
+            "ISOLATED usage consumption is only valid for periodic rules"
+        }
     }
 
     fun isEffectiveAt(instant: Instant): Boolean =
