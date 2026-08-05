@@ -4,7 +4,6 @@ import io.github.sepfins.limitguard.api.commands.AuthorizeTransactionCommand
 import io.github.sepfins.limitguard.domain.common.ChannelId
 import io.github.sepfins.limitguard.domain.common.CurrencyCode
 import io.github.sepfins.limitguard.domain.common.FundingSourceId
-import io.github.sepfins.limitguard.domain.common.IdempotencyKey
 import io.github.sepfins.limitguard.domain.common.Metadata
 import io.github.sepfins.limitguard.domain.common.Money
 import io.github.sepfins.limitguard.domain.common.OperationTypeId
@@ -34,7 +33,6 @@ internal class TransactionFactory(
             authorizedAmount = Money.positive(command.amount, currency),
             capturedAmount = Money.zero(currency),
             status = TransactionStatus.AUTHORIZED,
-            idempotencyKey = command.idempotencyKey?.let { IdempotencyKey.of(it) },
             expiresAt = command.expiresAt,
             metadata = Metadata(command.metadata),
             createdAt = now,

@@ -2,7 +2,6 @@ package io.github.sepfins.limitguard.domain.transaction
 
 import io.github.sepfins.limitguard.domain.common.ChannelId
 import io.github.sepfins.limitguard.domain.common.FundingSourceId
-import io.github.sepfins.limitguard.domain.common.IdempotencyKey
 import io.github.sepfins.limitguard.domain.common.Metadata
 import io.github.sepfins.limitguard.domain.common.Money
 import io.github.sepfins.limitguard.domain.common.OperationTypeId
@@ -21,7 +20,6 @@ data class PaymentTransaction(
     val authorizedAmount: Money,
     val capturedAmount: Money,
     val status: TransactionStatus,
-    val idempotencyKey: IdempotencyKey? = null,
     val expiresAt: Instant? = null,
     val metadata: Metadata = Metadata.EMPTY,
     val createdAt: Instant? = null

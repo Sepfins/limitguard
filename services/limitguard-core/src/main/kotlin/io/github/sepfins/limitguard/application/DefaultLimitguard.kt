@@ -92,6 +92,7 @@ class DefaultLimitguard(
 
     override val limitEvaluationService: LimitEvaluationService = DefaultLimitEvaluationService(
         transactionRepository = transactionRepository,
+        transactionEventRepository = transactionEventRepository,
         partyProfileRepository = partyProfileRepository,
         tenantRepository = tenantRepository,
         channelRepository = channelRepository,

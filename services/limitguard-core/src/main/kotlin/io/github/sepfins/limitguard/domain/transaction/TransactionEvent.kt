@@ -1,5 +1,6 @@
 package io.github.sepfins.limitguard.domain.transaction
 
+import io.github.sepfins.limitguard.domain.common.IdempotencyKey
 import io.github.sepfins.limitguard.domain.common.Metadata
 import io.github.sepfins.limitguard.domain.common.Money
 import io.github.sepfins.limitguard.domain.common.PaymentTransactionId
@@ -14,6 +15,7 @@ data class TransactionEvent(
     val eventType: TransactionEventType,
     val amount: Money? = null,
     val reason: TransactionEventReason? = null,
+    val idempotencyKey: IdempotencyKey? = null,
     val metadata: Metadata = Metadata.EMPTY,
     val createdAt: Instant? = null,
 )

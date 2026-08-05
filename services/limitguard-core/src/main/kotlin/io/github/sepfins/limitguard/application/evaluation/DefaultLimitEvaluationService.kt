@@ -11,13 +11,16 @@ import io.github.sepfins.limitguard.api.errors.ValidationException
 import io.github.sepfins.limitguard.api.results.AuthorizationResult
 import io.github.sepfins.limitguard.api.results.UsageMutationResult
 import io.github.sepfins.limitguard.application.transaction.TransactionRecorder
+import io.github.sepfins.limitguard.domain.common.IdempotencyKey
 import io.github.sepfins.limitguard.domain.transaction.PaymentTransaction
+import io.github.sepfins.limitguard.domain.transaction.TransactionEventType
 import io.github.sepfins.limitguard.port.persistence.ChannelRepository
 import io.github.sepfins.limitguard.port.persistence.FundingSourceOwnerRepository
 import io.github.sepfins.limitguard.port.persistence.FundingSourceRepository
 import io.github.sepfins.limitguard.port.persistence.OperationTypeRepository
 import io.github.sepfins.limitguard.port.persistence.PartyProfileRepository
 import io.github.sepfins.limitguard.port.persistence.TenantRepository
+import io.github.sepfins.limitguard.port.persistence.TransactionEventRepository
 import io.github.sepfins.limitguard.port.persistence.TransactionRepository
 import io.github.sepfins.limitguard.port.time.ClockProvider
 import io.github.sepfins.limitguard.port.transactions.TransactionRunner
@@ -25,6 +28,7 @@ import java.time.Instant
 
 internal class DefaultLimitEvaluationService(
     private val transactionRepository: TransactionRepository,
+    private val transactionEventRepository: TransactionEventRepository,
     private val partyProfileRepository: PartyProfileRepository,
     private val tenantRepository: TenantRepository,
     private val channelRepository: ChannelRepository,
@@ -42,11 +46,23 @@ internal class DefaultLimitEvaluationService(
     override fun authorizeTransaction(command: AuthorizeTransactionCommand): AuthorizationResult {
         val now = clockProvider.now()
         val requestedTransaction = validatedTransaction(command, now)
+        val idempotencyKey = validatedIdempotencyKey(command.idempotencyKey)
 
         return transactionRunner.inTransaction {
-            val existingTransaction = requestedTransaction.idempotencyKey
-                ?.let { transactionRepository.findByIdempotencyKey(requestedTransaction.tenantId, it) }
-            if (existingTransaction != null) {
+            val existingEvent = idempotencyKey
+                ?.let { transactionEventRepository.findByIdempotencyKey(requestedTransaction.tenantId, it) }
+            if (existingEvent != null) {
+                if (existingEvent.eventType != TransactionEventType.AUTHORIZATION) {
+                    throw IdempotencyConflictException(
+                        "idempotency key already belongs to a non-authorization transaction event",
+                    )
+                }
+                val existingTransaction = transactionRepository.findById(
+                    requestedTransaction.tenantId,
+                    existingEvent.paymentTransactionId,
+                ) ?: error(
+                    "Authorization event ${existingEvent.id.value} references a missing payment transaction",
+                )
                 requireSameAuthorizationRequest(existingTransaction, requestedTransaction)
                 val replay = transactionRecorder.replayAuthorization(existingTransaction)
                 return@inTransaction replay.transaction.toAuthorizationResult(
@@ -157,6 +173,16 @@ internal class DefaultLimitEvaluationService(
         } catch (exception: IllegalArgumentException) {
             throw ValidationException(
                 message = exception.message ?: "transaction authorization validation failed",
+                cause = exception,
+            )
+        }
+
+    private fun validatedIdempotencyKey(rawKey: String?): IdempotencyKey? =
+        try {
+            rawKey?.let(IdempotencyKey::of)
+        } catch (exception: IllegalArgumentException) {
+            throw ValidationException(
+                message = exception.message ?: "idempotency key validation failed",
                 cause = exception,
             )
         }

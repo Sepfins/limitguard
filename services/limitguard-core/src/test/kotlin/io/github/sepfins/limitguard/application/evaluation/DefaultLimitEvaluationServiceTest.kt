@@ -16,6 +16,7 @@ import io.github.sepfins.limitguard.domain.common.FundingSourceGroupId
 import io.github.sepfins.limitguard.domain.common.FundingSourceId
 import io.github.sepfins.limitguard.domain.common.FundingSourceOwnerId
 import io.github.sepfins.limitguard.domain.common.FundingSourceProductId
+import io.github.sepfins.limitguard.domain.common.IdempotencyKey
 import io.github.sepfins.limitguard.domain.common.LimitRuleId
 import io.github.sepfins.limitguard.domain.common.MandateId
 import io.github.sepfins.limitguard.domain.common.Metadata
@@ -155,6 +156,12 @@ class DefaultLimitEvaluationServiceTest {
 
         assertEquals(first, replay)
         assertEquals(1, fixture.repositories.transactions.findByFundingSourceId(tenantId, fundingSourceId).size)
+        assertEquals(
+            TransactionEventType.AUTHORIZATION,
+            fixture.repositories.transactionEvents
+                .findByIdempotencyKey(tenantId, IdempotencyKey.of("auth-1"))
+                ?.eventType,
+        )
         assertFailsWith<IdempotencyConflictException> {
             fixture.service.authorizeTransaction(command(amount = "76.00", idempotencyKey = "auth-1"))
         }
@@ -659,6 +666,7 @@ class DefaultLimitEvaluationServiceTest {
             val idGenerator = SequentialIdGenerator(startAt = 1000L)
             service = DefaultLimitEvaluationService(
                 transactionRepository = repositories.transactions,
+                transactionEventRepository = repositories.transactionEvents,
                 partyProfileRepository = repositories.partyProfiles,
                 tenantRepository = repositories.tenants,
                 channelRepository = repositories.channels,

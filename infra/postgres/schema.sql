@@ -392,7 +392,6 @@ CREATE TABLE payment_transaction (
     captured_amount NUMERIC(20, 4) NOT NULL DEFAULT 0,
     currency CHAR(3) NOT NULL,
     status transaction_status NOT NULL DEFAULT 'AUTHORIZED',
-    idempotency_key VARCHAR(255),
     expires_at TIMESTAMPTZ,
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -413,10 +412,6 @@ CREATE TABLE payment_transaction (
         currency ~ '^[A-Z]{3}$'
     )
 );
-
-CREATE UNIQUE INDEX uq_payment_transaction_idempotency
-    ON payment_transaction (tenant_id, idempotency_key)
-    WHERE idempotency_key IS NOT NULL;
 
 CREATE INDEX idx_payment_transaction_actor
     ON payment_transaction (tenant_id, acting_party_profile_id, created_at);
@@ -444,6 +439,7 @@ CREATE TABLE transaction_event (
     event_type transaction_event_type NOT NULL,
     amount NUMERIC(20, 4),
     reason VARCHAR(255),
+    idempotency_key VARCHAR(255),
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (tenant_id, id),
@@ -452,8 +448,21 @@ CREATE TABLE transaction_event (
         ON DELETE CASCADE,
     CONSTRAINT chk_transaction_event_amount CHECK (
         amount IS NULL OR amount >= 0
+    ),
+    CONSTRAINT chk_transaction_event_idempotency_key CHECK (
+        idempotency_key IS NULL OR (
+            length(idempotency_key) > 0 AND
+            idempotency_key = btrim(idempotency_key)
+        )
     )
 );
+
+COMMENT ON COLUMN transaction_event.idempotency_key IS
+    'Tenant-scoped key of the command that produced this event, including authorization, capture, release, and reversal. Reuse for different command data is an idempotency conflict.';
+
+CREATE UNIQUE INDEX uq_transaction_event_idempotency
+    ON transaction_event (tenant_id, idempotency_key)
+    WHERE idempotency_key IS NOT NULL;
 
 CREATE INDEX idx_transaction_event_transaction
     ON transaction_event (tenant_id, payment_transaction_id, created_at);

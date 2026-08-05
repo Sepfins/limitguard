@@ -884,13 +884,9 @@ class InMemoryTransactionRepository : TransactionRepository {
     override fun findByIdForUpdate(tenantId: TenantId, id: PaymentTransactionId): PaymentTransaction? =
         findById(tenantId, id)
 
-    override fun findByIdempotencyKey(tenantId: TenantId, key: IdempotencyKey): PaymentTransaction? =
-        transactions.tenantValues(tenantId).firstOrNull { it.idempotencyKey == key }
-
     override fun insert(tenantId: TenantId, transaction: PaymentTransaction): PaymentTransaction = synchronized(lock) {
         requireSameTenant(tenantId, transaction.tenantId)
         requireAbsent(findById(tenantId, transaction.id) != null, "transaction id already exists: ${transaction.id.value}")
-        requireTransactionIdempotencyUnique(tenantId, transaction)
         transactions[TenantScopedKey(tenantId, transaction.id)] = transaction
         transaction
     }
@@ -898,17 +894,8 @@ class InMemoryTransactionRepository : TransactionRepository {
     override fun update(tenantId: TenantId, transaction: PaymentTransaction): PaymentTransaction = synchronized(lock) {
         requireSameTenant(tenantId, transaction.tenantId)
         requirePresent(findById(tenantId, transaction.id) != null, "transaction not found: ${transaction.id.value}")
-        requireTransactionIdempotencyUnique(tenantId, transaction)
         transactions[TenantScopedKey(tenantId, transaction.id)] = transaction
         transaction
-    }
-
-    private fun requireTransactionIdempotencyUnique(tenantId: TenantId, transaction: PaymentTransaction) {
-        val idempotencyKey = transaction.idempotencyKey ?: return
-        requireAbsent(
-            transactions.tenantValues(tenantId).any { it.id != transaction.id && it.idempotencyKey == idempotencyKey },
-            "transaction idempotency key already exists: ${idempotencyKey.value}",
-        )
     }
 }
 
@@ -919,12 +906,20 @@ class InMemoryTransactionEventRepository : TransactionEventRepository {
     override fun findById(tenantId: TenantId, id: TransactionEventId): TransactionEvent? =
         events[TenantScopedKey(tenantId, id)]
 
+    override fun findByIdempotencyKey(tenantId: TenantId, key: IdempotencyKey): TransactionEvent? =
+        events.tenantValues(tenantId).firstOrNull { it.idempotencyKey == key }
+
     override fun findByTransaction(tenantId: TenantId, transactionId: PaymentTransactionId): List<TransactionEvent> =
         events.tenantValues(tenantId).filter { it.paymentTransactionId == transactionId }
 
     override fun insert(tenantId: TenantId, event: TransactionEvent): TransactionEvent = synchronized(lock) {
         requireSameTenant(tenantId, event.tenantId)
         requireAbsent(findById(tenantId, event.id) != null, "transaction event id already exists: ${event.id.value}")
+        val idempotencyKey = event.idempotencyKey
+        requireAbsent(
+            idempotencyKey != null && findByIdempotencyKey(tenantId, idempotencyKey) != null,
+            "transaction event idempotency key already exists: ${idempotencyKey?.value}",
+        )
         events[TenantScopedKey(tenantId, event.id)] = event
         event
     }
