@@ -16,6 +16,13 @@ data class TransactionEvent(
     val amount: Money? = null,
     val reason: TransactionEventReason? = null,
     val idempotencyKey: IdempotencyKey? = null,
+    val resultSnapshot: TransactionResultSnapshot? = null,
     val metadata: Metadata = Metadata.EMPTY,
     val createdAt: Instant? = null,
-)
+) {
+    init {
+        require((idempotencyKey == null) == (resultSnapshot == null)) {
+            "idempotencyKey and resultSnapshot must either both be present or both be absent"
+        }
+    }
+}

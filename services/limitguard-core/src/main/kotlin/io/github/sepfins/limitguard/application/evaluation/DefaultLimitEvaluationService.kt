@@ -119,6 +119,7 @@ internal class DefaultLimitEvaluationService(
                 transaction = requestedTransaction,
                 matchedRules = evaluation.decision.matchedRules,
                 authorities = authorities,
+                idempotencyKey = idempotencyKey,
                 recordedAt = now,
             )
 

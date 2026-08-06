@@ -2,6 +2,7 @@ package io.github.sepfins.limitguard.application.transaction
 
 import io.github.sepfins.limitguard.application.evaluation.ResolvedFundingAuthority
 import io.github.sepfins.limitguard.domain.common.CurrencyCode
+import io.github.sepfins.limitguard.domain.common.IdempotencyKey
 import io.github.sepfins.limitguard.domain.common.LimitRuleId
 import io.github.sepfins.limitguard.domain.common.Metadata
 import io.github.sepfins.limitguard.domain.common.Money
@@ -35,17 +36,28 @@ internal class TransactionRecorder(
         transaction: PaymentTransaction,
         matchedRules: List<MatchedLimitRule>,
         authorities: List<ResolvedFundingAuthority>,
+        idempotencyKey: IdempotencyKey?,
         recordedAt: Instant,
     ): RecordedAuthorization {
         val persistedTransaction = transactionRepository.insert(transaction.tenantId, transaction)
+        val eventId = TransactionEventId.of(idGenerator.newId())
+        val resultSnapshot = idempotencyKey?.let {
+            TransactionIdempotency.authorizationResultSnapshot(
+                transaction = persistedTransaction,
+                transactionEventId = eventId,
+                matchedRules = matchedRules,
+            )
+        }
         val event = transactionEventRepository.insert(
             transaction.tenantId,
             TransactionEvent(
-                id = TransactionEventId.of(idGenerator.newId()),
+                id = eventId,
                 tenantId = transaction.tenantId,
                 paymentTransactionId = persistedTransaction.id,
                 eventType = TransactionEventType.AUTHORIZATION,
                 amount = persistedTransaction.authorizedAmount,
+                idempotencyKey = idempotencyKey,
+                resultSnapshot = resultSnapshot,
                 metadata = authorizationMetadata(matchedRules, authorities),
                 createdAt = recordedAt,
             ),

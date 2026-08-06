@@ -156,11 +156,18 @@ class DefaultLimitEvaluationServiceTest {
 
         assertEquals(first, replay)
         assertEquals(1, fixture.repositories.transactions.findByFundingSourceId(tenantId, fundingSourceId).size)
-        assertEquals(
-            TransactionEventType.AUTHORIZATION,
+        val authorizationEvent = assertNotNull(
             fixture.repositories.transactionEvents
-                .findByIdempotencyKey(tenantId, IdempotencyKey.of("auth-1"))
-                ?.eventType,
+                .findByIdempotencyKey(tenantId, IdempotencyKey.of("auth-1")),
+        )
+        assertEquals(TransactionEventType.AUTHORIZATION, authorizationEvent.eventType)
+        assertEquals(
+            first.paymentTransactionId.toString(),
+            authorizationEvent.resultSnapshot?.value?.get("paymentTransactionId"),
+        )
+        assertEquals(
+            first.transactionEventId.toString(),
+            authorizationEvent.resultSnapshot?.value?.get("transactionEventId"),
         )
         assertFailsWith<IdempotencyConflictException> {
             fixture.service.authorizeTransaction(command(amount = "76.00", idempotencyKey = "auth-1"))

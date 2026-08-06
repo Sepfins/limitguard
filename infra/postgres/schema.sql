@@ -440,6 +440,7 @@ CREATE TABLE transaction_event (
     amount NUMERIC(20, 4),
     reason VARCHAR(255),
     idempotency_key VARCHAR(255),
+    result_snapshot JSONB,
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (tenant_id, id),
@@ -454,11 +455,25 @@ CREATE TABLE transaction_event (
             length(idempotency_key) > 0 AND
             idempotency_key = btrim(idempotency_key)
         )
+    ),
+    CONSTRAINT chk_transaction_event_idempotency_payload CHECK (
+        (
+            idempotency_key IS NULL AND
+            result_snapshot IS NULL
+        ) OR
+        (
+            idempotency_key IS NOT NULL AND
+            result_snapshot IS NOT NULL AND
+            jsonb_typeof(result_snapshot) = 'object'
+        )
     )
 );
 
 COMMENT ON COLUMN transaction_event.idempotency_key IS
     'Tenant-scoped key of the command that produced this event, including authorization, capture, release, and reversal. Reuse for different command data is an idempotency conflict.';
+
+COMMENT ON COLUMN transaction_event.result_snapshot IS
+    'Versioned JSON object containing the original command result required for exact replay even after later transaction mutations change aggregate state.';
 
 CREATE UNIQUE INDEX uq_transaction_event_idempotency
     ON transaction_event (tenant_id, idempotency_key)
