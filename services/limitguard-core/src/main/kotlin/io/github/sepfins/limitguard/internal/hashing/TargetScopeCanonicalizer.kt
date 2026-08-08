@@ -5,21 +5,12 @@ import io.github.sepfins.limitguard.domain.limit.LimitKind
 import io.github.sepfins.limitguard.domain.limit.LimitOperationScope
 import io.github.sepfins.limitguard.domain.limit.LimitRuleTargetScope
 import io.github.sepfins.limitguard.domain.mandate.MandateScope
-import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
-
 
 internal object TargetScopeCanonicalizer : Canonicalizer<LimitRuleTargetScope> {
-    private val json = Json {
-        encodeDefaults = true
-        explicitNulls = true
-        prettyPrint = false
-    }
-
     override fun canonicalize(value: LimitRuleTargetScope): String =
-        json.encodeToString(value.toCanonical())
+        CanonicalJson.encodeObject(value.toCanonicalValues())
 
-    private fun LimitRuleTargetScope.toCanonical(): CanonicalLimitRuleTargetScope {
+    private fun LimitRuleTargetScope.toCanonicalValues(): Map<String, Any?> {
         val canonicalMandateScope = when (mandateScope) {
             MandateScope.AllOwnerMandates ->
                 CanonicalMandateScope("ALL_OWNER_MANDATES", null)
@@ -50,36 +41,21 @@ internal object TargetScopeCanonicalizer : Canonicalizer<LimitRuleTargetScope> {
                 CanonicalKind("PERIODIC", kind.period.name)
         }
 
-        return CanonicalLimitRuleTargetScope(
-            owner = owner.value.toString(),
-            mandateScope = canonicalMandateScope.scope,
-            mandateId = canonicalMandateScope.mandateId,
-            channelScope = canonicalChannelScope.scope,
-            channelGroupId = canonicalChannelScope.channelGroupId,
-            channelId = canonicalChannelScope.channelId,
-            operationScope = canonicalOperationScope.scope,
-            operationTypeId = canonicalOperationScope.operationTypeId,
-            currency = currency.value,
-            kind = canonicalKind.kind,
-            period = canonicalKind.period
+        return mapOf(
+            "owner" to owner.value.toString(),
+            "mandateScope" to canonicalMandateScope.scope,
+            "mandateId" to canonicalMandateScope.mandateId,
+            "channelScope" to canonicalChannelScope.scope,
+            "channelGroupId" to canonicalChannelScope.channelGroupId,
+            "channelId" to canonicalChannelScope.channelId,
+            "operationScope" to canonicalOperationScope.scope,
+            "operationTypeId" to canonicalOperationScope.operationTypeId,
+            "currency" to currency.value,
+            "kind" to canonicalKind.kind,
+            "period" to canonicalKind.period,
         )
     }
 }
-
-@Serializable
-private data class CanonicalLimitRuleTargetScope(
-    val channelGroupId: String?,
-    val channelId: String?,
-    val channelScope: String,
-    val currency: String,
-    val kind: String,
-    val mandateId: String?,
-    val mandateScope: String,
-    val operationScope: String,
-    val operationTypeId: String?,
-    val owner: String,
-    val period: String?
-)
 
 private data class CanonicalMandateScope(
     val scope: String,

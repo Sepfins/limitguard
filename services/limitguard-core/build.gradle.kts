@@ -1,7 +1,6 @@
 plugins {
     `java-library`
     kotlin("jvm") version "2.4.0"
-    kotlin("plugin.serialization") version "2.4.0"
     id("nu.studer.jooq") version "10.2.1"
 }
 
@@ -71,7 +70,7 @@ java {
 
 dependencies {
     implementation("org.jooq:jooq:$jooqVersion")
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
+    implementation("com.apicatalog:titanium-jcs:3.0.0-M3")
     testImplementation(kotlin("test-junit5"))
     testRuntimeOnly("org.junit.platform:junit-platform-launcher:6.0.3")
     jooqGenerator("org.postgresql:postgresql:42.7.8")
