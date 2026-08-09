@@ -152,6 +152,18 @@ class DefaultLimitEvaluationServiceTest {
         )
 
         val first = fixture.service.authorizeTransaction(command(amount = "75.00", idempotencyKey = "auth-1"))
+        val persistedTransaction = assertNotNull(
+            fixture.repositories.transactions.findById(
+                tenantId,
+                PaymentTransactionId.of(assertNotNull(first.paymentTransactionId)),
+            ),
+        )
+        fixture.repositories.transactions.update(
+            tenantId,
+            persistedTransaction.copy(
+                metadata = Metadata(mapOf("changedAfterAuthorization" to true)),
+            ),
+        )
         val replay = fixture.service.authorizeTransaction(command(amount = "75.00", idempotencyKey = "auth-1"))
 
         assertEquals(first, replay)
@@ -169,6 +181,8 @@ class DefaultLimitEvaluationServiceTest {
             first.transactionEventId.toString(),
             authorizationEvent.resultSnapshot?.value?.get("transactionEventId"),
         )
+        assertNull(authorizationEvent.metadata.value["matchedRules"])
+        assertNotNull(authorizationEvent.metadata.value["fundingAuthorities"])
         assertFailsWith<IdempotencyConflictException> {
             fixture.service.authorizeTransaction(command(amount = "76.00", idempotencyKey = "auth-1"))
         }

@@ -1,11 +1,18 @@
 package io.github.sepfins.limitguard.application.transaction
 
+import io.github.sepfins.limitguard.api.AuthorizationDecision
+import io.github.sepfins.limitguard.api.LimitKind as ApiLimitKind
+import io.github.sepfins.limitguard.api.LimitPeriod as ApiLimitPeriod
+import io.github.sepfins.limitguard.api.results.AuthorizationResult
+import io.github.sepfins.limitguard.api.results.MatchedLimitRule as MatchedLimitRuleResult
 import io.github.sepfins.limitguard.api.results.UsageMutationResult
 import io.github.sepfins.limitguard.domain.common.TransactionEventId
 import io.github.sepfins.limitguard.domain.limit.LimitKind
 import io.github.sepfins.limitguard.domain.limit.MatchedLimitRule
 import io.github.sepfins.limitguard.domain.transaction.PaymentTransaction
 import io.github.sepfins.limitguard.domain.transaction.TransactionResultSnapshot
+import java.math.BigDecimal
+import java.util.UUID
 
 internal object TransactionIdempotency {
     fun authorizationResultSnapshot(
@@ -15,7 +22,7 @@ internal object TransactionIdempotency {
     ): TransactionResultSnapshot =
         TransactionResultSnapshot(
             mapOf(
-                "snapshotVersion" to 1,
+                "snapshotVersion" to AUTHORIZATION_SNAPSHOT_VERSION,
                 "tenantId" to transaction.tenantId.value.toString(),
                 "decision" to "ALLOWED",
                 "paymentTransactionId" to transaction.id.value.toString(),
@@ -28,6 +35,45 @@ internal object TransactionIdempotency {
             ),
         )
 
+    fun replayAuthorization(snapshot: TransactionResultSnapshot): AuthorizationResult {
+        val values = snapshot.value
+        val snapshotVersion = values.requiredNumber("snapshotVersion").toInt()
+        check(snapshotVersion == AUTHORIZATION_SNAPSHOT_VERSION) {
+            "Unsupported authorization result snapshot version: $snapshotVersion"
+        }
+
+        val decision = values.requiredEnum<AuthorizationDecision>("decision")
+        check(decision == AuthorizationDecision.ALLOWED) {
+            "Authorization result snapshot version $snapshotVersion only supports allowed decisions"
+        }
+        check(values.requiredList("violations").isEmpty()) {
+            "Allowed authorization result snapshot must not contain violations"
+        }
+
+        return AuthorizationResult(
+            tenantId = values.requiredUuid("tenantId"),
+            decision = decision,
+            paymentTransactionId = values.requiredUuid("paymentTransactionId"),
+            transactionEventId = values.requiredUuid("transactionEventId"),
+            authorizedAmount = values.requiredDecimal("authorizedAmount"),
+            currency = values.requiredString("currency"),
+            matchedRules = values.requiredList("matchedRules").map { rawRule ->
+                val rule = rawRule as? Map<*, *>
+                    ?: error("Authorization result snapshot contains an invalid matched rule")
+                MatchedLimitRuleResult(
+                    id = rule.requiredUuid("id"),
+                    name = rule.requiredString("name"),
+                    limitKind = rule.requiredEnum<ApiLimitKind>("limitKind"),
+                    period = rule.optionalEnum<ApiLimitPeriod>("period"),
+                    amount = rule.requiredDecimal("amount"),
+                    currency = rule.requiredString("currency"),
+                    priority = rule.requiredNumber("priority").toInt(),
+                )
+            },
+            violations = emptyList(),
+            metadata = values.requiredStringKeyedMap("metadata"),
+        )
+    }
     fun usageMutationResultSnapshot(result: UsageMutationResult): TransactionResultSnapshot =
         TransactionResultSnapshot(
             mapOf(
@@ -64,4 +110,52 @@ internal object TransactionIdempotency {
             "currency" to amount.currency.value,
             "priority" to priority.value,
         )
+
+    private fun Map<*, *>.requiredString(key: String): String =
+        this[key] as? String
+            ?: error("Transaction result snapshot has no string '$key'")
+
+    private fun Map<*, *>.requiredNumber(key: String): Number =
+        this[key] as? Number
+            ?: error("Transaction result snapshot has no number '$key'")
+
+    private fun Map<*, *>.requiredDecimal(key: String): BigDecimal =
+        requiredString(key).toBigDecimalOrNull()
+            ?: error("Transaction result snapshot has an invalid decimal '$key'")
+
+    private fun Map<*, *>.requiredUuid(key: String): UUID =
+        runCatching { UUID.fromString(requiredString(key)) }
+            .getOrElse { error("Transaction result snapshot has an invalid UUID '$key'") }
+
+    private fun Map<*, *>.requiredList(key: String): List<*> =
+        this[key] as? List<*>
+            ?: error("Transaction result snapshot has no list '$key'")
+
+    private fun Map<*, *>.requiredStringKeyedMap(key: String): Map<String, Any?> {
+        val map = this[key] as? Map<*, *>
+            ?: error("Transaction result snapshot has no object '$key'")
+        check(map.keys.all { it is String }) {
+            "Transaction result snapshot object '$key' contains a non-string key"
+        }
+        @Suppress("UNCHECKED_CAST")
+        return map as Map<String, Any?>
+    }
+
+    private inline fun <reified T : Enum<T>> Map<*, *>.requiredEnum(key: String): T =
+        enumValueOfOrNull<T>(requiredString(key))
+            ?: error("Transaction result snapshot has an invalid ${T::class.simpleName} '$key'")
+
+    private inline fun <reified T : Enum<T>> Map<*, *>.optionalEnum(key: String): T? {
+        val value = this[key] ?: return null
+        check(value is String) {
+            "Transaction result snapshot has a non-string '${key}'"
+        }
+        return enumValueOfOrNull<T>(value)
+            ?: error("Transaction result snapshot has an invalid ${T::class.simpleName} '$key'")
+    }
+
+    private inline fun <reified T : Enum<T>> enumValueOfOrNull(value: String): T? =
+        enumValues<T>().firstOrNull { it.name == value }
+
+    private const val AUTHORIZATION_SNAPSHOT_VERSION = 1
 }

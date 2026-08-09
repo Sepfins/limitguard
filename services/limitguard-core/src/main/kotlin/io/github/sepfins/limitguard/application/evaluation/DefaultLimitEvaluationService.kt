@@ -11,9 +11,11 @@ import io.github.sepfins.limitguard.api.errors.ValidationException
 import io.github.sepfins.limitguard.api.results.AuthorizationResult
 import io.github.sepfins.limitguard.api.results.UsageMutationResult
 import io.github.sepfins.limitguard.application.transaction.TransactionRecorder
+import io.github.sepfins.limitguard.application.transaction.TransactionIdempotency
 import io.github.sepfins.limitguard.domain.common.IdempotencyKey
 import io.github.sepfins.limitguard.domain.transaction.PaymentTransaction
 import io.github.sepfins.limitguard.domain.transaction.TransactionEventType
+import io.github.sepfins.limitguard.internal.hashing.CanonicalJson
 import io.github.sepfins.limitguard.port.persistence.ChannelRepository
 import io.github.sepfins.limitguard.port.persistence.FundingSourceOwnerRepository
 import io.github.sepfins.limitguard.port.persistence.FundingSourceRepository
@@ -63,15 +65,16 @@ internal class DefaultLimitEvaluationService(
                 ) ?: error(
                     "Authorization event ${existingEvent.id.value} references a missing payment transaction",
                 )
-                requireSameAuthorizationRequest(existingTransaction, requestedTransaction)
-                val replay = transactionRecorder.replayAuthorization(existingTransaction)
-                return@inTransaction replay.transaction.toAuthorizationResult(
-                    decision = LimitDecision(
-                        matchedRules = replay.matchedRules,
-                        violations = emptyList(),
-                    ),
-                    transactionEventId = replay.event.id,
+                val replay = TransactionIdempotency.replayAuthorization(
+                    existingEvent.resultSnapshot
+                        ?: error("Idempotent authorization event ${existingEvent.id.value} has no result snapshot"),
                 )
+                requireSameAuthorizationRequest(
+                    existing = existingTransaction,
+                    requested = requestedTransaction,
+                    originalMetadata = replay.metadata,
+                )
+                return@inTransaction replay
             }
 
             requireAuthorizationReferences(requestedTransaction)
@@ -191,6 +194,7 @@ internal class DefaultLimitEvaluationService(
     private fun requireSameAuthorizationRequest(
         existing: PaymentTransaction,
         requested: PaymentTransaction,
+        originalMetadata: Map<String, Any?>,
     ) {
         val sameRequest =
             existing.actingPartyProfileId == requested.actingPartyProfileId &&
@@ -199,7 +203,8 @@ internal class DefaultLimitEvaluationService(
                 existing.channelId == requested.channelId &&
                 existing.authorizedAmount == requested.authorizedAmount &&
                 existing.expiresAt == requested.expiresAt &&
-                existing.metadata == requested.metadata
+                CanonicalJson.encodeObject(originalMetadata) ==
+                CanonicalJson.encodeObject(requested.metadata.value)
 
         if (!sameRequest) {
             throw IdempotencyConflictException(
@@ -207,4 +212,5 @@ internal class DefaultLimitEvaluationService(
             )
         }
     }
+
 }
