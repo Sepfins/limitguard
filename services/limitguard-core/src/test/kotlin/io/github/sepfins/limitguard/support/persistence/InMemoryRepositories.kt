@@ -66,6 +66,8 @@ import io.github.sepfins.limitguard.domain.tenant.Tenant
 import io.github.sepfins.limitguard.domain.tenant.TenantName
 import io.github.sepfins.limitguard.domain.transaction.PaymentTransaction
 import io.github.sepfins.limitguard.domain.transaction.TransactionEvent
+import io.github.sepfins.limitguard.domain.transaction.TransactionEventType
+import io.github.sepfins.limitguard.domain.transaction.TransactionResultSnapshot
 import io.github.sepfins.limitguard.domain.usage.LimitUsageBucket
 import io.github.sepfins.limitguard.domain.usage.LimitUsageEvent
 import io.github.sepfins.limitguard.domain.usage.LimitUsageEventType
@@ -912,16 +914,53 @@ class InMemoryTransactionEventRepository : TransactionEventRepository {
     override fun findByTransaction(tenantId: TenantId, transactionId: PaymentTransactionId): List<TransactionEvent> =
         events.tenantValues(tenantId).filter { it.paymentTransactionId == transactionId }
 
+    override fun findAuthorizationEvent(
+        tenantId: TenantId,
+        transactionId: PaymentTransactionId
+    ): TransactionEvent? =
+        events
+            .tenantValues(tenantId)
+            .singleOrNull() {
+                it.paymentTransactionId == transactionId && it.eventType == TransactionEventType.AUTHORIZATION
+            }
+
     override fun insert(tenantId: TenantId, event: TransactionEvent): TransactionEvent = synchronized(lock) {
         requireSameTenant(tenantId, event.tenantId)
         requireAbsent(findById(tenantId, event.id) != null, "transaction event id already exists: ${event.id.value}")
-        val idempotencyKey = event.idempotencyKey
-        requireAbsent(
-            idempotencyKey != null && findByIdempotencyKey(tenantId, idempotencyKey) != null,
-            "transaction event idempotency key already exists: ${idempotencyKey?.value}",
-        )
+        requireIdempotencyKeyUnique(tenantId, event)
         events[TenantScopedKey(tenantId, event.id)] = event
         event
+    }
+
+    override fun completeIdempotency(
+        tenantId: TenantId,
+        eventId: TransactionEventId,
+        idempotencyKey: IdempotencyKey,
+        resultSnapshot: TransactionResultSnapshot,
+    ): TransactionEvent = synchronized(lock) {
+        val event = findById(tenantId, eventId)
+            ?: throw NotFoundException("transaction event not found: ${eventId.value}")
+        requireAbsent(
+            event.idempotencyKey != null,
+            "transaction event already has idempotency data: ${eventId.value}",
+        )
+        val completedEvent = event.copy(
+            idempotencyKey = idempotencyKey,
+            resultSnapshot = resultSnapshot,
+        )
+        requireIdempotencyKeyUnique(tenantId, completedEvent)
+        events[TenantScopedKey(tenantId, eventId)] = completedEvent
+        completedEvent
+    }
+
+    private fun requireIdempotencyKeyUnique(tenantId: TenantId, event: TransactionEvent) {
+        val idempotencyKey = event.idempotencyKey
+        requireAbsent(
+            idempotencyKey != null && events.tenantValues(tenantId).any {
+                it.id != event.id && it.idempotencyKey == idempotencyKey
+            },
+            "transaction event idempotency key already exists: ${idempotencyKey?.value}",
+        )
     }
 }
 
@@ -1009,6 +1048,14 @@ class InMemoryUsageEventRepository : UsageEventRepository {
 
     override fun findByTransactionEvent(tenantId: TenantId, transactionEventId: TransactionEventId): List<LimitUsageEvent> =
         events.tenantValues(tenantId).filter { it.transactionEventId == transactionEventId }
+
+    override fun findByTransactionEventAndType(
+        tenantId: TenantId,
+        transactionEventId: TransactionEventId,
+        type: LimitUsageEventType,
+    ): List<LimitUsageEvent> =
+        findByTransactionEvent(tenantId, transactionEventId)
+            .filter { it.eventType == type }
 
     override fun findByLimitRuleAndTransactionEvent(
         tenantId: TenantId,

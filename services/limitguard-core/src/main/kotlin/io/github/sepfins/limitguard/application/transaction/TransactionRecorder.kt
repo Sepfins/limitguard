@@ -3,17 +3,26 @@ package io.github.sepfins.limitguard.application.transaction
 import io.github.sepfins.limitguard.application.evaluation.ResolvedFundingAuthority
 import io.github.sepfins.limitguard.domain.common.IdempotencyKey
 import io.github.sepfins.limitguard.domain.common.Metadata
+import io.github.sepfins.limitguard.domain.common.Money
 import io.github.sepfins.limitguard.domain.common.TransactionEventId
 import io.github.sepfins.limitguard.domain.limit.MatchedLimitRule
 import io.github.sepfins.limitguard.domain.transaction.PaymentTransaction
 import io.github.sepfins.limitguard.domain.transaction.TransactionEvent
+import io.github.sepfins.limitguard.domain.transaction.TransactionEventReason
 import io.github.sepfins.limitguard.domain.transaction.TransactionEventType
+import io.github.sepfins.limitguard.domain.transaction.TransactionResultSnapshot
+import io.github.sepfins.limitguard.domain.transaction.TransactionStatus
 import io.github.sepfins.limitguard.port.ids.IdGenerator
 import io.github.sepfins.limitguard.port.persistence.TransactionEventRepository
 import io.github.sepfins.limitguard.port.persistence.TransactionRepository
 import java.time.Instant
 
 internal data class RecordedAuthorization(
+    val transaction: PaymentTransaction,
+    val event: TransactionEvent,
+)
+
+internal data class RecordedCapture(
     val transaction: PaymentTransaction,
     val event: TransactionEvent,
 )
@@ -56,6 +65,58 @@ internal class TransactionRecorder(
         return RecordedAuthorization(
             transaction = persistedTransaction,
             event = event,
+        )
+    }
+
+    fun recordCapture(
+        transaction: PaymentTransaction,
+        captureAmount: Money,
+        requestedAmount: Money?,
+        reason: TransactionEventReason?,
+        metadata: Metadata,
+        recordedAt: Instant,
+    ): RecordedCapture {
+        val persistedTransaction = transactionRepository.update(transaction.tenantId, transaction)
+        val eventId = TransactionEventId.of(idGenerator.newId())
+        val eventType = when (persistedTransaction.status) {
+            TransactionStatus.CAPTURED -> TransactionEventType.CAPTURE
+            TransactionStatus.PARTIALLY_CAPTURED -> TransactionEventType.PARTIAL_CAPTURE
+            else -> error("A capture must leave the transaction captured or partially captured")
+        }
+        val event = transactionEventRepository.insert(
+            transaction.tenantId,
+            TransactionEvent(
+                id = eventId,
+                tenantId = transaction.tenantId,
+                paymentTransactionId = persistedTransaction.id,
+                eventType = eventType,
+                amount = captureAmount,
+                requestedAmount = requestedAmount,
+                reason = reason,
+                metadata = metadata,
+                createdAt = recordedAt,
+            ),
+        )
+        return RecordedCapture(
+            transaction = persistedTransaction,
+            event = event,
+        )
+    }
+
+    /**
+     * Completes an event after the orchestrator has assembled the public result
+     * and serialized it to an infrastructure-neutral snapshot.
+     */
+    fun completeIdempotentRecording(
+        event: TransactionEvent,
+        idempotencyKey: IdempotencyKey,
+        resultSnapshot: TransactionResultSnapshot,
+    ) {
+        transactionEventRepository.completeIdempotency(
+            tenantId = event.tenantId,
+            eventId = event.id,
+            idempotencyKey = idempotencyKey,
+            resultSnapshot = resultSnapshot,
         )
     }
 

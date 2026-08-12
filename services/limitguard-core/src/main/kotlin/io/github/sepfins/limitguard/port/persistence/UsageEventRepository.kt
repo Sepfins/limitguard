@@ -12,6 +12,11 @@ interface UsageEventRepository {
     fun findById(tenantId: TenantId, id: UsageEventId): LimitUsageEvent?
     fun findByBucket(tenantId: TenantId, bucketId: UsageBucketId): List<LimitUsageEvent>
     fun findByTransactionEvent(tenantId: TenantId, transactionEventId: TransactionEventId): List<LimitUsageEvent>
+    fun findByTransactionEventAndType(
+        tenantId: TenantId,
+        transactionEventId: TransactionEventId,
+        type: LimitUsageEventType
+    ): List<LimitUsageEvent>
     fun findByLimitRuleAndTransactionEvent(
         tenantId: TenantId,
         limitRuleId: LimitRuleId,

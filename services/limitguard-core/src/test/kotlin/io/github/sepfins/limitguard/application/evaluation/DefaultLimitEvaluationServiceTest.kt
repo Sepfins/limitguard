@@ -2,8 +2,11 @@ package io.github.sepfins.limitguard.application.evaluation
 
 import io.github.sepfins.limitguard.api.AuthorizationDecision
 import io.github.sepfins.limitguard.api.commands.AuthorizeTransactionCommand
+import io.github.sepfins.limitguard.api.commands.CaptureTransactionCommand
 import io.github.sepfins.limitguard.api.errors.IdempotencyConflictException
+import io.github.sepfins.limitguard.api.TransactionStatus as ApiTransactionStatus
 import io.github.sepfins.limitguard.application.transaction.TransactionRecorder
+import io.github.sepfins.limitguard.application.usage.UsageConsumptionService
 import io.github.sepfins.limitguard.domain.channel.Channel
 import io.github.sepfins.limitguard.domain.channel.ChannelCode
 import io.github.sepfins.limitguard.domain.channel.ChannelGroupMember
@@ -52,6 +55,7 @@ import io.github.sepfins.limitguard.domain.party.PartyProfile
 import io.github.sepfins.limitguard.domain.tenant.Tenant
 import io.github.sepfins.limitguard.domain.tenant.TenantName
 import io.github.sepfins.limitguard.domain.transaction.TransactionEventType
+import io.github.sepfins.limitguard.domain.transaction.TransactionStatus as DomainTransactionStatus
 import io.github.sepfins.limitguard.application.usage.UsageReservationService
 import io.github.sepfins.limitguard.application.usage.UsageWindowCalculator
 import io.github.sepfins.limitguard.support.DirectTransactionRunner
@@ -185,6 +189,135 @@ class DefaultLimitEvaluationServiceTest {
         assertNotNull(authorizationEvent.metadata.value["fundingAuthorities"])
         assertFailsWith<IdempotencyConflictException> {
             fixture.service.authorizeTransaction(command(amount = "76.00", idempotencyKey = "auth-1"))
+        }
+    }
+
+    @Test
+    fun `capture records transaction and event without mutating periodic usage`() {
+        val fixture = fixture(firstOwnerId)
+        fixture.addMandate(
+            id = 100,
+            ownerId = firstOwnerId,
+            scope = FundingSourceScope.AllOwnerSources,
+        )
+        val dailyRule = fixture.addRule(
+            id = 200,
+            ownerId = firstOwnerId,
+            mandateScope = MandateScope.AllOwnerMandates,
+            amount = "100.00",
+            limitKind = LimitKind.Periodic(LimitPeriod.DAILY),
+        )
+        val authorization = fixture.service.authorizeTransaction(command(amount = "25.00"))
+        val transactionId = requireNotNull(authorization.paymentTransactionId)
+
+        val result = fixture.service.captureTransaction(
+            captureCommand(
+                paymentTransactionId = transactionId,
+                reason = " settlement ",
+                metadata = mapOf("processorReference" to "capture-001"),
+            ),
+        )
+
+        assertEquals(ApiTransactionStatus.CAPTURED, result.status)
+        assertEquals(BigDecimal("25.0000"), result.amount)
+        assertEquals("EUR", result.currency)
+        assertEquals(emptyList(), result.usageEvents)
+        assertEquals(mapOf("processorReference" to "capture-001"), result.metadata)
+
+        val persistedTransaction = assertNotNull(
+            fixture.repositories.transactions.findById(
+                tenantId,
+                PaymentTransactionId.of(transactionId),
+            ),
+        )
+        assertEquals(DomainTransactionStatus.CAPTURED, persistedTransaction.status)
+        assertEquals(
+            Money.positive("25.00", CurrencyCode.of("EUR")),
+            persistedTransaction.capturedAmount,
+        )
+
+        val captureEvent = fixture.repositories.transactionEvents
+            .findByTransaction(tenantId, persistedTransaction.id)
+            .single { it.eventType == TransactionEventType.CAPTURE }
+        assertEquals(result.transactionEventId, captureEvent.id.value)
+        assertEquals(Money.positive("25.00", CurrencyCode.of("EUR")), captureEvent.amount)
+        assertNull(captureEvent.requestedAmount)
+        assertEquals("settlement", captureEvent.reason?.value)
+        assertEquals(mapOf("processorReference" to "capture-001"), captureEvent.metadata.value)
+        assertNull(captureEvent.idempotencyKey)
+        assertNull(captureEvent.resultSnapshot)
+        assertEquals(
+            emptyList(),
+            fixture.repositories.usageEvents.findByTransactionEvent(tenantId, captureEvent.id),
+        )
+
+        val bucket = fixture.periodicBucket(dailyRule, LimitPeriod.DAILY)
+        assertEquals(Money.positive("25.00", CurrencyCode.of("EUR")), bucket.reservedAmount)
+        assertEquals(Money.zero(CurrencyCode.of("EUR")), bucket.consumedAmount)
+    }
+
+    @Test
+    fun `idempotent partial capture replays the completed result snapshot`() {
+        val fixture = fixture(firstOwnerId)
+        fixture.addMandate(
+            id = 100,
+            ownerId = firstOwnerId,
+            scope = FundingSourceScope.AllOwnerSources,
+        )
+        fixture.addRule(
+            id = 200,
+            ownerId = firstOwnerId,
+            mandateScope = MandateScope.AllOwnerMandates,
+            amount = "100.00",
+        )
+        val authorization = fixture.service.authorizeTransaction(command(amount = "75.00"))
+        val transactionId = requireNotNull(authorization.paymentTransactionId)
+        val capture = captureCommand(
+            paymentTransactionId = transactionId,
+            amount = "25.00",
+            reason = "first presentment",
+            idempotencyKey = "capture-1",
+            metadata = mapOf("processorReference" to "capture-002"),
+        )
+
+        val first = fixture.service.captureTransaction(capture)
+        val replay = fixture.service.captureTransaction(capture)
+
+        assertEquals(first, replay)
+        assertEquals(ApiTransactionStatus.PARTIALLY_CAPTURED, first.status)
+        assertEquals(BigDecimal("25.0000"), first.amount)
+        assertEquals(mapOf("processorReference" to "capture-002"), replay.metadata)
+
+        val transaction = assertNotNull(
+            fixture.repositories.transactions.findById(
+                tenantId,
+                PaymentTransactionId.of(transactionId),
+            ),
+        )
+        assertEquals(Money.positive("25.00", CurrencyCode.of("EUR")), transaction.capturedAmount)
+        val events = fixture.repositories.transactionEvents.findByTransaction(tenantId, transaction.id)
+        assertEquals(2, events.size)
+        val captureEvent = events.single { it.eventType == TransactionEventType.PARTIAL_CAPTURE }
+        assertEquals(IdempotencyKey.of("capture-1"), captureEvent.idempotencyKey)
+        assertEquals(Money.positive("25.00", CurrencyCode.of("EUR")), captureEvent.requestedAmount)
+        assertEquals(
+            first.transactionEventId.toString(),
+            captureEvent.resultSnapshot?.value?.get("transactionEventId"),
+        )
+
+        assertFailsWith<IdempotencyConflictException> {
+            fixture.service.captureTransaction(capture.copy(amount = BigDecimal("26.00")))
+        }
+        assertFailsWith<IdempotencyConflictException> {
+            fixture.service.captureTransaction(capture.copy(amount = null))
+        }
+        assertFailsWith<IdempotencyConflictException> {
+            fixture.service.captureTransaction(capture.copy(reason = "second presentment"))
+        }
+        assertFailsWith<IdempotencyConflictException> {
+            fixture.service.captureTransaction(
+                capture.copy(metadata = mapOf("processorReference" to "capture-003")),
+            )
         }
     }
 
@@ -619,6 +752,22 @@ class DefaultLimitEvaluationServiceTest {
             metadata = mapOf("merchantCategory" to "GROCERY"),
         )
 
+    private fun captureCommand(
+        paymentTransactionId: UUID,
+        amount: String? = null,
+        reason: String? = null,
+        idempotencyKey: String? = null,
+        metadata: Map<String, Any?> = emptyMap(),
+    ): CaptureTransactionCommand =
+        CaptureTransactionCommand(
+            tenantId = tenantId.value,
+            paymentTransactionId = paymentTransactionId,
+            amount = amount?.toBigDecimal(),
+            reason = reason,
+            idempotencyKey = idempotencyKey,
+            metadata = metadata,
+        )
+
     private inner class AuthorizationFixture(ownerIds: List<PartyProfileId>) {
         val repositories = InMemoryLimitguardRepositories()
         val service: DefaultLimitEvaluationService
@@ -710,6 +859,12 @@ class DefaultLimitEvaluationServiceTest {
                         usageEventRepository = repositories.usageEvents,
                         usageWindowCalculator = UsageWindowCalculator(),
                     ),
+                ),
+                usageConsumptionService = UsageConsumptionService(
+                    idGenerator = idGenerator,
+                    transactionEventRepository = repositories.transactionEvents,
+                    usageBucketRepository = repositories.usageBuckets,
+                    usageEventRepository = repositories.usageEvents
                 ),
                 transactionRecorder = TransactionRecorder(
                     transactionRepository = repositories.transactions,

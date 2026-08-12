@@ -1,9 +1,12 @@
 package io.github.sepfins.limitguard.application.transaction
 
 import io.github.sepfins.limitguard.api.AuthorizationDecision
+import io.github.sepfins.limitguard.api.LimitUsageEventType
+import io.github.sepfins.limitguard.api.TransactionStatus
 import io.github.sepfins.limitguard.api.LimitKind as ApiLimitKind
 import io.github.sepfins.limitguard.api.LimitPeriod as ApiLimitPeriod
 import io.github.sepfins.limitguard.api.results.AuthorizationResult
+import io.github.sepfins.limitguard.api.results.UsageMutationEvent
 import io.github.sepfins.limitguard.api.results.MatchedLimitRule as MatchedLimitRuleResult
 import io.github.sepfins.limitguard.api.results.UsageMutationResult
 import io.github.sepfins.limitguard.domain.common.TransactionEventId
@@ -74,10 +77,38 @@ internal object TransactionIdempotency {
             metadata = values.requiredStringKeyedMap("metadata"),
         )
     }
+    fun replayCapture(snapshot: TransactionResultSnapshot): UsageMutationResult {
+        val values = snapshot.value
+        val snapshotVersion = values.requiredNumber("snapshotVersion").toInt()
+        check(snapshotVersion == USAGE_MUTATION_SNAPSHOT_VERSION) {
+            "Unsupported usage mutation result snapshot version: $snapshotVersion"
+        }
+
+        return UsageMutationResult(
+            tenantId = values.requiredUuid("tenantId"),
+            paymentTransactionId = values.requiredUuid("paymentTransactionId"),
+            transactionEventId = values.requiredUuid("transactionEventId"),
+            status = values.requiredEnum<TransactionStatus>("status"),
+            amount = values.requiredDecimal("amount"),
+            currency = values.requiredString("currency"),
+            usageEvents = values.requiredList("usageEvents").map { rawEvent ->
+                val event = rawEvent as? Map<*, *>
+                    ?: error("Usage mutation result snapshot contains an invalid usage event")
+                UsageMutationEvent(
+                    limitRuleId = event.requiredUuid("limitRuleId"),
+                    usageBucketId = event.optionalUuid("usageBucketId"),
+                    eventType = event.requiredEnum<LimitUsageEventType>("eventType"),
+                    amountDelta = event.requiredDecimal("amountDelta"),
+                    currency = event.requiredString("currency"),
+                )
+            },
+            metadata = values.requiredStringKeyedMap("metadata"),
+        )
+    }
     fun usageMutationResultSnapshot(result: UsageMutationResult): TransactionResultSnapshot =
         TransactionResultSnapshot(
             mapOf(
-                "snapshotVersion" to 1,
+                "snapshotVersion" to USAGE_MUTATION_SNAPSHOT_VERSION,
                 "tenantId" to result.tenantId.toString(),
                 "paymentTransactionId" to result.paymentTransactionId.toString(),
                 "transactionEventId" to result.transactionEventId?.toString(),
@@ -127,6 +158,15 @@ internal object TransactionIdempotency {
         runCatching { UUID.fromString(requiredString(key)) }
             .getOrElse { error("Transaction result snapshot has an invalid UUID '$key'") }
 
+    private fun Map<*, *>.optionalUuid(key: String): UUID?  {
+        val value = this[key] ?: return null
+        check(value is String) {
+            "Transaction result snapshot has a non-string '$key'"
+        }
+        return runCatching { UUID.fromString(value) }
+            .getOrElse { error("Transaction result snapshot has an invalid UUID '$key'") }
+    }
+
     private fun Map<*, *>.requiredList(key: String): List<*> =
         this[key] as? List<*>
             ?: error("Transaction result snapshot has no list '$key'")
@@ -158,4 +198,5 @@ internal object TransactionIdempotency {
         enumValues<T>().firstOrNull { it.name == value }
 
     private const val AUTHORIZATION_SNAPSHOT_VERSION = 1
+    private const val USAGE_MUTATION_SNAPSHOT_VERSION = 1
 }

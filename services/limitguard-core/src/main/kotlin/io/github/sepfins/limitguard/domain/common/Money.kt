@@ -35,6 +35,8 @@ data class Money private constructor(
 
     operator fun plus(other: Money): Money = MoneyMath.add(this, other)
 
+    operator fun plus(other: BigDecimal): Money = MoneyMath.plusDelta(this, other)
+
     operator fun minus(other: Money): Money = MoneyMath.subtract(this, other)
 
     override fun compareTo(other: Money): Int {

@@ -14,6 +14,7 @@ data class TransactionEvent(
     val paymentTransactionId: PaymentTransactionId,
     val eventType: TransactionEventType,
     val amount: Money? = null,
+    val requestedAmount: Money? = null,
     val reason: TransactionEventReason? = null,
     val idempotencyKey: IdempotencyKey? = null,
     val resultSnapshot: TransactionResultSnapshot? = null,

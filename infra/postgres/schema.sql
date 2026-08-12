@@ -438,6 +438,7 @@ CREATE TABLE transaction_event (
     payment_transaction_id UUID NOT NULL,
     event_type transaction_event_type NOT NULL,
     amount NUMERIC(20, 4),
+    requested_amount NUMERIC(20, 4),
     reason VARCHAR(255),
     idempotency_key VARCHAR(255),
     result_snapshot JSONB,
@@ -449,6 +450,9 @@ CREATE TABLE transaction_event (
         ON DELETE CASCADE,
     CONSTRAINT chk_transaction_event_amount CHECK (
         amount IS NULL OR amount >= 0
+    ),
+    CONSTRAINT chk_transaction_event_requested_amount CHECK (
+        requested_amount IS NULL OR requested_amount > 0
     ),
     CONSTRAINT chk_transaction_event_idempotency_key CHECK (
         idempotency_key IS NULL OR (
@@ -471,6 +475,9 @@ CREATE TABLE transaction_event (
 
 COMMENT ON COLUMN transaction_event.idempotency_key IS
     'Tenant-scoped key of the command that produced this event, including authorization, capture, release, and reversal. Reuse for different command data is an idempotency conflict.';
+
+COMMENT ON COLUMN transaction_event.requested_amount IS
+    'Client-supplied mutation amount after normalization; null means the operation used its default amount.';
 
 COMMENT ON COLUMN transaction_event.result_snapshot IS
     'Versioned JSON object containing the original command result required for exact replay even after later transaction mutations change aggregate state.';
