@@ -18,7 +18,7 @@ import io.github.sepfins.limitguard.application.evaluation.LimitRuleMatcher
 import io.github.sepfins.limitguard.application.evaluation.MandateResolver
 import io.github.sepfins.limitguard.application.evaluation.TransactionFactory
 import io.github.sepfins.limitguard.application.transaction.TransactionRecorder
-import io.github.sepfins.limitguard.application.usage.UsageConsumptionService
+import io.github.sepfins.limitguard.application.usage.UsageMutationService
 import io.github.sepfins.limitguard.application.usage.UsageReservationService
 import io.github.sepfins.limitguard.application.usage.UsageWindowCalculator
 import io.github.sepfins.limitguard.port.ids.IdGenerator
@@ -117,7 +117,7 @@ class DefaultLimitguard(
                 usageWindowCalculator = UsageWindowCalculator(),
             ),
         ),
-        usageConsumptionService = UsageConsumptionService(
+        usageMutationService = UsageMutationService(
             idGenerator = idGenerator,
             transactionEventRepository = transactionEventRepository,
             usageBucketRepository = usageBucketRepository,

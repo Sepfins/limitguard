@@ -10,14 +10,11 @@ import io.github.sepfins.limitguard.api.errors.NotFoundException
 import io.github.sepfins.limitguard.api.errors.ValidationException
 import io.github.sepfins.limitguard.api.results.AuthorizationResult
 import io.github.sepfins.limitguard.api.results.UsageMutationResult
-import io.github.sepfins.limitguard.application.transaction.TransactionRecorder
 import io.github.sepfins.limitguard.application.transaction.TransactionIdempotency
-import io.github.sepfins.limitguard.application.usage.UsageConsumptionService
+import io.github.sepfins.limitguard.application.transaction.TransactionRecorder
+import io.github.sepfins.limitguard.application.usage.UsageMutationService
 import io.github.sepfins.limitguard.domain.common.IdempotencyKey
 import io.github.sepfins.limitguard.domain.common.Metadata
-import io.github.sepfins.limitguard.domain.common.Money
-import io.github.sepfins.limitguard.domain.common.PaymentTransactionId
-import io.github.sepfins.limitguard.domain.common.TenantId
 import io.github.sepfins.limitguard.domain.transaction.PaymentTransaction
 import io.github.sepfins.limitguard.domain.transaction.TransactionEvent
 import io.github.sepfins.limitguard.domain.transaction.TransactionEventReason
@@ -48,11 +45,11 @@ internal class DefaultLimitEvaluationService(
     private val mandateResolver: MandateResolver,
     private val limitRuleMatcher: LimitRuleMatcher,
     private val authorizationEvaluator: AuthorizationEvaluator,
-    private val usageConsumptionService: UsageConsumptionService,
+    private val usageMutationService: UsageMutationService,
     private val transactionRecorder: TransactionRecorder,
     private val clockProvider: ClockProvider,
     private val transactionRunner: TransactionRunner,
-): LimitEvaluationService {
+) : LimitEvaluationService {
     override fun authorizeTransaction(command: AuthorizeTransactionCommand): AuthorizationResult {
         val now = clockProvider.now()
         val requestedTransaction = validatedTransaction(command, now)
@@ -73,10 +70,7 @@ internal class DefaultLimitEvaluationService(
                 ) ?: error(
                     "Authorization event ${existingEvent.id.value} references a missing payment transaction",
                 )
-                val replay = TransactionIdempotency.replayAuthorization(
-                    existingEvent.resultSnapshot
-                        ?: error("Idempotent authorization event ${existingEvent.id.value} has no result snapshot"),
-                )
+                val replay = TransactionIdempotency.replayAuthorization(existingEvent.resultSnapshot!!)
                 requireSameAuthorizationRequest(
                     existing = existingTransaction,
                     requested = requestedTransaction,
@@ -115,7 +109,6 @@ internal class DefaultLimitEvaluationService(
                 authorities = authorities,
                 at = now,
             )
-
             val evaluation = authorizationEvaluator.evaluate(
                 transaction = requestedTransaction,
                 matchedRules = matchingRules,
@@ -133,7 +126,6 @@ internal class DefaultLimitEvaluationService(
                 idempotencyKey = idempotencyKey,
                 recordedAt = now,
             )
-
             authorizationEvaluator.reserve(
                 evaluation = evaluation,
                 transactionEventId = recorded.event.id,
@@ -147,57 +139,64 @@ internal class DefaultLimitEvaluationService(
         }
     }
 
-    override fun captureTransaction(command: CaptureTransactionCommand): UsageMutationResult {
+    override fun captureTransaction(command: CaptureTransactionCommand): UsageMutationResult =
+        mutateTransaction(command.toMutationEventCommand())
+
+    override fun releaseAuthorization(command: ReleaseAuthorizationCommand): UsageMutationResult =
+        mutateTransaction(command.toMutationEventCommand())
+
+    override fun reverseTransaction(command: ReverseTransactionCommand): UsageMutationResult =
+        mutateTransaction(command.toMutationEventCommand())
+
+    private fun mutateTransaction(command: MutationEventCommand): UsageMutationResult {
         val now = clockProvider.now()
-        val tenantId = TenantId.of(command.tenantId)
-        val transactionId = PaymentTransactionId.of(command.paymentTransactionId)
-        val idempotencyKey = validatedIdempotencyKey(command.idempotencyKey)
+        val idempotencyKey = validatedIdempotencyKey(command.idempotencyKeyRaw)
         val reason = validatedTransactionEventReason(command.reason)
         val metadata = Metadata(command.metadata)
 
         return transactionRunner.inTransaction {
             val existingEvent = idempotencyKey
-                ?.let { transactionEventRepository.findByIdempotencyKey(tenantId, it) }
+                ?.let { transactionEventRepository.findByIdempotencyKey(command.tenantId, it) }
             if (existingEvent != null) {
                 val sameRequest =
-                    existingEvent.eventType in CAPTURE_EVENT_TYPES &&
-                        existingEvent.paymentTransactionId == transactionId &&
+                    existingEvent.eventType in command.mutationKind.transactionEventTypes &&
+                        existingEvent.paymentTransactionId == command.transactionId &&
                         sameRequestedAmount(existingEvent, command) &&
                         existingEvent.reason == reason &&
-                        CanonicalJson.encodeObject(existingEvent.metadata.value) ==
-                        CanonicalJson.encodeObject(metadata.value)
+                        sameMetadata(existingEvent.metadata.value, metadata.value)
                 if (!sameRequest) {
                     throw IdempotencyConflictException(
-                        "idempotency key already belongs to a different capture request",
+                        "idempotency key already belongs to a different " +
+                            "${command.mutationKind.operationName} request",
                     )
                 }
-                return@inTransaction TransactionIdempotency.replayCapture(
-                    snapshot = existingEvent.resultSnapshot
-                        ?: error("Idempotent capture event ${existingEvent.id.value} has no result snapshot"),
-                )
+                return@inTransaction TransactionIdempotency.replayMutation(existingEvent.resultSnapshot!!)
             }
 
-            val existingTransaction = transactionRepository.findByIdForUpdate(tenantId, transactionId)
-                ?: throw NotFoundException(
-                    "Transaction with id ${tenantId.value} / ${transactionId.value} not found",
-                )
-            val (capturedTransaction, capturedAmount) = validatedCapture(existingTransaction, command)
-            val recorded = transactionRecorder.recordCapture(
-                transaction = capturedTransaction,
-                captureAmount = capturedAmount,
-                requestedAmount = capturedAmount.takeIf { command.amount != null },
+            val existingTransaction = transactionRepository.findByIdForUpdate(
+                tenantId = command.tenantId,
+                id = command.transactionId,
+            ) ?: throw NotFoundException(
+                "Transaction with id ${command.tenantId.value} / ${command.transactionId.value} not found",
+            )
+
+            val (mutatedTransaction, mutationAmount) = validatedMutation(existingTransaction, command)
+            val recorded = transactionRecorder.recordMutation(
+                transaction = mutatedTransaction,
+                mutationKind = command.mutationKind,
+                mutationAmount = mutationAmount,
+                requestedAmount = mutationAmount.takeIf { command.amount != null },
                 reason = reason,
                 metadata = metadata,
                 recordedAt = now,
             )
-
-            val usageMutation = usageConsumptionService.consume(
+            val usageMutation = usageMutationService.mutate(
                 transaction = recorded.transaction,
-                captureEventId = recorded.event.id,
-                amount = capturedAmount,
+                mutationKind = command.mutationKind,
+                mutationEventId = recorded.event.id,
+                amount = mutationAmount,
                 now = now,
             )
-
             val result = recorded.toUsageMutationResult(usageMutation)
 
             if (idempotencyKey != null) {
@@ -212,21 +211,21 @@ internal class DefaultLimitEvaluationService(
         }
     }
 
-    override fun releaseAuthorization(command: ReleaseAuthorizationCommand): UsageMutationResult =
-        TODO()
-
-    override fun reverseTransaction(command: ReverseTransactionCommand): UsageMutationResult =
-        TODO()
-
     private fun sameRequestedAmount(
         event: TransactionEvent,
-        command: CaptureTransactionCommand,
+        command: MutationEventCommand,
     ): Boolean =
         when {
             event.requestedAmount == null -> command.amount == null
             command.amount == null -> false
             else -> event.requestedAmount.amount.compareTo(command.amount) == 0
         }
+
+    private fun sameMetadata(
+        persisted: Map<String, Any?>,
+        requested: Map<String, Any?>,
+    ): Boolean =
+        CanonicalJson.encodeObject(persisted) == CanonicalJson.encodeObject(requested)
 
     private fun requireAuthorizationReferences(transaction: PaymentTransaction) {
         tenantRepository.findById(transaction.tenantId)
@@ -285,8 +284,7 @@ internal class DefaultLimitEvaluationService(
                 existing.channelId == requested.channelId &&
                 existing.authorizedAmount == requested.authorizedAmount &&
                 existing.expiresAt == requested.expiresAt &&
-                CanonicalJson.encodeObject(originalMetadata) ==
-                CanonicalJson.encodeObject(requested.metadata.value)
+                sameMetadata(originalMetadata, requested.metadata.value)
 
         if (!sameRequest) {
             throw IdempotencyConflictException(
@@ -295,18 +293,16 @@ internal class DefaultLimitEvaluationService(
         }
     }
 
-    private fun validatedCapture(
+    private fun validatedMutation(
         transaction: PaymentTransaction,
-        command: CaptureTransactionCommand,
-    ): Pair<PaymentTransaction, Money> =
+        command: MutationEventCommand,
+    ) =
         try {
-            val amount = command.amount
-                ?.let { Money.positive(it, transaction.authorizedAmount.currency) }
-                ?: (transaction.authorizedAmount - transaction.capturedAmount)
-            transaction.capture(amount) to amount
+            val amount = command.mutationKind.amount(transaction, command.amount)
+            command.mutationKind.apply(transaction, amount) to amount
         } catch (exception: IllegalArgumentException) {
             throw ValidationException(
-                message = "Invalid capture request: ${exception.message}",
+                message = "Invalid ${command.mutationKind.operationName} request: ${exception.message}",
                 cause = exception,
             )
         }
@@ -316,16 +312,8 @@ internal class DefaultLimitEvaluationService(
             rawReason?.let(TransactionEventReason::of)
         } catch (exception: IllegalArgumentException) {
             throw ValidationException(
-                message = "Invalid capture reason: ${exception.message}",
+                message = "Invalid mutation reason: ${exception.message}",
                 cause = exception,
             )
         }
-
-    private companion object {
-        val CAPTURE_EVENT_TYPES = setOf(
-            TransactionEventType.CAPTURE,
-            TransactionEventType.PARTIAL_CAPTURE,
-        )
-    }
-
 }

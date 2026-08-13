@@ -22,7 +22,7 @@ internal data class RecordedAuthorization(
     val event: TransactionEvent,
 )
 
-internal data class RecordedCapture(
+internal data class RecordedMutation(
     val transaction: PaymentTransaction,
     val event: TransactionEvent,
 )
@@ -68,21 +68,37 @@ internal class TransactionRecorder(
         )
     }
 
-    fun recordCapture(
+    fun recordMutation(
         transaction: PaymentTransaction,
-        captureAmount: Money,
+        mutationKind: TransactionMutationKind,
+        mutationAmount: Money,
         requestedAmount: Money?,
         reason: TransactionEventReason?,
         metadata: Metadata,
         recordedAt: Instant,
-    ): RecordedCapture {
+    ): RecordedMutation {
         val persistedTransaction = transactionRepository.update(transaction.tenantId, transaction)
         val eventId = TransactionEventId.of(idGenerator.newId())
-        val eventType = when (persistedTransaction.status) {
-            TransactionStatus.CAPTURED -> TransactionEventType.CAPTURE
-            TransactionStatus.PARTIALLY_CAPTURED -> TransactionEventType.PARTIAL_CAPTURE
-            else -> error("A capture must leave the transaction captured or partially captured")
+
+        val eventType = when (mutationKind) {
+            TransactionMutationKind.CAPTURE ->
+                if (persistedTransaction.status == TransactionStatus.CAPTURED) {
+                    TransactionEventType.CAPTURE
+                } else {
+                    TransactionEventType.PARTIAL_CAPTURE
+                }
+
+            TransactionMutationKind.RELEASE ->
+                if (persistedTransaction.status == TransactionStatus.VOIDED) {
+                    TransactionEventType.VOID
+                } else {
+                    TransactionEventType.ADJUSTMENT
+                }
+
+            TransactionMutationKind.REVERSAL ->
+                TransactionEventType.REVERSAL
         }
+
         val event = transactionEventRepository.insert(
             transaction.tenantId,
             TransactionEvent(
@@ -90,14 +106,14 @@ internal class TransactionRecorder(
                 tenantId = transaction.tenantId,
                 paymentTransactionId = persistedTransaction.id,
                 eventType = eventType,
-                amount = captureAmount,
+                amount = mutationAmount,
                 requestedAmount = requestedAmount,
                 reason = reason,
                 metadata = metadata,
                 createdAt = recordedAt,
             ),
         )
-        return RecordedCapture(
+        return RecordedMutation(
             transaction = persistedTransaction,
             event = event,
         )

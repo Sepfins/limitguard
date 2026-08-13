@@ -77,7 +77,7 @@ internal object TransactionIdempotency {
             metadata = values.requiredStringKeyedMap("metadata"),
         )
     }
-    fun replayCapture(snapshot: TransactionResultSnapshot): UsageMutationResult {
+    fun replayMutation(snapshot: TransactionResultSnapshot): UsageMutationResult {
         val values = snapshot.value
         val snapshotVersion = values.requiredNumber("snapshotVersion").toInt()
         check(snapshotVersion == USAGE_MUTATION_SNAPSHOT_VERSION) {

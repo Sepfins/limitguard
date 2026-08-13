@@ -11,6 +11,8 @@ data class Money private constructor(
 ) : Comparable<Money> {
     val isPositive: Boolean
         get() = amount.signum() > 0
+    val isZero: Boolean
+        get() = amount.signum() == 0
 
     companion object {
         fun of(amount: BigDecimal, currency: CurrencyCode): Money {

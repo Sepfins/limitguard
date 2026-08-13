@@ -403,7 +403,7 @@ CREATE TABLE payment_transaction (
     FOREIGN KEY (tenant_id, channel_id)
         REFERENCES channel(tenant_id, id),
     CONSTRAINT chk_payment_transaction_authorized_amount CHECK (
-        authorized_amount > 0
+        authorized_amount >= 0
     ),
     CONSTRAINT chk_payment_transaction_captured_amount CHECK (
         captured_amount >= 0 AND captured_amount <= authorized_amount

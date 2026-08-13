@@ -32,8 +32,48 @@ class PaymentTransactionTest {
     }
 
     @Test
+    fun `release reduces only uncaptured authorization`() {
+        val transaction = authorizedTransaction()
+            .capture(Money.positive("25", eur))
+            .release(Money.positive("75", eur))
+
+        assertEquals(TransactionStatus.CAPTURED, transaction.status)
+        assertEquals(Money.of("25", eur), transaction.authorizedAmount)
+        assertEquals(Money.of("25", eur), transaction.capturedAmount)
+    }
+
+    @Test
+    fun `full release voids an uncaptured authorization`() {
+        val transaction = authorizedTransaction()
+            .release(Money.positive("100", eur))
+
+        assertEquals(TransactionStatus.VOIDED, transaction.status)
+        assertEquals(Money.zero(eur), transaction.authorizedAmount)
+        assertEquals(Money.zero(eur), transaction.capturedAmount)
+    }
+
+    @Test
+    fun `partial and full reversal reduce captured amount`() {
+        val partiallyReversed = authorizedTransaction()
+            .capture(Money.positive("100", eur))
+            .reverse(Money.positive("40", eur))
+
+        assertEquals(TransactionStatus.CAPTURED, partiallyReversed.status)
+        assertEquals(Money.of("60", eur), partiallyReversed.authorizedAmount)
+        assertEquals(Money.of("60", eur), partiallyReversed.capturedAmount)
+
+        val fullyReversed = partiallyReversed.reverse()
+
+        assertEquals(TransactionStatus.REVERSED, fullyReversed.status)
+        assertEquals(Money.zero(eur), fullyReversed.authorizedAmount)
+        assertEquals(Money.zero(eur), fullyReversed.capturedAmount)
+    }
+
+    @Test
     fun `terminal transaction statuses cannot transition again`() {
-        val reversed = authorizedTransaction().reverse()
+        val reversed = authorizedTransaction()
+            .capture(Money.positive("100", eur))
+            .reverse()
 
         assertFailsWith<IllegalArgumentException> {
             reversed.capture(Money.positive("1", eur))

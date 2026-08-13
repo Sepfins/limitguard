@@ -25,8 +25,8 @@ data class PaymentTransaction(
     val createdAt: Instant? = null
 ) {
     init {
-        require(authorizedAmount.isPositive) {
-            "authorizedAmount must be positive"
+        require(status in ZERO_AUTHORIZATION_STATUSES || authorizedAmount.isPositive) {
+            "authorizedAmount must be positive unless the transaction is terminal"
         }
         require(capturedAmount.currency == authorizedAmount.currency) {
             "capturedAmount currency must match authorizedAmount currency"
@@ -68,11 +68,77 @@ data class PaymentTransaction(
         return transitionTo(nextStatus).copy(capturedAmount = newCapturedAmount)
     }
 
+    fun release(amount: Money): PaymentTransaction {
+        require(status == TransactionStatus.AUTHORIZED || status == TransactionStatus.PARTIALLY_CAPTURED) {
+            "Only authorized or partially captured transactions can be released"
+        }
+        require(amount.isPositive) { "release amount must be positive" }
+        require(amount.currency == authorizedAmount.currency) {
+            "release amount currency must match authorized amount currency"
+        }
+
+        val releasableAmount = authorizedAmount - capturedAmount
+
+        require(amount <= releasableAmount) {
+            "release amount must be less than or equal to uncaptured authorized amount"
+        }
+
+        val newAuthorizedAmount = authorizedAmount - amount
+
+        val nextStatus =
+            when {
+                newAuthorizedAmount == capturedAmount && capturedAmount.isZero ->
+                    TransactionStatus.VOIDED
+
+                newAuthorizedAmount == capturedAmount ->
+                    TransactionStatus.CAPTURED
+
+                capturedAmount.isZero ->
+                    TransactionStatus.AUTHORIZED
+
+                else ->
+                    TransactionStatus.PARTIALLY_CAPTURED
+            }
+
+        return transitionTo(nextStatus).copy(
+            authorizedAmount = newAuthorizedAmount,
+        )
+    }
+
     fun void(): PaymentTransaction =
-        transitionTo(TransactionStatus.VOIDED)
+        transitionTo(TransactionStatus.VOIDED).copy(
+            authorizedAmount = Money.zero(authorizedAmount.currency),
+            capturedAmount = Money.zero(capturedAmount.currency),
+        )
+
+    fun reverse(amount: Money): PaymentTransaction {
+        require(status == TransactionStatus.CAPTURED) {
+            "Only captured transactions can be reversed"
+        }
+        require(amount.isPositive) { "reverse amount must be positive" }
+        require(amount.currency == authorizedAmount.currency) {
+            "reverse amount currency must match authorized amount currency"
+        }
+        require(amount <= capturedAmount) {
+            "reverse amount must be less than or equal to captured amount"
+        }
+
+        val newCapturedAmount = capturedAmount - amount
+        val nextStatus =
+            if (newCapturedAmount.isZero) {
+                TransactionStatus.REVERSED
+            } else {
+                TransactionStatus.CAPTURED
+            }
+
+        return transitionTo(nextStatus).copy(
+            authorizedAmount = newCapturedAmount,
+            capturedAmount = newCapturedAmount,
+        )
+    }
 
     fun reverse(): PaymentTransaction =
-        transitionTo(TransactionStatus.REVERSED)
+        reverse(capturedAmount)
 
     fun expire(): PaymentTransaction =
         transitionTo(TransactionStatus.EXPIRED)
@@ -81,21 +147,30 @@ data class PaymentTransaction(
         private val allowedTransitions: Map<TransactionStatus, Set<TransactionStatus>> =
             mapOf(
                 TransactionStatus.AUTHORIZED to setOf(
+                    TransactionStatus.AUTHORIZED,
                     TransactionStatus.CAPTURED,
                     TransactionStatus.PARTIALLY_CAPTURED,
                     TransactionStatus.VOIDED,
-                    TransactionStatus.REVERSED,
                     TransactionStatus.EXPIRED,
                 ),
                 TransactionStatus.PARTIALLY_CAPTURED to setOf(
                     TransactionStatus.PARTIALLY_CAPTURED,
                     TransactionStatus.CAPTURED,
+                ),
+                TransactionStatus.CAPTURED to setOf(
+                    TransactionStatus.CAPTURED,
                     TransactionStatus.REVERSED,
                 ),
-                TransactionStatus.CAPTURED to setOf(TransactionStatus.REVERSED),
                 TransactionStatus.VOIDED to emptySet(),
                 TransactionStatus.REVERSED to emptySet(),
                 TransactionStatus.EXPIRED to emptySet(),
+            )
+
+        private val ZERO_AUTHORIZATION_STATUSES: Set<TransactionStatus> =
+            setOf(
+                TransactionStatus.VOIDED,
+                TransactionStatus.REVERSED,
+                TransactionStatus.EXPIRED,
             )
     }
 }
