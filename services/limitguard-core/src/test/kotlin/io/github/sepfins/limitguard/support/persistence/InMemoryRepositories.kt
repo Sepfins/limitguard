@@ -992,6 +992,9 @@ class InMemoryUsageBucketRepository : UsageBucketRepository {
     override fun findById(tenantId: TenantId, id: UsageBucketId): LimitUsageBucket? =
         buckets[TenantScopedKey(tenantId, id)]
 
+    override fun findByIdForUpdate(tenantId: TenantId, id: UsageBucketId): LimitUsageBucket? =
+        buckets[TenantScopedKey(tenantId, id)]
+
     override fun findForUpdate(
         tenantId: TenantId,
         limitRuleId: LimitRuleId,

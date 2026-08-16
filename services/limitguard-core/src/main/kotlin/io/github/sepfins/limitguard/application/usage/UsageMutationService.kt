@@ -50,12 +50,18 @@ class UsageMutationService(
         val updatedBuckets = mutableListOf<LimitUsageBucket>()
         val usageEvents = mutableListOf<LimitUsageEvent>()
 
-        for (reservedEvent in reservedEvents) {
+        for (
+            reservedEvent in reservedEvents.sortedBy {
+                checkNotNull(it.usageBucketId) {
+                    "Reserve usage event ${it.id.value} has no bucket"
+                }.value
+            }
+        ) {
             val bucketId = checkNotNull(reservedEvent.usageBucketId) {
                 "Reserve usage event ${reservedEvent.id.value} has no bucket"
             }
 
-            val bucket = usageBucketRepository.findById(
+            val bucket = usageBucketRepository.findByIdForUpdate(
                 transaction.tenantId,
                 bucketId
             ) ?: error("Usage bucket ${bucketId.value} not found")
