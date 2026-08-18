@@ -4,14 +4,14 @@ import io.github.sepfins.limitguard.api.LimitChangeService
 import io.github.sepfins.limitguard.api.LimitEvaluationService
 import io.github.sepfins.limitguard.api.Limitguard
 import io.github.sepfins.limitguard.api.TenantCatalogService
-import io.github.sepfins.limitguard.api.commands.ApplyDueLimitChangesCommand
-import io.github.sepfins.limitguard.api.commands.ApproveLimitRuleChangeCommand
-import io.github.sepfins.limitguard.api.commands.CancelLimitRuleChangeCommand
-import io.github.sepfins.limitguard.api.commands.RejectLimitRuleChangeCommand
-import io.github.sepfins.limitguard.api.commands.RequestLimitRuleChangeCommand
-import io.github.sepfins.limitguard.api.results.ApplyDueChangesResult
-import io.github.sepfins.limitguard.api.results.LimitChangeRequestResult
 import io.github.sepfins.limitguard.application.catalog.DefaultTenantCatalogService
+import io.github.sepfins.limitguard.application.change.ChangeCommandValidator
+import io.github.sepfins.limitguard.application.change.ChangeReferenceResolver
+import io.github.sepfins.limitguard.application.change.DefaultLimitChangeService
+import io.github.sepfins.limitguard.application.change.LimitChangeEventFactory
+import io.github.sepfins.limitguard.application.change.LimitChangeRequestFactory
+import io.github.sepfins.limitguard.application.change.LimitRuleCandidateFactory
+import io.github.sepfins.limitguard.application.change.RequestLimitRuleChangeWorkflow
 import io.github.sepfins.limitguard.application.evaluation.AuthorizationEvaluator
 import io.github.sepfins.limitguard.application.evaluation.DefaultLimitEvaluationService
 import io.github.sepfins.limitguard.application.evaluation.LimitRuleMatcher
@@ -30,8 +30,11 @@ import io.github.sepfins.limitguard.port.persistence.FundingSourceProductReposit
 import io.github.sepfins.limitguard.port.persistence.FundingSourceRepository
 import io.github.sepfins.limitguard.port.persistence.IndividualRepository
 import io.github.sepfins.limitguard.port.persistence.LegalEntityRepository
+import io.github.sepfins.limitguard.port.persistence.LimitChangeRequestRepository
 import io.github.sepfins.limitguard.port.persistence.LimitConfigurationRepository
+import io.github.sepfins.limitguard.port.persistence.LimitRuleChangeEventRepository
 import io.github.sepfins.limitguard.port.persistence.LimitRuleRepository
+import io.github.sepfins.limitguard.port.persistence.LimitRuleRevisionRepository
 import io.github.sepfins.limitguard.port.persistence.MandateRepository
 import io.github.sepfins.limitguard.port.persistence.OperationTypeRepository
 import io.github.sepfins.limitguard.port.persistence.PartyLegalIdentifierRepository
@@ -61,7 +64,10 @@ class DefaultLimitguard(
     fundingSourceGroupMemberRepository: FundingSourceGroupMemberRepository,
     mandateRepository: MandateRepository,
     limitConfigurationRepository: LimitConfigurationRepository,
+    limitChangeRequestRepository: LimitChangeRequestRepository,
+    limitChangeEventRepository: LimitRuleChangeEventRepository,
     limitRuleRepository: LimitRuleRepository,
+    limitRuleRevisionRepository: LimitRuleRevisionRepository,
     transactionRepository: TransactionRepository,
     transactionEventRepository: TransactionEventRepository,
     usageBucketRepository: UsageBucketRepository,
@@ -89,7 +95,26 @@ class DefaultLimitguard(
         transactionRunner = transactionRunner,
     )
 
-    override val limitChangeService: LimitChangeService = DeferredLimitChangeService
+    override val limitChangeService: LimitChangeService = DefaultLimitChangeService(
+        requestWorkflow = RequestLimitRuleChangeWorkflow(
+            commandValidator = ChangeCommandValidator(),
+            referenceResolver = ChangeReferenceResolver(
+                limitConfigurationRepository = limitConfigurationRepository,
+                limitRuleRepository = limitRuleRepository,
+                limitRuleRevisionRepository = limitRuleRevisionRepository,
+            ),
+            candidateFactory = LimitRuleCandidateFactory(),
+            changeRequestFactory = LimitChangeRequestFactory(),
+            changeEventFactory = LimitChangeEventFactory(idGenerator),
+            changeRequestRepository = limitChangeRequestRepository,
+            changeEventRepository = limitChangeEventRepository,
+            limitRuleRepository = limitRuleRepository,
+            limitRuleRevisionRepository = limitRuleRevisionRepository,
+            idGenerator = idGenerator,
+            clockProvider = clockProvider,
+            transactionRunner = transactionRunner,
+        ),
+    )
 
     override val limitEvaluationService: LimitEvaluationService = DefaultLimitEvaluationService(
         transactionRepository = transactionRepository,
@@ -131,24 +156,4 @@ class DefaultLimitguard(
         clockProvider = clockProvider,
         transactionRunner = transactionRunner,
     )
-
-    private object DeferredLimitChangeService : LimitChangeService {
-        override fun requestLimitRuleChange(command: RequestLimitRuleChangeCommand): LimitChangeRequestResult =
-            notImplemented()
-
-        override fun approveLimitRuleChange(command: ApproveLimitRuleChangeCommand): LimitChangeRequestResult =
-            notImplemented()
-
-        override fun rejectLimitRuleChange(command: RejectLimitRuleChangeCommand): LimitChangeRequestResult =
-            notImplemented()
-
-        override fun cancelLimitRuleChange(command: CancelLimitRuleChangeCommand): LimitChangeRequestResult =
-            notImplemented()
-
-        override fun applyDueLimitChanges(command: ApplyDueLimitChangesCommand): ApplyDueChangesResult =
-            notImplemented()
-    }
 }
-
-private fun notImplemented(): Nothing =
-    throw UnsupportedOperationException("Future implementations")

@@ -1103,12 +1103,12 @@ CREATE TABLE limit_rule_change_request (
     CONSTRAINT chk_limit_rule_change_request_target_rule CHECK (
         (
             change_type = 'CREATE' AND
-            limit_rule_id IS NULL AND
             before_rule IS NULL
         ) OR
         (
             change_type <> 'CREATE' AND
-            limit_rule_id IS NOT NULL
+            limit_rule_id IS NOT NULL AND
+            before_rule IS NOT NULL
         )
     ),
     CONSTRAINT chk_limit_rule_change_request_json CHECK (

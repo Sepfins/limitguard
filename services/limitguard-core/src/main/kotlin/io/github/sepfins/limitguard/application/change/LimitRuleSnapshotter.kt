@@ -34,7 +34,7 @@ internal object LimitRuleSnapshotter {
                 "isActive" to rule.isActive,
                 "version" to rule.version.value,
                 "startsAt" to rule.effectiveWindow.startsAt.toString(),
-                "endsAt" to rule.effectiveWindow.endsAt.toString(),
+                "endsAt" to rule.effectiveWindow.endsAt?.toString(),
                 "metadata" to rule.metadata.value,
             )
         )

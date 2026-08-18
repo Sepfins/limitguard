@@ -35,4 +35,64 @@ internal class LimitChangeEventFactory(
             createdAt = now,
         )
     }
+
+    fun approved(
+        before: LimitRuleChangeRequest,
+        after: LimitRuleChangeRequest,
+        now: Instant,
+    ): LimitRuleChangeEvent =
+        LimitRuleChangeEvent(
+            id = LimitRuleChangeEventId.of(idGenerator.newId()),
+            tenantId = after.tenantId,
+            changeRequestId = after.id,
+            eventType = LimitRuleChangeEventType.APPROVED,
+            beforeStatus = before.status,
+            afterStatus = after.status,
+            beforeRule = before.requestedRule,
+            afterRule = after.approvedRule,
+            message = "Limit rule change automatically approved",
+            createdAt = now,
+        )
+
+    fun applied(
+        before: LimitRuleChangeRequest,
+        after: LimitRuleChangeRequest,
+        now: Instant,
+    ): LimitRuleChangeEvent =
+        LimitRuleChangeEvent(
+            id = LimitRuleChangeEventId.of(idGenerator.newId()),
+            tenantId = after.tenantId,
+            changeRequestId = after.id,
+            eventType = LimitRuleChangeEventType.APPLIED,
+            beforeStatus = before.status,
+            afterStatus = after.status,
+            beforeRule = before.beforeRule,
+            afterRule = after.approvedRule,
+            eventPayload = Metadata(
+                mapOf("limitRuleId" to requireNotNull(after.limitRuleId).value.toString())
+            ),
+            message = "Limit rule change applied",
+            createdAt = now,
+        )
+
+    fun scheduled(
+        before: LimitRuleChangeRequest,
+        after: LimitRuleChangeRequest,
+        now: Instant,
+    ): LimitRuleChangeEvent =
+        LimitRuleChangeEvent(
+            id = LimitRuleChangeEventId.of(idGenerator.newId()),
+            tenantId = after.tenantId,
+            changeRequestId = after.id,
+            eventType = LimitRuleChangeEventType.SCHEDULED,
+            beforeStatus = before.status,
+            afterStatus = after.status,
+            beforeRule = before.approvedRule,
+            afterRule = after.approvedRule,
+            eventPayload = Metadata(
+                mapOf("effectiveAt" to requireNotNull(after.effectiveAt).toString())
+            ),
+            message = "Limit rule change scheduled",
+            createdAt = now,
+        )
 }

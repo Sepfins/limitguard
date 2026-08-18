@@ -7,20 +7,21 @@ import io.github.sepfins.limitguard.domain.change.LimitRuleChangeType
 import io.github.sepfins.limitguard.domain.change.ScopeHash
 import io.github.sepfins.limitguard.domain.common.IdempotencyKey
 import io.github.sepfins.limitguard.domain.common.LimitChangeRequestId
+import io.github.sepfins.limitguard.domain.common.MandateId
 import io.github.sepfins.limitguard.domain.common.Metadata
 import io.github.sepfins.limitguard.domain.common.PartyProfileDelegationId
 import io.github.sepfins.limitguard.domain.limit.LimitRule
+import io.github.sepfins.limitguard.domain.mandate.MandateScope
 import io.github.sepfins.limitguard.internal.hashing.StableJsonHasher
 import io.github.sepfins.limitguard.internal.hashing.TargetScopeCanonicalizer
-import io.github.sepfins.limitguard.port.ids.IdGenerator
 import java.time.Instant
 
-internal class LimitChangeRequestFactory(
-    private val idGenerator: IdGenerator,
-) {
+internal class LimitChangeRequestFactory {
     fun create(
+        id: LimitChangeRequestId,
         command: RequestLimitRuleChangeCommand,
         requestedRule: LimitRule,
+        currentRule: LimitRule?,
         now: Instant
     ): LimitRuleChangeRequest {
 
@@ -33,16 +34,18 @@ internal class LimitChangeRequestFactory(
         val actor = command.toChangeActor()
 
         return LimitRuleChangeRequest(
-            id = LimitChangeRequestId.of(idGenerator.newId()),
+            id = id,
             tenantId = requestedRule.tenantId,
-            changeType = LimitRuleChangeType.CREATE,
+            changeType = LimitRuleChangeType.valueOf(command.changeType.name),
             status = LimitRuleChangeStatus.REQUESTED,
             requestedBy = actor,
+            limitRuleId = currentRule?.id,
             targetOwnerPartyProfileId = requestedRule.ownerPartyProfileId,
-            targetMandateId = command.toTargetMandateId(),
+            targetMandateId = requestedRule.targetMandateId(),
             targetScope = targetScopeSnapshot,
             targetScopeHash = ScopeHash.of(targetScopeHash),
             requestedRule = requestedRuleSnapshot,
+            beforeRule = currentRule?.let { LimitRuleSnapshotter.ruleSnapshot(it) },
             authorityDelegationId = command.authorityDelegationId?.let { PartyProfileDelegationId.of(it) },
             requestActorContext = command.toRequestActorContext(actor),
             requesterPartyProfileId = command.toRequesterPartyProfileId(actor),
@@ -55,4 +58,10 @@ internal class LimitChangeRequestFactory(
             updatedAt = now
         )
     }
+
+    private fun LimitRule.targetMandateId(): MandateId? =
+        when (val scope = mandateScope) {
+            MandateScope.AllOwnerMandates -> null
+            is MandateScope.MandateSpecific -> scope.mandateId
+        }
 }

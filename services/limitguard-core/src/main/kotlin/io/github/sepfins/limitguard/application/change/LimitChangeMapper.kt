@@ -171,8 +171,9 @@ internal fun RequestLimitRuleChangeCommand.toRequesterPartyProfileId(actor: Chan
             ChangeActor.System -> null
         }
 
-internal fun RequestLimitRuleChangeCommand.toTargetMandateId(): MandateId? =
-    when (requestedRule.mandateScope) {
+internal fun RequestLimitRuleChangeCommand.toTargetMandateId(): MandateId? {
+    val draft = requireNotNull(requestedRule) { "requestedRule is required for ${changeType.name}" }
+    return when (draft.mandateScope) {
         LimitMandateScope.ALL_OWNER_MANDATES -> {
             require(targetMandateId == null) {
                 "RequestLimitRuleChangeCommand.targetMandateId must be null when requestedRule.mandateScope is ALL_OWNER_MANDATES"
@@ -180,7 +181,7 @@ internal fun RequestLimitRuleChangeCommand.toTargetMandateId(): MandateId? =
             null
         }
         LimitMandateScope.MANDATE -> {
-            val draftMandateId = requireNotNull(requestedRule.mandateId) {
+            val draftMandateId = requireNotNull(draft.mandateId) {
                 "LimitRuleDraft.mandateId is required for LimitMandateScope.MANDATE"
             }
             require(targetMandateId == null || targetMandateId == draftMandateId) {
@@ -189,6 +190,7 @@ internal fun RequestLimitRuleChangeCommand.toTargetMandateId(): MandateId? =
             MandateId.of(draftMandateId)
         }
     }
+}
 
 internal fun LimitRuleChangeRequest.toResult(): LimitChangeRequestResult =
     LimitChangeRequestResult(

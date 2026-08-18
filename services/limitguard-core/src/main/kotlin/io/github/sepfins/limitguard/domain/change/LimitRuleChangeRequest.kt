@@ -42,13 +42,140 @@ data class LimitRuleChangeRequest(
 ) {
     init {
         if (changeType == LimitRuleChangeType.CREATE) {
-            require(limitRuleId == null) { "CREATE change must not target an existing rule" }
             require(beforeRule == null) { "CREATE change must not carry a before-rule snapshot" }
+            require(status == LimitRuleChangeStatus.APPLIED || limitRuleId == null) {
+                "CREATE change must not reference a rule before it is applied"
+            }
+            require(status != LimitRuleChangeStatus.APPLIED || limitRuleId != null) {
+                "APPLIED CREATE change must reference the created rule"
+            }
         } else {
             require(limitRuleId != null) { "$changeType change must target an existing rule" }
+            require(beforeRule != null) { "$changeType change must carry a before-rule snapshot" }
         }
         require(effectiveAt == null || expiresAt == null || expiresAt > effectiveAt) {
             "expiresAt must be after effectiveAt"
         }
+    }
+
+    fun approve(
+        approvedRule: Metadata,
+        reason: String?,
+        at: Instant,
+    ): LimitRuleChangeRequest {
+        return transitionTo(LimitRuleChangeStatus.APPROVED).copy(
+            approvedRule = approvedRule,
+            decidedAt = at,
+            decisionReason = reason,
+            updatedAt = at,
+        )
+    }
+
+    fun schedule(
+        effectiveAt: Instant,
+        at: Instant,
+    ): LimitRuleChangeRequest {
+        return transitionTo(LimitRuleChangeStatus.PENDING_EFFECTIVE_DATE).copy(
+            effectiveAt = effectiveAt,
+            updatedAt = at,
+        )
+    }
+
+    fun reject(
+        reason: String?,
+        at: Instant
+    ): LimitRuleChangeRequest {
+        return transitionTo(LimitRuleChangeStatus.REJECTED).copy(
+            status = LimitRuleChangeStatus.REJECTED,
+            decidedAt = at,
+            decisionReason = reason,
+            updatedAt = at,
+        )
+    }
+
+    fun cancel(
+        at: Instant,
+    ): LimitRuleChangeRequest {
+        return transitionTo(LimitRuleChangeStatus.CANCELLED).copy(
+            status = LimitRuleChangeStatus.REJECTED,
+            cancelledAt = at,
+            updatedAt = at,
+        )
+    }
+
+    fun supersede(
+        by: LimitChangeRequestId,
+        at: Instant,
+    ): LimitRuleChangeRequest {
+        return transitionTo(LimitRuleChangeStatus.SUPERSEDED).copy(
+            supersededByChangeRequestId = by,
+            expiresAt = at,
+            updatedAt = at,
+        )
+    }
+
+    fun fail(
+        at: Instant,
+    ): LimitRuleChangeRequest {
+        return transitionTo(LimitRuleChangeStatus.FAILED).copy(
+            cancelledAt = at,
+            updatedAt = at,
+        )
+    }
+
+    fun markApplied(
+        limitRuleId: LimitRuleId,
+        at: Instant,
+    ): LimitRuleChangeRequest {
+        require(canTransitionTo(LimitRuleChangeStatus.APPLIED)) {
+            "Cannot transition limit change request from $status to ${LimitRuleChangeStatus.APPLIED}"
+        }
+        return copy(
+            status = LimitRuleChangeStatus.APPLIED,
+            limitRuleId = limitRuleId,
+            appliedAt = at,
+            updatedAt = at,
+        )
+    }
+
+    private fun transitionTo(nextStatus: LimitRuleChangeStatus): LimitRuleChangeRequest {
+        require(canTransitionTo(nextStatus)) {
+            "Cannot transition limit change request from $status to $nextStatus"
+        }
+        return copy(status = nextStatus)
+    }
+
+    private fun canTransitionTo(nextStatus: LimitRuleChangeStatus): Boolean =
+        nextStatus in allowedTransitions.getValue(status)
+
+    companion object {
+        private val allowedTransitions: Map<LimitRuleChangeStatus, Set<LimitRuleChangeStatus>> =
+            mapOf(
+                LimitRuleChangeStatus.REQUESTED to setOf(
+                    LimitRuleChangeStatus.APPROVED,
+                    LimitRuleChangeStatus.REJECTED,
+                    LimitRuleChangeStatus.CANCELLED,
+                    LimitRuleChangeStatus.SUPERSEDED,
+                    LimitRuleChangeStatus.FAILED,
+                ),
+                LimitRuleChangeStatus.APPROVED to setOf(
+                    LimitRuleChangeStatus.PENDING_EFFECTIVE_DATE,
+                    LimitRuleChangeStatus.APPLIED,
+                    LimitRuleChangeStatus.CANCELLED,
+                    LimitRuleChangeStatus.SUPERSEDED,
+                    LimitRuleChangeStatus.FAILED,
+                ),
+                LimitRuleChangeStatus.PENDING_EFFECTIVE_DATE to setOf(
+                    LimitRuleChangeStatus.APPLIED,
+                    LimitRuleChangeStatus.CANCELLED,
+                    LimitRuleChangeStatus.SUPERSEDED,
+                    LimitRuleChangeStatus.FAILED,
+                ),
+                LimitRuleChangeStatus.APPLIED to setOf(),
+                LimitRuleChangeStatus.REJECTED to setOf(),
+                LimitRuleChangeStatus.CANCELLED to setOf(),
+                LimitRuleChangeStatus.SUPERSEDED to setOf(),
+                LimitRuleChangeStatus.FAILED to setOf(),
+            )
     }
 }
