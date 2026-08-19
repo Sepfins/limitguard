@@ -5,9 +5,11 @@ import io.github.sepfins.limitguard.api.LimitEvaluationService
 import io.github.sepfins.limitguard.api.Limitguard
 import io.github.sepfins.limitguard.api.TenantCatalogService
 import io.github.sepfins.limitguard.application.catalog.DefaultTenantCatalogService
+import io.github.sepfins.limitguard.application.change.ApproveLimitRuleChangeWorkflow
 import io.github.sepfins.limitguard.application.change.ChangeCommandValidator
 import io.github.sepfins.limitguard.application.change.ChangeReferenceResolver
 import io.github.sepfins.limitguard.application.change.DefaultLimitChangeService
+import io.github.sepfins.limitguard.application.change.LimitChangeApplicationWorkflow
 import io.github.sepfins.limitguard.application.change.LimitChangeEventFactory
 import io.github.sepfins.limitguard.application.change.LimitChangeRequestFactory
 import io.github.sepfins.limitguard.application.change.LimitRuleCandidateFactory
@@ -76,6 +78,16 @@ class DefaultLimitguard(
     clockProvider: ClockProvider,
     transactionRunner: TransactionRunner,
 ) : Limitguard {
+    private val limitChangeEventFactory = LimitChangeEventFactory(idGenerator)
+    private val limitChangeApplicationWorkflow = LimitChangeApplicationWorkflow(
+        changeRequestRepository = limitChangeRequestRepository,
+        changeEventRepository = limitChangeEventRepository,
+        limitRuleRepository = limitRuleRepository,
+        limitRuleRevisionRepository = limitRuleRevisionRepository,
+        changeEventFactory = limitChangeEventFactory,
+        idGenerator = idGenerator,
+    )
+
     override val tenantCatalogService: TenantCatalogService = DefaultTenantCatalogService(
         tenantRepository = tenantRepository,
         channelRepository = channelRepository,
@@ -105,12 +117,23 @@ class DefaultLimitguard(
             ),
             candidateFactory = LimitRuleCandidateFactory(),
             changeRequestFactory = LimitChangeRequestFactory(),
-            changeEventFactory = LimitChangeEventFactory(idGenerator),
+            changeEventFactory = limitChangeEventFactory,
+            applicationWorkflow = limitChangeApplicationWorkflow,
             changeRequestRepository = limitChangeRequestRepository,
             changeEventRepository = limitChangeEventRepository,
             limitRuleRepository = limitRuleRepository,
-            limitRuleRevisionRepository = limitRuleRevisionRepository,
             idGenerator = idGenerator,
+            clockProvider = clockProvider,
+            transactionRunner = transactionRunner,
+        ),
+        approveWorkflow = ApproveLimitRuleChangeWorkflow(
+            candidateFactory = LimitRuleCandidateFactory(),
+            applicationWorkflow = limitChangeApplicationWorkflow,
+            changeEventFactory = limitChangeEventFactory,
+            changeRequestRepository = limitChangeRequestRepository,
+            changeEventRepository = limitChangeEventRepository,
+            limitConfigurationRepository = limitConfigurationRepository,
+            limitRuleRepository = limitRuleRepository,
             clockProvider = clockProvider,
             transactionRunner = transactionRunner,
         ),

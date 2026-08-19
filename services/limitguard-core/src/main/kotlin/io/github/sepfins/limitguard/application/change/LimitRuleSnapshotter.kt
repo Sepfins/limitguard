@@ -1,12 +1,29 @@
 package io.github.sepfins.limitguard.application.change
 
+import io.github.sepfins.limitguard.domain.common.ChannelGroupId
+import io.github.sepfins.limitguard.domain.common.ChannelId
+import io.github.sepfins.limitguard.domain.common.CurrencyCode
+import io.github.sepfins.limitguard.domain.common.EffectiveWindow
+import io.github.sepfins.limitguard.domain.common.LimitConfigurationId
+import io.github.sepfins.limitguard.domain.common.LimitRuleId
+import io.github.sepfins.limitguard.domain.common.MandateId
 import io.github.sepfins.limitguard.domain.common.Metadata
+import io.github.sepfins.limitguard.domain.common.Money
+import io.github.sepfins.limitguard.domain.common.OperationTypeId
+import io.github.sepfins.limitguard.domain.common.PartyProfileId
+import io.github.sepfins.limitguard.domain.common.TenantId
+import io.github.sepfins.limitguard.domain.common.Version
 import io.github.sepfins.limitguard.domain.limit.LimitChannelScope
 import io.github.sepfins.limitguard.domain.limit.LimitKind
 import io.github.sepfins.limitguard.domain.limit.LimitOperationScope
+import io.github.sepfins.limitguard.domain.limit.LimitPeriod
+import io.github.sepfins.limitguard.domain.limit.LimitPriority
 import io.github.sepfins.limitguard.domain.limit.LimitRule
+import io.github.sepfins.limitguard.domain.limit.LimitRuleName
 import io.github.sepfins.limitguard.domain.limit.LimitRuleTargetScope
+import io.github.sepfins.limitguard.domain.limit.LimitUsageConsumptionMode
 import io.github.sepfins.limitguard.domain.mandate.MandateScope
+import java.time.Instant
 
 internal object LimitRuleSnapshotter {
     fun ruleSnapshot(rule: LimitRule): Metadata =
@@ -38,6 +55,70 @@ internal object LimitRuleSnapshotter {
                 "metadata" to rule.metadata.value,
             )
         )
+
+    fun restoreRule(
+        snapshot: Metadata,
+        createdAt: Instant?,
+        updatedAt: Instant,
+    ): LimitRule {
+        val values = snapshot.value
+        return LimitRule(
+            id = LimitRuleId.of(values.requiredString("id")),
+            tenantId = TenantId.of(values.requiredString("tenantId")),
+            ownerPartyProfileId = PartyProfileId.of(values.requiredString("ownerPartyProfileId")),
+            name = LimitRuleName.of(values.requiredString("name")),
+            description = values.optionalString("description"),
+            limitKind = when (values.requiredString("limitKind")) {
+                "PER_TRANSACTION" -> LimitKind.PerTransaction
+                "PERIODIC" -> LimitKind.Periodic(
+                    LimitPeriod.valueOf(values.requiredString("period"))
+                )
+                else -> throw IllegalArgumentException("unsupported limitKind in rule snapshot")
+            },
+            amount = Money.positive(
+                values.requiredString("amount"),
+                CurrencyCode.of(values.requiredString("currency")),
+            ),
+            mandateScope = when (values.requiredString("mandateScope")) {
+                "ALL_OWNER_MANDATES" -> MandateScope.AllOwnerMandates
+                "MANDATE" -> MandateScope.MandateSpecific(
+                    MandateId.of(values.requiredString("mandateId"))
+                )
+                else -> throw IllegalArgumentException("unsupported mandateScope in rule snapshot")
+            },
+            configurationId = values.optionalString("configurationId")?.let { LimitConfigurationId.of(it) },
+            channelScope = when (values.requiredString("channelScope")) {
+                "ALL_CHANNELS" -> LimitChannelScope.AllChannels
+                "CHANNEL" -> LimitChannelScope.ChannelSpecific(
+                    ChannelId.of(values.requiredString("channelId"))
+                )
+                "CHANNEL_GROUP" -> LimitChannelScope.ChannelGroupSpecific(
+                    ChannelGroupId.of(values.requiredString("channelGroupId"))
+                )
+                else -> throw IllegalArgumentException("unsupported channelScope in rule snapshot")
+            },
+            operationScope = when (values.requiredString("operationScope")) {
+                "ALL_OPERATIONS" -> LimitOperationScope.AllOperations
+                "OPERATION_TYPE" -> LimitOperationScope.OperationTypeSpecific(
+                    OperationTypeId.of(values.requiredString("operationTypeId"))
+                )
+                else -> throw IllegalArgumentException("unsupported operationScope in rule snapshot")
+            },
+            usageConsumptionMode = LimitUsageConsumptionMode.valueOf(
+                values.requiredString("usageConsumptionMode")
+            ),
+            priority = LimitPriority.of(values.requiredInt("priority")),
+            isActive = values.requiredBoolean("isActive"),
+            version = Version.of(values.requiredInt("version")),
+            effectiveWindow = EffectiveWindow(
+                startsAt = values.requiredInstant("startsAt"),
+                endsAt = values.optionalInstant("endsAt"),
+            ),
+            metadata = Metadata(values.requiredMap("metadata")),
+            createdAt = createdAt,
+            updatedAt = updatedAt,
+        )
+    }
 
     fun targetScopeSnapshot(targetScope: LimitRuleTargetScope): Metadata =
         Metadata(
@@ -112,4 +193,45 @@ internal object LimitRuleSnapshotter {
             LimitOperationScope.AllOperations -> null
             is LimitOperationScope.OperationTypeSpecific -> operationTypeId.value.toString()
         }
+
+    private fun Map<String, Any?>.requiredString(key: String): String =
+        this[key] as? String
+            ?: throw IllegalArgumentException("$key is required in rule snapshot")
+
+    private fun Map<String, Any?>.optionalString(key: String): String? {
+        val value = this[key] ?: return null
+        return value as? String
+            ?: throw IllegalArgumentException("$key must be a string in rule snapshot")
+    }
+
+    private fun Map<String, Any?>.requiredInt(key: String): Int =
+        (this[key] as? Number)?.toInt()
+            ?: throw IllegalArgumentException("$key is required in rule snapshot")
+
+    private fun Map<String, Any?>.requiredBoolean(key: String): Boolean =
+        this[key] as? Boolean
+            ?: throw IllegalArgumentException("$key is required in rule snapshot")
+
+    private fun Map<String, Any?>.requiredInstant(key: String): Instant =
+        try {
+            Instant.parse(requiredString(key))
+        } catch (exception: RuntimeException) {
+            throw IllegalArgumentException("$key must be an instant in rule snapshot", exception)
+        }
+
+    private fun Map<String, Any?>.optionalInstant(key: String): Instant? {
+        val value = optionalString(key) ?: return null
+        return try {
+            Instant.parse(value)
+        } catch (exception: RuntimeException) {
+            throw IllegalArgumentException("$key must be an instant in rule snapshot", exception)
+        }
+    }
+
+    private fun Map<String, Any?>.requiredMap(key: String): Map<String, Any?> {
+        val value = this[key] as? Map<*, *>
+            ?: throw IllegalArgumentException("$key is required in rule snapshot")
+        require(value.keys.all { it is String }) { "$key must contain string keys in rule snapshot" }
+        return value.entries.associate { (entryKey, entryValue) -> entryKey as String to entryValue }
+    }
 }

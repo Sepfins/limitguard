@@ -11,12 +11,13 @@ import io.github.sepfins.limitguard.api.results.LimitChangeRequestResult
 
 internal class DefaultLimitChangeService(
     private val requestWorkflow: RequestLimitRuleChangeWorkflow,
+    private val approveWorkflow: ApproveLimitRuleChangeWorkflow,
 ) : LimitChangeService {
     override fun requestLimitRuleChange(command: RequestLimitRuleChangeCommand): LimitChangeRequestResult =
         requestWorkflow.execute(command)
 
     override fun approveLimitRuleChange(command: ApproveLimitRuleChangeCommand): LimitChangeRequestResult =
-        deferredWorkflow("approveLimitRuleChange")
+        approveWorkflow.execute(command)
 
     override fun rejectLimitRuleChange(command: RejectLimitRuleChangeCommand): LimitChangeRequestResult =
         deferredWorkflow("rejectLimitRuleChange")

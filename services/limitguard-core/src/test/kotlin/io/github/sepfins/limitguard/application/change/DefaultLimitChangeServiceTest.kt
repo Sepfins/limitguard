@@ -16,6 +16,11 @@ import io.github.sepfins.limitguard.api.commands.RequestLimitRuleChangeCommand
 import io.github.sepfins.limitguard.api.errors.ConflictException
 import io.github.sepfins.limitguard.api.errors.IdempotencyConflictException
 import io.github.sepfins.limitguard.api.errors.ValidationException
+import io.github.sepfins.limitguard.domain.change.ChangeActor
+import io.github.sepfins.limitguard.domain.change.LimitRuleChangeEventType
+import io.github.sepfins.limitguard.domain.change.LimitRuleChangeRequest
+import io.github.sepfins.limitguard.domain.change.LimitRuleRevisionEventType
+import io.github.sepfins.limitguard.domain.common.BankWorkerId
 import io.github.sepfins.limitguard.domain.common.CurrencyCode
 import io.github.sepfins.limitguard.domain.common.EffectiveWindow
 import io.github.sepfins.limitguard.domain.common.LimitConfigurationId
@@ -26,8 +31,6 @@ import io.github.sepfins.limitguard.domain.common.Money
 import io.github.sepfins.limitguard.domain.common.PartyProfileId
 import io.github.sepfins.limitguard.domain.common.TenantId
 import io.github.sepfins.limitguard.domain.common.Version
-import io.github.sepfins.limitguard.domain.change.LimitRuleChangeEventType
-import io.github.sepfins.limitguard.domain.change.LimitRuleRevisionEventType
 import io.github.sepfins.limitguard.domain.limit.LimitChannelScope as DomainLimitChannelScope
 import io.github.sepfins.limitguard.domain.limit.LimitConfiguration
 import io.github.sepfins.limitguard.domain.limit.LimitConfigurationCode
@@ -61,6 +64,9 @@ class DefaultLimitChangeServiceTest {
     private val channelId = UUID.fromString("00000000-0000-0000-0000-000000000004")
     private val configurationId = LimitConfigurationId.of(UUID.fromString("00000000-0000-0000-0000-000000000005"))
     private val existingRuleId = LimitRuleId.of(UUID.fromString("00000000-0000-0000-0000-000000000006"))
+    private val pendingRuleId = LimitRuleId.of(UUID.fromString("00000000-0000-0000-0000-000000000007"))
+    private val pendingRequestId = LimitChangeRequestId.of(UUID.fromString("00000000-0000-0000-0000-000000000008"))
+    private val approverId = UUID.fromString("00000000-0000-0000-0000-000000000009")
 
     @Test
     fun `requestLimitRuleChange applies create request with complete audit history`() {
@@ -364,18 +370,127 @@ class DefaultLimitChangeServiceTest {
     }
 
     @Test
-    fun `non-create workflows fail explicitly while deferred`() {
+    fun `approveLimitRuleChange applies a requested create with approver audit`() {
+        val repositories = repositoriesWithConfiguration()
+        val request = insertRequestedCreate(repositories)
+        val service = limitChangeService(repositories)
+        val approver = LimitChangeActorCommand(
+            actorType = LimitChangeActorType.BANK_WORKER,
+            bankWorkerId = approverId,
+        )
+
+        val result = service.approveLimitRuleChange(
+            ApproveLimitRuleChangeCommand(
+                tenantId = tenantId.value,
+                changeRequestId = request.id.value,
+                approvedBy = approver,
+                decisionReason = "Approved by branch supervisor",
+                metadata = mapOf("caseId" to "approval-1"),
+            )
+        )
+
+        assertEquals(LimitRuleChangeStatus.APPLIED, result.status)
+        assertEquals(pendingRuleId.value, result.limitRuleId)
+        assertEquals("Approved by branch supervisor", result.decisionReason)
+        val persistedRequest = assertNotNull(repositories.limitChangeRequests.findById(tenantId, request.id))
+        assertEquals(request.requestedRule, persistedRequest.approvedRule)
+
+        val events = repositories.limitRuleChangeEvents.findByChangeRequest(tenantId, request.id)
+        assertEquals(
+            listOf(
+                LimitRuleChangeEventType.REQUESTED,
+                LimitRuleChangeEventType.APPROVED,
+                LimitRuleChangeEventType.APPLIED,
+            ),
+            events.map { it.eventType },
+        )
+        val approvalEvent = events[1]
+        assertEquals(ChangeActor.BankWorkerActor(BankWorkerId.of(approverId)), approvalEvent.actor)
+        assertEquals(mapOf("caseId" to "approval-1"), approvalEvent.eventPayload.value)
+
+        val revision = repositories.limitRuleRevisions.findByChangeRequest(tenantId, request.id).single()
+        assertEquals(ChangeActor.BankWorkerActor(BankWorkerId.of(approverId)), revision.actor)
+        assertEquals(pendingRuleId, revision.limitRuleId)
+    }
+
+    @Test
+    fun `approveLimitRuleChange applies an adjusted approved rule`() {
+        val repositories = repositoriesWithConfiguration()
+        val request = insertRequestedCreate(repositories)
+        val service = limitChangeService(repositories)
+
+        val result = service.approveLimitRuleChange(
+            ApproveLimitRuleChangeCommand(
+                tenantId = tenantId.value,
+                changeRequestId = request.id.value,
+                approvedBy = LimitChangeActorCommand(LimitChangeActorType.SYSTEM),
+                approvedRule = draft(amount = "750.00"),
+            )
+        )
+
+        assertEquals(LimitRuleChangeStatus.APPLIED, result.status)
+        val persistedRequest = assertNotNull(repositories.limitChangeRequests.findById(tenantId, request.id))
+        assertEquals("500.0000", persistedRequest.requestedRule.value["amount"])
+        assertEquals("750.0000", persistedRequest.approvedRule?.value?.get("amount"))
+        val rule = assertNotNull(repositories.limitRules.findById(tenantId, pendingRuleId))
+        assertEquals(BigDecimal("750.0000"), rule.amount.amount)
+    }
+
+    @Test
+    fun `approveLimitRuleChange schedules a future request without applying it`() {
+        val repositories = repositoriesWithConfiguration()
+        val request = insertRequestedCreate(
+            repositories,
+            command().copy(effectiveAt = now.plusSeconds(3600)),
+        )
+        val service = limitChangeService(repositories)
+
+        val result = service.approveLimitRuleChange(
+            ApproveLimitRuleChangeCommand(
+                tenantId = tenantId.value,
+                changeRequestId = request.id.value,
+                approvedBy = LimitChangeActorCommand(LimitChangeActorType.SYSTEM),
+            )
+        )
+
+        assertEquals(LimitRuleChangeStatus.PENDING_EFFECTIVE_DATE, result.status)
+        assertEquals(null, repositories.limitRules.findById(tenantId, pendingRuleId))
+        assertEquals(emptyList(), repositories.limitRuleRevisions.findByChangeRequest(tenantId, request.id))
+        assertEquals(
+            listOf(
+                LimitRuleChangeEventType.REQUESTED,
+                LimitRuleChangeEventType.APPROVED,
+                LimitRuleChangeEventType.SCHEDULED,
+            ),
+            repositories.limitRuleChangeEvents.findByChangeRequest(tenantId, request.id).map { it.eventType },
+        )
+    }
+
+    @Test
+    fun `approveLimitRuleChange rejects a request that is no longer awaiting approval`() {
+        val repositories = repositoriesWithConfiguration()
+        val service = limitChangeService(repositories)
+        val applied = service.requestLimitRuleChange(command())
+
+        assertFailsWith<ConflictException> {
+            service.approveLimitRuleChange(
+                ApproveLimitRuleChangeCommand(
+                    tenantId = tenantId.value,
+                    changeRequestId = applied.id,
+                    approvedBy = LimitChangeActorCommand(LimitChangeActorType.SYSTEM),
+                )
+            )
+        }
+    }
+
+    @Test
+    fun `remaining workflows fail explicitly while deferred`() {
         val service = limitChangeService(repositoriesWithConfiguration())
         val actor = LimitChangeActorCommand(
             actorType = LimitChangeActorType.PARTY_PROFILE,
             partyProfileId = requesterId,
         )
 
-        assertFailsWith<UnsupportedOperationException> {
-            service.approveLimitRuleChange(
-                ApproveLimitRuleChangeCommand(tenantId.value, ownerId, actor),
-            )
-        }
         assertFailsWith<UnsupportedOperationException> {
             service.rejectLimitRuleChange(
                 RejectLimitRuleChangeCommand(tenantId.value, ownerId, actor, "not approved"),
@@ -418,11 +533,50 @@ class DefaultLimitChangeServiceTest {
         return repositories
     }
 
+    private fun insertRequestedCreate(
+        repositories: InMemoryLimitguardRepositories,
+        requestCommand: RequestLimitRuleChangeCommand = command(),
+    ): LimitRuleChangeRequest {
+        val facts = ChangeReferenceResolver(
+            limitConfigurationRepository = repositories.limitConfigurations,
+            limitRuleRepository = repositories.limitRules,
+            limitRuleRevisionRepository = repositories.limitRuleRevisions,
+        ).resolve(requestCommand)
+        val candidate = LimitRuleCandidateFactory().createCandidate(
+            command = requestCommand,
+            facts = facts,
+            futureRuleId = pendingRuleId,
+            now = now,
+        )
+        val request = LimitChangeRequestFactory().create(
+            id = pendingRequestId,
+            command = requestCommand,
+            requestedRule = candidate,
+            currentRule = null,
+            now = now,
+        )
+        val persisted = repositories.limitChangeRequests.insert(tenantId, request)
+        repositories.limitRuleChangeEvents.insert(
+            tenantId,
+            LimitChangeEventFactory(SequentialIdGenerator(startAt = 900L)).requested(persisted, now),
+        )
+        return persisted
+    }
+
     private fun limitChangeService(
         repositories: InMemoryLimitguardRepositories,
         clock: FixedClockProvider = FixedClockProvider(now),
     ): DefaultLimitChangeService {
         val idGenerator = SequentialIdGenerator(startAt = 100L)
+        val changeEventFactory = LimitChangeEventFactory(idGenerator)
+        val applicationWorkflow = LimitChangeApplicationWorkflow(
+            changeRequestRepository = repositories.limitChangeRequests,
+            changeEventRepository = repositories.limitRuleChangeEvents,
+            limitRuleRepository = repositories.limitRules,
+            limitRuleRevisionRepository = repositories.limitRuleRevisions,
+            changeEventFactory = changeEventFactory,
+            idGenerator = idGenerator,
+        )
         return DefaultLimitChangeService(
             requestWorkflow = RequestLimitRuleChangeWorkflow(
                 commandValidator = ChangeCommandValidator(),
@@ -433,12 +587,23 @@ class DefaultLimitChangeServiceTest {
                 ),
                 candidateFactory = LimitRuleCandidateFactory(),
                 changeRequestFactory = LimitChangeRequestFactory(),
-                changeEventFactory = LimitChangeEventFactory(idGenerator),
+                changeEventFactory = changeEventFactory,
+                applicationWorkflow = applicationWorkflow,
                 changeRequestRepository = repositories.limitChangeRequests,
                 changeEventRepository = repositories.limitRuleChangeEvents,
                 limitRuleRepository = repositories.limitRules,
-                limitRuleRevisionRepository = repositories.limitRuleRevisions,
                 idGenerator = idGenerator,
+                clockProvider = clock,
+                transactionRunner = DirectTransactionRunner(),
+            ),
+            approveWorkflow = ApproveLimitRuleChangeWorkflow(
+                candidateFactory = LimitRuleCandidateFactory(),
+                applicationWorkflow = applicationWorkflow,
+                changeEventFactory = changeEventFactory,
+                changeRequestRepository = repositories.limitChangeRequests,
+                changeEventRepository = repositories.limitRuleChangeEvents,
+                limitConfigurationRepository = repositories.limitConfigurations,
+                limitRuleRepository = repositories.limitRules,
                 clockProvider = clock,
                 transactionRunner = DirectTransactionRunner(),
             ),

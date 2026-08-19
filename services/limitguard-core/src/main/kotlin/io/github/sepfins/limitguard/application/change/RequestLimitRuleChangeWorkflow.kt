@@ -10,14 +10,10 @@ import io.github.sepfins.limitguard.api.results.LimitChangeRequestResult
 import io.github.sepfins.limitguard.domain.change.ChangeActor
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeRequest
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeStatus
-import io.github.sepfins.limitguard.domain.change.LimitRuleRevision
-import io.github.sepfins.limitguard.domain.change.LimitRuleRevisionEventType
-import io.github.sepfins.limitguard.domain.change.RevisionNumber
 import io.github.sepfins.limitguard.domain.common.CurrencyCode
 import io.github.sepfins.limitguard.domain.common.IdempotencyKey
 import io.github.sepfins.limitguard.domain.common.LimitChangeRequestId
 import io.github.sepfins.limitguard.domain.common.LimitRuleId
-import io.github.sepfins.limitguard.domain.common.LimitRuleRevisionId
 import io.github.sepfins.limitguard.domain.common.Money
 import io.github.sepfins.limitguard.domain.common.PartyProfileDelegationId
 import io.github.sepfins.limitguard.domain.common.PartyProfileId
@@ -28,7 +24,6 @@ import io.github.sepfins.limitguard.port.ids.IdGenerator
 import io.github.sepfins.limitguard.port.persistence.LimitChangeRequestRepository
 import io.github.sepfins.limitguard.port.persistence.LimitRuleChangeEventRepository
 import io.github.sepfins.limitguard.port.persistence.LimitRuleRepository
-import io.github.sepfins.limitguard.port.persistence.LimitRuleRevisionRepository
 import io.github.sepfins.limitguard.port.time.ClockProvider
 import io.github.sepfins.limitguard.port.transactions.TransactionRunner
 import java.time.Instant
@@ -39,10 +34,10 @@ internal class RequestLimitRuleChangeWorkflow(
     private val candidateFactory: LimitRuleCandidateFactory,
     private val changeRequestFactory: LimitChangeRequestFactory,
     private val changeEventFactory: LimitChangeEventFactory,
+    private val applicationWorkflow: LimitChangeApplicationWorkflow,
     private val changeRequestRepository: LimitChangeRequestRepository,
     private val changeEventRepository: LimitRuleChangeEventRepository,
     private val limitRuleRepository: LimitRuleRepository,
-    private val limitRuleRevisionRepository: LimitRuleRevisionRepository,
     private val idGenerator: IdGenerator,
     private val clockProvider: ClockProvider,
     private val transactionRunner: TransactionRunner,
@@ -106,34 +101,12 @@ internal class RequestLimitRuleChangeWorkflow(
                 return@inTransaction persistedScheduled.toResult()
             }
 
-            val persistedRule = when (command.changeType) {
-                LimitRuleChangeType.CREATE -> limitRuleRepository.insert(tenantId, candidate)
-                else -> limitRuleRepository.update(tenantId, candidate)
-            }
-            limitRuleRevisionRepository.insert(
-                tenantId,
-                LimitRuleRevision(
-                    id = LimitRuleRevisionId.of(idGenerator.newId()),
-                    tenantId = tenantId,
-                    limitRuleId = persistedRule.id,
-                    revisionNumber = RevisionNumber.of(persistedRule.version.value),
-                    revisionEventType = command.changeType.toRevisionEventType(),
-                    actor = ChangeActor.System,
-                    changeRequestId = requested.id,
-                    beforeRule = requested.beforeRule,
-                    afterRule = LimitRuleSnapshotter.ruleSnapshot(persistedRule),
-                    effectiveAt = now,
-                    createdAt = now,
-                ),
-            )
-
-            val applied = persistedApproved.markApplied(persistedRule.id, now)
-            val persistedApplied = changeRequestRepository.update(tenantId, applied)
-            changeEventRepository.insert(
-                tenantId,
-                changeEventFactory.applied(persistedApproved, persistedApplied, now),
-            )
-            persistedApplied.toResult()
+            applicationWorkflow.applyInCurrentTransaction(
+                request = persistedApproved,
+                candidate = candidate,
+                actor = ChangeActor.System,
+                applicationTime = now,
+            ).toResult()
         }
     }
 
@@ -261,15 +234,6 @@ internal class RequestLimitRuleChangeWorkflow(
 
         return expectedValues.all { (key, value) -> snapshot[key] == value }
     }
-
-    private fun LimitRuleChangeType.toRevisionEventType(): LimitRuleRevisionEventType =
-        when (this) {
-            LimitRuleChangeType.CREATE -> LimitRuleRevisionEventType.CREATED
-            LimitRuleChangeType.UPDATE -> LimitRuleRevisionEventType.UPDATED
-            LimitRuleChangeType.DEACTIVATE -> LimitRuleRevisionEventType.DEACTIVATED
-            LimitRuleChangeType.REACTIVATE -> LimitRuleRevisionEventType.REACTIVATED
-            LimitRuleChangeType.DELETE -> LimitRuleRevisionEventType.DELETED
-        }
 
     private inline fun <T> mapValidation(block: () -> T): T =
         try {

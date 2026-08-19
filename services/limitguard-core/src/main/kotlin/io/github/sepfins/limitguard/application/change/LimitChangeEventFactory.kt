@@ -1,5 +1,6 @@
 package io.github.sepfins.limitguard.application.change
 
+import io.github.sepfins.limitguard.domain.change.ChangeActor
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeEvent
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeEventType
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeRequest
@@ -40,17 +41,21 @@ internal class LimitChangeEventFactory(
         before: LimitRuleChangeRequest,
         after: LimitRuleChangeRequest,
         now: Instant,
+        actor: ChangeActor = ChangeActor.System,
+        eventPayload: Metadata = Metadata.EMPTY,
     ): LimitRuleChangeEvent =
         LimitRuleChangeEvent(
             id = LimitRuleChangeEventId.of(idGenerator.newId()),
             tenantId = after.tenantId,
             changeRequestId = after.id,
             eventType = LimitRuleChangeEventType.APPROVED,
+            actor = actor,
             beforeStatus = before.status,
             afterStatus = after.status,
             beforeRule = before.requestedRule,
             afterRule = after.approvedRule,
-            message = "Limit rule change automatically approved",
+            eventPayload = eventPayload,
+            message = "Limit rule change approved",
             createdAt = now,
         )
 
@@ -58,12 +63,14 @@ internal class LimitChangeEventFactory(
         before: LimitRuleChangeRequest,
         after: LimitRuleChangeRequest,
         now: Instant,
+        actor: ChangeActor = ChangeActor.System,
     ): LimitRuleChangeEvent =
         LimitRuleChangeEvent(
             id = LimitRuleChangeEventId.of(idGenerator.newId()),
             tenantId = after.tenantId,
             changeRequestId = after.id,
             eventType = LimitRuleChangeEventType.APPLIED,
+            actor = actor,
             beforeStatus = before.status,
             afterStatus = after.status,
             beforeRule = before.beforeRule,
@@ -79,12 +86,14 @@ internal class LimitChangeEventFactory(
         before: LimitRuleChangeRequest,
         after: LimitRuleChangeRequest,
         now: Instant,
+        actor: ChangeActor = ChangeActor.System,
     ): LimitRuleChangeEvent =
         LimitRuleChangeEvent(
             id = LimitRuleChangeEventId.of(idGenerator.newId()),
             tenantId = after.tenantId,
             changeRequestId = after.id,
             eventType = LimitRuleChangeEventType.SCHEDULED,
+            actor = actor,
             beforeStatus = before.status,
             afterStatus = after.status,
             beforeRule = before.approvedRule,

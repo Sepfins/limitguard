@@ -103,6 +103,40 @@ internal class LimitRuleCandidateFactory {
         return validateCandidate(candidate, facts, command.changeType)
     }
 
+    fun createApprovedCandidate(
+        requestedCandidate: LimitRule,
+        approvedRule: LimitRuleDraft,
+        effectiveAt: Instant?,
+        now: Instant,
+    ): LimitRule {
+        val candidate = requestedCandidate.copy(
+            name = LimitRuleName.of(approvedRule.name),
+            description = approvedRule.description,
+            limitKind = approvedRule.toLimitKind(),
+            amount = Money.positive(approvedRule.amount, CurrencyCode.of(approvedRule.currency)),
+            mandateScope = approvedRule.toMandateScope(),
+            configurationId = approvedRule.configurationId?.let { LimitConfigurationId.of(it) }
+                ?: requestedCandidate.configurationId,
+            channelScope = approvedRule.toChannelScope(),
+            operationScope = approvedRule.toOperationScope(),
+            usageConsumptionMode = LimitUsageConsumptionMode.valueOf(approvedRule.usageConsumptionMode.name),
+            priority = LimitPriority.of(approvedRule.priority),
+            effectiveWindow = EffectiveWindow(
+                startsAt = approvedRule.startsAt ?: requestedCandidate.effectiveWindow.startsAt,
+                endsAt = approvedRule.endsAt,
+            ),
+            metadata = Metadata(approvedRule.metadata),
+            updatedAt = now,
+        )
+        if (candidate.isActive) {
+            val applicationTime = effectiveAt ?: now
+            require(candidate.effectiveWindow.endsAt == null || candidate.effectiveWindow.endsAt > applicationTime) {
+                "active limit rule must not end before it is applied"
+            }
+        }
+        return candidate
+    }
+
     private fun validateCandidate(
         rule: LimitRule,
         facts: ResolvedLimitChangeFacts,

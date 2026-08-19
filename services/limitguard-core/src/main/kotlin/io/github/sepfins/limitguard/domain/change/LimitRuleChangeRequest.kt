@@ -62,9 +62,15 @@ data class LimitRuleChangeRequest(
         approvedRule: Metadata,
         reason: String?,
         at: Instant,
+        approvedTargetScope: Metadata = targetScope,
+        approvedTargetScopeHash: ScopeHash = targetScopeHash,
+        approvedTargetMandateId: MandateId? = targetMandateId,
     ): LimitRuleChangeRequest {
         return transitionTo(LimitRuleChangeStatus.APPROVED).copy(
             approvedRule = approvedRule,
+            targetScope = approvedTargetScope,
+            targetScopeHash = approvedTargetScopeHash,
+            targetMandateId = approvedTargetMandateId,
             decidedAt = at,
             decisionReason = reason,
             updatedAt = at,
