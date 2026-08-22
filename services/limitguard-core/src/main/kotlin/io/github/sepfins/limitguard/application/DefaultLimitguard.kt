@@ -6,6 +6,7 @@ import io.github.sepfins.limitguard.api.Limitguard
 import io.github.sepfins.limitguard.api.TenantCatalogService
 import io.github.sepfins.limitguard.application.catalog.DefaultTenantCatalogService
 import io.github.sepfins.limitguard.application.change.ApproveLimitRuleChangeWorkflow
+import io.github.sepfins.limitguard.application.change.CancelLimitRuleChangeWorkflow
 import io.github.sepfins.limitguard.application.change.ChangeCommandValidator
 import io.github.sepfins.limitguard.application.change.ChangeReferenceResolver
 import io.github.sepfins.limitguard.application.change.DefaultLimitChangeService
@@ -14,6 +15,7 @@ import io.github.sepfins.limitguard.application.change.LimitChangeEventFactory
 import io.github.sepfins.limitguard.application.change.LimitChangeRequestFactory
 import io.github.sepfins.limitguard.application.change.LimitRuleCandidateFactory
 import io.github.sepfins.limitguard.application.change.RequestLimitRuleChangeWorkflow
+import io.github.sepfins.limitguard.application.change.RejectLimitRuleChangeWorkflow
 import io.github.sepfins.limitguard.application.evaluation.AuthorizationEvaluator
 import io.github.sepfins.limitguard.application.evaluation.DefaultLimitEvaluationService
 import io.github.sepfins.limitguard.application.evaluation.LimitRuleMatcher
@@ -134,6 +136,20 @@ class DefaultLimitguard(
             changeEventRepository = limitChangeEventRepository,
             limitConfigurationRepository = limitConfigurationRepository,
             limitRuleRepository = limitRuleRepository,
+            clockProvider = clockProvider,
+            transactionRunner = transactionRunner,
+        ),
+        rejectWorkflow = RejectLimitRuleChangeWorkflow(
+            changeEventFactory = limitChangeEventFactory,
+            changeRequestRepository = limitChangeRequestRepository,
+            changeEventRepository = limitChangeEventRepository,
+            clockProvider = clockProvider,
+            transactionRunner = transactionRunner,
+        ),
+        cancelWorkflow = CancelLimitRuleChangeWorkflow(
+            changeEventFactory = limitChangeEventFactory,
+            changeRequestRepository = limitChangeRequestRepository,
+            changeEventRepository = limitChangeEventRepository,
             clockProvider = clockProvider,
             transactionRunner = transactionRunner,
         ),

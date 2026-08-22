@@ -59,6 +59,50 @@ internal class LimitChangeEventFactory(
             createdAt = now,
         )
 
+    fun rejected(
+        before: LimitRuleChangeRequest,
+        after: LimitRuleChangeRequest,
+        now: Instant,
+        actor: ChangeActor,
+        eventPayload: Metadata = Metadata.EMPTY,
+    ): LimitRuleChangeEvent =
+        LimitRuleChangeEvent(
+            id = LimitRuleChangeEventId.of(idGenerator.newId()),
+            tenantId = after.tenantId,
+            changeRequestId = after.id,
+            eventType = LimitRuleChangeEventType.REJECTED,
+            actor = actor,
+            beforeStatus = before.status,
+            afterStatus = after.status,
+            beforeRule = before.requestedRule,
+            afterRule = after.requestedRule,
+            eventPayload = eventPayload,
+            message = "Limit rule change rejected",
+            createdAt = now,
+        )
+
+    fun cancelled(
+        before: LimitRuleChangeRequest,
+        after: LimitRuleChangeRequest,
+        now: Instant,
+        actor: ChangeActor,
+        eventPayload: Metadata = Metadata.EMPTY,
+    ): LimitRuleChangeEvent =
+        LimitRuleChangeEvent(
+            id = LimitRuleChangeEventId.of(idGenerator.newId()),
+            tenantId = after.tenantId,
+            changeRequestId = after.id,
+            eventType = LimitRuleChangeEventType.CANCELLED,
+            actor = actor,
+            beforeStatus = before.status,
+            afterStatus = after.status,
+            beforeRule = before.approvedRule ?: before.requestedRule,
+            afterRule = after.approvedRule ?: after.requestedRule,
+            eventPayload = eventPayload,
+            message = "Limit rule change cancelled",
+            createdAt = now,
+        )
+
     fun applied(
         before: LimitRuleChangeRequest,
         after: LimitRuleChangeRequest,
