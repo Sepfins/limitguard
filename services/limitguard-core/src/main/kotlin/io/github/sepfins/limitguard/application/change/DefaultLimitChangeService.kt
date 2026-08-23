@@ -14,6 +14,7 @@ internal class DefaultLimitChangeService(
     private val approveWorkflow: ApproveLimitRuleChangeWorkflow,
     private val rejectWorkflow: RejectLimitRuleChangeWorkflow,
     private val cancelWorkflow: CancelLimitRuleChangeWorkflow,
+    private val applyDueWorkflow: ApplyDueLimitChangesWorkflow,
 ) : LimitChangeService {
     override fun requestLimitRuleChange(command: RequestLimitRuleChangeCommand): LimitChangeRequestResult =
         requestWorkflow.execute(command)
@@ -28,8 +29,5 @@ internal class DefaultLimitChangeService(
         cancelWorkflow.execute(command)
 
     override fun applyDueLimitChanges(command: ApplyDueLimitChangesCommand): ApplyDueChangesResult =
-        deferredWorkflow("applyDueLimitChanges")
-
-    private fun deferredWorkflow(name: String): Nothing =
-        throw UnsupportedOperationException("$name is deferred until the limit-change workflow slice")
+        applyDueWorkflow.execute(command)
 }

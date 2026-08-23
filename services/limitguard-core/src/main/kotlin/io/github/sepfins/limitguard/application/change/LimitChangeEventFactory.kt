@@ -103,6 +103,27 @@ internal class LimitChangeEventFactory(
             createdAt = now,
         )
 
+    fun failed(
+        before: LimitRuleChangeRequest,
+        after: LimitRuleChangeRequest,
+        now: Instant,
+        failureReason: String,
+    ): LimitRuleChangeEvent =
+        LimitRuleChangeEvent(
+            id = LimitRuleChangeEventId.of(idGenerator.newId()),
+            tenantId = after.tenantId,
+            changeRequestId = after.id,
+            eventType = LimitRuleChangeEventType.FAILED,
+            actor = ChangeActor.System,
+            beforeStatus = before.status,
+            afterStatus = after.status,
+            beforeRule = before.approvedRule ?: before.requestedRule,
+            afterRule = after.approvedRule ?: after.requestedRule,
+            eventPayload = Metadata(mapOf("reason" to failureReason)),
+            message = "Limit rule change application failed",
+            createdAt = now,
+        )
+
     fun applied(
         before: LimitRuleChangeRequest,
         after: LimitRuleChangeRequest,

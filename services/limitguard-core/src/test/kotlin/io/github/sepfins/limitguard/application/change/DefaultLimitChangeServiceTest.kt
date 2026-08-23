@@ -627,11 +627,114 @@ class DefaultLimitChangeServiceTest {
     }
 
     @Test
-    fun `applyDueLimitChanges fails explicitly while deferred`() {
+    fun `applyDueLimitChanges applies scheduled changes that are due`() {
+        val repositories = repositoriesWithConfiguration()
+        val service = limitChangeService(repositories)
+        val dueAt = now.plusSeconds(3600)
+        val scheduled = service.requestLimitRuleChange(
+            command().copy(effectiveAt = dueAt)
+        )
+
+        val earlyResult = service.applyDueLimitChanges(
+            ApplyDueLimitChangesCommand(tenantId.value, dueAt.minusSeconds(1))
+        )
+        assertEquals(0, earlyResult.appliedCount)
+        assertEquals(0, earlyResult.failedCount)
+
+        val result = service.applyDueLimitChanges(
+            ApplyDueLimitChangesCommand(tenantId.value, dueAt)
+        )
+
+        assertEquals(tenantId.value, result.tenantId)
+        assertEquals(dueAt, result.dueAt)
+        assertEquals(1, result.appliedCount)
+        assertEquals(0, result.failedCount)
+        assertEquals(listOf(scheduled.id), result.appliedChangeRequestIds)
+        assertEquals(emptyList(), result.failedChangeRequestIds)
+
+        val appliedRequest = assertNotNull(
+            repositories.limitChangeRequests.findById(tenantId, LimitChangeRequestId.of(scheduled.id))
+        )
+        assertEquals(DomainLimitRuleChangeStatus.APPLIED, appliedRequest.status)
+        assertEquals(dueAt, appliedRequest.appliedAt)
+        val rule = assertNotNull(
+            repositories.limitRules.findById(tenantId, requireNotNull(appliedRequest.limitRuleId))
+        )
+        assertEquals(dueAt, rule.updatedAt)
+        val revision = repositories.limitRuleRevisions.findByChangeRequest(tenantId, appliedRequest.id).single()
+        assertEquals(ChangeActor.System, revision.actor)
+        assertEquals(dueAt, revision.effectiveAt)
+        assertEquals(
+            listOf(
+                LimitRuleChangeEventType.REQUESTED,
+                LimitRuleChangeEventType.APPROVED,
+                LimitRuleChangeEventType.SCHEDULED,
+                LimitRuleChangeEventType.APPLIED,
+            ),
+            repositories.limitRuleChangeEvents
+                .findByChangeRequest(tenantId, appliedRequest.id)
+                .map { it.eventType },
+        )
+    }
+
+    @Test
+    fun `applyDueLimitChanges marks a stale scheduled change as failed`() {
+        val repositories = repositoriesWithConfiguration()
+        val currentRule = insertRule(repositories)
+        val service = limitChangeService(repositories)
+        val dueAt = now.plusSeconds(3600)
+        val scheduled = service.requestLimitRuleChange(
+            commandForExistingRule(
+                changeType = LimitRuleChangeType.UPDATE,
+                currentRule = currentRule,
+                requestedRule = draft(amount = "700.00"),
+                effectiveAt = dueAt,
+            )
+        )
+        repositories.limitRules.update(
+            tenantId,
+            currentRule.copy(
+                version = currentRule.version.next(),
+                updatedAt = now.plusSeconds(60),
+            ),
+        )
+
+        val result = service.applyDueLimitChanges(
+            ApplyDueLimitChangesCommand(tenantId.value, dueAt)
+        )
+
+        assertEquals(0, result.appliedCount)
+        assertEquals(1, result.failedCount)
+        assertEquals(emptyList(), result.appliedChangeRequestIds)
+        assertEquals(listOf(scheduled.id), result.failedChangeRequestIds)
+        val failedRequest = assertNotNull(
+            repositories.limitChangeRequests.findById(tenantId, LimitChangeRequestId.of(scheduled.id))
+        )
+        assertEquals(DomainLimitRuleChangeStatus.FAILED, failedRequest.status)
+        assertEquals("limit rule version conflict: expected 1, found 2", failedRequest.decisionReason)
+        assertEquals(null, failedRequest.cancelledAt)
+        assertEquals(emptyList(), repositories.limitRuleRevisions.findByChangeRequest(tenantId, failedRequest.id))
+        val events = repositories.limitRuleChangeEvents.findByChangeRequest(tenantId, failedRequest.id)
+        assertEquals(LimitRuleChangeEventType.FAILED, events.last().eventType)
+        assertEquals(DomainLimitRuleChangeStatus.PENDING_EFFECTIVE_DATE, events.last().beforeStatus)
+        assertEquals(DomainLimitRuleChangeStatus.FAILED, events.last().afterStatus)
+        assertEquals(
+            mapOf("reason" to "limit rule version conflict: expected 1, found 2"),
+            events.last().eventPayload.value,
+        )
+    }
+
+    @Test
+    fun `applyDueLimitChanges uses the current time and validates the batch limit`() {
         val service = limitChangeService(repositoriesWithConfiguration())
 
-        assertFailsWith<UnsupportedOperationException> {
-            service.applyDueLimitChanges(ApplyDueLimitChangesCommand(tenantId.value))
+        val result = service.applyDueLimitChanges(ApplyDueLimitChangesCommand(tenantId.value))
+        assertEquals(now, result.dueAt)
+        assertEquals(0, result.appliedCount)
+        assertEquals(0, result.failedCount)
+
+        assertFailsWith<ValidationException> {
+            service.applyDueLimitChanges(ApplyDueLimitChangesCommand(tenantId.value, limit = 0))
         }
     }
 
@@ -747,6 +850,15 @@ class DefaultLimitChangeServiceTest {
                 changeEventFactory = changeEventFactory,
                 changeRequestRepository = repositories.limitChangeRequests,
                 changeEventRepository = repositories.limitRuleChangeEvents,
+                clockProvider = clock,
+                transactionRunner = DirectTransactionRunner(),
+            ),
+            applyDueWorkflow = ApplyDueLimitChangesWorkflow(
+                applicationWorkflow = applicationWorkflow,
+                changeEventFactory = changeEventFactory,
+                changeRequestRepository = repositories.limitChangeRequests,
+                changeEventRepository = repositories.limitRuleChangeEvents,
+                limitRuleRepository = repositories.limitRules,
                 clockProvider = clock,
                 transactionRunner = DirectTransactionRunner(),
             ),

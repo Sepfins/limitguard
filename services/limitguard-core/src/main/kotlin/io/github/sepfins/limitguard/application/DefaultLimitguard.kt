@@ -6,6 +6,7 @@ import io.github.sepfins.limitguard.api.Limitguard
 import io.github.sepfins.limitguard.api.TenantCatalogService
 import io.github.sepfins.limitguard.application.catalog.DefaultTenantCatalogService
 import io.github.sepfins.limitguard.application.change.ApproveLimitRuleChangeWorkflow
+import io.github.sepfins.limitguard.application.change.ApplyDueLimitChangesWorkflow
 import io.github.sepfins.limitguard.application.change.CancelLimitRuleChangeWorkflow
 import io.github.sepfins.limitguard.application.change.ChangeCommandValidator
 import io.github.sepfins.limitguard.application.change.ChangeReferenceResolver
@@ -150,6 +151,15 @@ class DefaultLimitguard(
             changeEventFactory = limitChangeEventFactory,
             changeRequestRepository = limitChangeRequestRepository,
             changeEventRepository = limitChangeEventRepository,
+            clockProvider = clockProvider,
+            transactionRunner = transactionRunner,
+        ),
+        applyDueWorkflow = ApplyDueLimitChangesWorkflow(
+            applicationWorkflow = limitChangeApplicationWorkflow,
+            changeEventFactory = limitChangeEventFactory,
+            changeRequestRepository = limitChangeRequestRepository,
+            changeEventRepository = limitChangeEventRepository,
+            limitRuleRepository = limitRuleRepository,
             clockProvider = clockProvider,
             transactionRunner = transactionRunner,
         ),

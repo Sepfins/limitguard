@@ -122,10 +122,11 @@ data class LimitRuleChangeRequest(
     }
 
     fun fail(
+        reason: String,
         at: Instant,
     ): LimitRuleChangeRequest {
         return transitionTo(LimitRuleChangeStatus.FAILED).copy(
-            cancelledAt = at,
+            decisionReason = reason,
             updatedAt = at,
         )
     }
