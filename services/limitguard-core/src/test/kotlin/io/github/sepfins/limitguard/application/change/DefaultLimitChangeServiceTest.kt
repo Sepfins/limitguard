@@ -3,6 +3,7 @@ package io.github.sepfins.limitguard.application.change
 import io.github.sepfins.limitguard.api.LimitChangeActorType
 import io.github.sepfins.limitguard.api.LimitChannelScope
 import io.github.sepfins.limitguard.api.LimitKind
+import io.github.sepfins.limitguard.api.LimitMandateScope
 import io.github.sepfins.limitguard.api.LimitRuleChangeStatus
 import io.github.sepfins.limitguard.api.LimitRuleChangeType
 import io.github.sepfins.limitguard.api.LimitUsageConsumptionMode
@@ -15,6 +16,7 @@ import io.github.sepfins.limitguard.api.commands.RejectLimitRuleChangeCommand
 import io.github.sepfins.limitguard.api.commands.RequestLimitRuleChangeCommand
 import io.github.sepfins.limitguard.api.errors.ConflictException
 import io.github.sepfins.limitguard.api.errors.IdempotencyConflictException
+import io.github.sepfins.limitguard.api.errors.NotFoundException
 import io.github.sepfins.limitguard.api.errors.ValidationException
 import io.github.sepfins.limitguard.domain.change.ChangeActor
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeEventType
@@ -27,6 +29,7 @@ import io.github.sepfins.limitguard.domain.common.EffectiveWindow
 import io.github.sepfins.limitguard.domain.common.LimitConfigurationId
 import io.github.sepfins.limitguard.domain.common.LimitChangeRequestId
 import io.github.sepfins.limitguard.domain.common.LimitRuleId
+import io.github.sepfins.limitguard.domain.common.MandateId
 import io.github.sepfins.limitguard.domain.common.Metadata
 import io.github.sepfins.limitguard.domain.common.Money
 import io.github.sepfins.limitguard.domain.common.PartyProfileId
@@ -43,6 +46,9 @@ import io.github.sepfins.limitguard.domain.limit.LimitPriority
 import io.github.sepfins.limitguard.domain.limit.LimitRule
 import io.github.sepfins.limitguard.domain.limit.LimitRuleName
 import io.github.sepfins.limitguard.domain.limit.LimitUsageConsumptionMode as DomainLimitUsageConsumptionMode
+import io.github.sepfins.limitguard.domain.funding.FundingSourceScope
+import io.github.sepfins.limitguard.domain.mandate.Mandate
+import io.github.sepfins.limitguard.domain.mandate.MandateName
 import io.github.sepfins.limitguard.domain.mandate.MandateScope
 import io.github.sepfins.limitguard.support.DirectTransactionRunner
 import io.github.sepfins.limitguard.support.FixedClockProvider
@@ -68,6 +74,7 @@ class DefaultLimitChangeServiceTest {
     private val pendingRuleId = LimitRuleId.of(UUID.fromString("00000000-0000-0000-0000-000000000007"))
     private val pendingRequestId = LimitChangeRequestId.of(UUID.fromString("00000000-0000-0000-0000-000000000008"))
     private val approverId = UUID.fromString("00000000-0000-0000-0000-000000000009")
+    private val mandateId = MandateId.of(UUID.fromString("00000000-0000-0000-0000-000000000010"))
 
     @Test
     fun `requestLimitRuleChange applies create request with complete audit history`() {
@@ -80,6 +87,7 @@ class DefaultLimitChangeServiceTest {
         assertEquals(LimitRuleChangeType.CREATE, result.changeType)
         assertEquals(LimitRuleChangeStatus.APPLIED, result.status)
         assertEquals(ownerId, result.targetOwnerPartyProfileId)
+        assertEquals(null, result.targetMandateId)
         assertNotNull(result.targetScopeHash)
         val limitRuleId = assertNotNull(result.limitRuleId)
         assertEquals(now, result.createdAt)
@@ -114,6 +122,70 @@ class DefaultLimitChangeServiceTest {
         assertEquals(1, revisions.size)
         assertEquals(rule.id, revisions.single().limitRuleId)
         assertEquals(rule.version.value, revisions.single().revisionNumber.value)
+    }
+
+    @Test
+    fun `mandate-specific create requires an applicable mandate owned by the target`() {
+        val repositories = repositoriesWithConfiguration()
+        val service = limitChangeService(repositories)
+        val mandateCommand = command().copy(
+            requestedRule = draft().copy(
+                mandateScope = LimitMandateScope.MANDATE,
+                mandateId = mandateId.value,
+            ),
+            targetMandateId = mandateId.value,
+        )
+
+        assertFailsWith<NotFoundException> {
+            service.requestLimitRuleChange(mandateCommand)
+        }
+
+        val wrongOwnerMandate = mandate(
+            owner = PartyProfileId.of(requesterId),
+            assignee = PartyProfileId.of(ownerId),
+        )
+        repositories.mandates.insert(tenantId, wrongOwnerMandate)
+        assertFailsWith<ConflictException> {
+            service.requestLimitRuleChange(mandateCommand)
+        }
+
+        repositories.mandates.update(
+            tenantId,
+            mandate(
+                effectiveWindow = EffectiveWindow(now.minusSeconds(120), now.minusSeconds(60)),
+            ),
+        )
+        assertFailsWith<ConflictException> {
+            service.requestLimitRuleChange(mandateCommand)
+        }
+
+        repositories.mandates.update(tenantId, mandate())
+        val result = service.requestLimitRuleChange(mandateCommand)
+
+        assertEquals(LimitRuleChangeStatus.APPLIED, result.status)
+        assertEquals(mandateId.value, result.targetMandateId)
+        val rule = assertNotNull(
+            repositories.limitRules.findById(tenantId, LimitRuleId.of(requireNotNull(result.limitRuleId)))
+        )
+        assertEquals(MandateScope.MandateSpecific(mandateId), rule.mandateScope)
+    }
+
+    @Test
+    fun `direct owner create does not require an explicit mandate`() {
+        val repositories = repositoriesWithConfiguration()
+        val service = limitChangeService(repositories)
+        val result = service.requestLimitRuleChange(
+            command().copy(
+                requestedBy = LimitChangeActorCommand(
+                    actorType = LimitChangeActorType.PARTY_PROFILE,
+                    partyProfileId = ownerId,
+                )
+            )
+        )
+
+        assertEquals(LimitRuleChangeStatus.APPLIED, result.status)
+        assertEquals(null, result.targetMandateId)
+        assertEquals(emptyList(), repositories.mandates.findActiveForOwner(tenantId, PartyProfileId.of(ownerId), now))
     }
 
     @Test
@@ -438,6 +510,31 @@ class DefaultLimitChangeServiceTest {
     }
 
     @Test
+    fun `approveLimitRuleChange validates an adjusted mandate scope`() {
+        val repositories = repositoriesWithConfiguration()
+        val request = insertRequestedCreate(repositories)
+        val service = limitChangeService(repositories)
+
+        assertFailsWith<NotFoundException> {
+            service.approveLimitRuleChange(
+                ApproveLimitRuleChangeCommand(
+                    tenantId = tenantId.value,
+                    changeRequestId = request.id.value,
+                    approvedBy = LimitChangeActorCommand(LimitChangeActorType.SYSTEM),
+                    approvedRule = draft().copy(
+                        mandateScope = LimitMandateScope.MANDATE,
+                        mandateId = mandateId.value,
+                    ),
+                )
+            )
+        }
+
+        val unchanged = assertNotNull(repositories.limitChangeRequests.findById(tenantId, request.id))
+        assertEquals(DomainLimitRuleChangeStatus.REQUESTED, unchanged.status)
+        assertEquals(null, repositories.limitRules.findById(tenantId, pendingRuleId))
+    }
+
+    @Test
     fun `approveLimitRuleChange schedules a future request without applying it`() {
         val repositories = repositoriesWithConfiguration()
         val request = insertRequestedCreate(
@@ -725,6 +822,41 @@ class DefaultLimitChangeServiceTest {
     }
 
     @Test
+    fun `applyDueLimitChanges revalidates a mandate before creating the rule`() {
+        val repositories = repositoriesWithConfiguration()
+        repositories.mandates.insert(tenantId, mandate())
+        val service = limitChangeService(repositories)
+        val dueAt = now.plusSeconds(3600)
+        val scheduled = service.requestLimitRuleChange(
+            command().copy(
+                requestedRule = draft().copy(
+                    mandateScope = LimitMandateScope.MANDATE,
+                    mandateId = mandateId.value,
+                ),
+                targetMandateId = mandateId.value,
+                effectiveAt = dueAt,
+            )
+        )
+        repositories.mandates.update(tenantId, mandate(isActive = false))
+
+        val result = service.applyDueLimitChanges(
+            ApplyDueLimitChangesCommand(tenantId.value, dueAt)
+        )
+
+        assertEquals(0, result.appliedCount)
+        assertEquals(1, result.failedCount)
+        assertEquals(listOf(scheduled.id), result.failedChangeRequestIds)
+        val failedRequest = assertNotNull(
+            repositories.limitChangeRequests.findById(tenantId, LimitChangeRequestId.of(scheduled.id))
+        )
+        assertEquals(DomainLimitRuleChangeStatus.FAILED, failedRequest.status)
+        assertEquals(
+            emptyList(),
+            repositories.limitRules.findActiveForOwner(tenantId, PartyProfileId.of(ownerId), dueAt),
+        )
+    }
+
+    @Test
     fun `applyDueLimitChanges uses the current time and validates the batch limit`() {
         val service = limitChangeService(repositoriesWithConfiguration())
 
@@ -801,6 +933,7 @@ class DefaultLimitChangeServiceTest {
     ): DefaultLimitChangeService {
         val idGenerator = SequentialIdGenerator(startAt = 100L)
         val changeEventFactory = LimitChangeEventFactory(idGenerator)
+        val mandateValidator = LimitRuleMandateValidator(repositories.mandates)
         val applicationWorkflow = LimitChangeApplicationWorkflow(
             changeRequestRepository = repositories.limitChangeRequests,
             changeEventRepository = repositories.limitRuleChangeEvents,
@@ -818,6 +951,7 @@ class DefaultLimitChangeServiceTest {
                     limitRuleRevisionRepository = repositories.limitRuleRevisions,
                 ),
                 candidateFactory = LimitRuleCandidateFactory(),
+                mandateValidator = mandateValidator,
                 changeRequestFactory = LimitChangeRequestFactory(),
                 changeEventFactory = changeEventFactory,
                 applicationWorkflow = applicationWorkflow,
@@ -830,6 +964,7 @@ class DefaultLimitChangeServiceTest {
             ),
             approveWorkflow = ApproveLimitRuleChangeWorkflow(
                 candidateFactory = LimitRuleCandidateFactory(),
+                mandateValidator = mandateValidator,
                 applicationWorkflow = applicationWorkflow,
                 changeEventFactory = changeEventFactory,
                 changeRequestRepository = repositories.limitChangeRequests,
@@ -855,6 +990,7 @@ class DefaultLimitChangeServiceTest {
             ),
             applyDueWorkflow = ApplyDueLimitChangesWorkflow(
                 applicationWorkflow = applicationWorkflow,
+                mandateValidator = mandateValidator,
                 changeEventFactory = changeEventFactory,
                 changeRequestRepository = repositories.limitChangeRequests,
                 changeEventRepository = repositories.limitRuleChangeEvents,
@@ -864,6 +1000,29 @@ class DefaultLimitChangeServiceTest {
             ),
         )
     }
+
+    private fun mandate(
+        owner: PartyProfileId = PartyProfileId.of(ownerId),
+        assignee: PartyProfileId = PartyProfileId.of(requesterId),
+        isActive: Boolean = true,
+        effectiveWindow: EffectiveWindow = EffectiveWindow(now.minusSeconds(60), null),
+    ): Mandate =
+        Mandate(
+            id = mandateId,
+            tenantId = tenantId,
+            ownerPartyProfileId = owner,
+            assigneePartyProfileId = assignee,
+            authorityDelegationId = null,
+            name = MandateName.of("Payment delegate"),
+            description = null,
+            fundingScope = FundingSourceScope.AllOwnerSources,
+            isActive = isActive,
+            version = Version.INITIAL,
+            effectiveWindow = effectiveWindow,
+            metadata = Metadata.EMPTY,
+            createdAt = now,
+            updatedAt = now,
+        )
 
     private fun insertRule(
         repositories: InMemoryLimitguardRepositories,

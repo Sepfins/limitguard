@@ -27,6 +27,7 @@ import java.time.Instant
 
 internal class ApproveLimitRuleChangeWorkflow(
     private val candidateFactory: LimitRuleCandidateFactory,
+    private val mandateValidator: LimitRuleMandateValidator,
     private val applicationWorkflow: LimitChangeApplicationWorkflow,
     private val changeEventFactory: LimitChangeEventFactory,
     private val changeRequestRepository: LimitChangeRequestRepository,
@@ -74,6 +75,7 @@ internal class ApproveLimitRuleChangeWorkflow(
                 )
             } ?: requestedCandidate
             validateCandidate(request, approvedCandidate, now)
+            mandateValidator.validate(approvedCandidate, request.effectiveAt ?: now)
 
             val targetScope = approvedCandidate.toTargetScope()
             val targetScopeSnapshot = LimitRuleSnapshotter.targetScopeSnapshot(targetScope)

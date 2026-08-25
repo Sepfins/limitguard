@@ -32,6 +32,7 @@ internal class RequestLimitRuleChangeWorkflow(
     private val commandValidator: ChangeCommandValidator,
     private val referenceResolver: ChangeReferenceResolver,
     private val candidateFactory: LimitRuleCandidateFactory,
+    private val mandateValidator: LimitRuleMandateValidator,
     private val changeRequestFactory: LimitChangeRequestFactory,
     private val changeEventFactory: LimitChangeEventFactory,
     private val applicationWorkflow: LimitChangeApplicationWorkflow,
@@ -67,6 +68,7 @@ internal class RequestLimitRuleChangeWorkflow(
                 },
                 now = now,
             )
+            mandateValidator.validate(candidate, command.effectiveAt ?: now)
             val request = changeRequestFactory.create(
                 id = LimitChangeRequestId.of(idGenerator.newId()),
                 command = command,

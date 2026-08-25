@@ -17,6 +17,7 @@ import java.time.Instant
 
 internal class ApplyDueLimitChangesWorkflow(
     private val applicationWorkflow: LimitChangeApplicationWorkflow,
+    private val mandateValidator: LimitRuleMandateValidator,
     private val changeEventFactory: LimitChangeEventFactory,
     private val changeRequestRepository: LimitChangeRequestRepository,
     private val changeEventRepository: LimitRuleChangeEventRepository,
@@ -69,6 +70,7 @@ internal class ApplyDueLimitChangesWorkflow(
                 createdAt = currentRule?.createdAt ?: request.createdAt,
                 updatedAt = dueAt,
             )
+            mandateValidator.validate(candidate, dueAt)
 
             applicationWorkflow.applyInCurrentTransaction(
                 request = request,

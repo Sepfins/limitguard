@@ -15,6 +15,7 @@ import io.github.sepfins.limitguard.application.change.LimitChangeApplicationWor
 import io.github.sepfins.limitguard.application.change.LimitChangeEventFactory
 import io.github.sepfins.limitguard.application.change.LimitChangeRequestFactory
 import io.github.sepfins.limitguard.application.change.LimitRuleCandidateFactory
+import io.github.sepfins.limitguard.application.change.LimitRuleMandateValidator
 import io.github.sepfins.limitguard.application.change.RequestLimitRuleChangeWorkflow
 import io.github.sepfins.limitguard.application.change.RejectLimitRuleChangeWorkflow
 import io.github.sepfins.limitguard.application.evaluation.AuthorizationEvaluator
@@ -82,6 +83,7 @@ class DefaultLimitguard(
     transactionRunner: TransactionRunner,
 ) : Limitguard {
     private val limitChangeEventFactory = LimitChangeEventFactory(idGenerator)
+    private val limitRuleMandateValidator = LimitRuleMandateValidator(mandateRepository)
     private val limitChangeApplicationWorkflow = LimitChangeApplicationWorkflow(
         changeRequestRepository = limitChangeRequestRepository,
         changeEventRepository = limitChangeEventRepository,
@@ -119,6 +121,7 @@ class DefaultLimitguard(
                 limitRuleRevisionRepository = limitRuleRevisionRepository,
             ),
             candidateFactory = LimitRuleCandidateFactory(),
+            mandateValidator = limitRuleMandateValidator,
             changeRequestFactory = LimitChangeRequestFactory(),
             changeEventFactory = limitChangeEventFactory,
             applicationWorkflow = limitChangeApplicationWorkflow,
@@ -131,6 +134,7 @@ class DefaultLimitguard(
         ),
         approveWorkflow = ApproveLimitRuleChangeWorkflow(
             candidateFactory = LimitRuleCandidateFactory(),
+            mandateValidator = limitRuleMandateValidator,
             applicationWorkflow = limitChangeApplicationWorkflow,
             changeEventFactory = limitChangeEventFactory,
             changeRequestRepository = limitChangeRequestRepository,
@@ -156,6 +160,7 @@ class DefaultLimitguard(
         ),
         applyDueWorkflow = ApplyDueLimitChangesWorkflow(
             applicationWorkflow = limitChangeApplicationWorkflow,
+            mandateValidator = limitRuleMandateValidator,
             changeEventFactory = limitChangeEventFactory,
             changeRequestRepository = limitChangeRequestRepository,
             changeEventRepository = limitChangeEventRepository,
