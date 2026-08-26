@@ -19,6 +19,13 @@ import io.github.sepfins.limitguard.api.errors.IdempotencyConflictException
 import io.github.sepfins.limitguard.api.errors.NotFoundException
 import io.github.sepfins.limitguard.api.errors.ValidationException
 import io.github.sepfins.limitguard.domain.change.ChangeActor
+import io.github.sepfins.limitguard.domain.change.LimitChangePolicy
+import io.github.sepfins.limitguard.domain.change.LimitChangePolicyCode
+import io.github.sepfins.limitguard.domain.change.LimitChangePolicyDecision
+import io.github.sepfins.limitguard.domain.change.LimitChangePolicyEngine
+import io.github.sepfins.limitguard.domain.change.LimitChangePolicyEvaluationOutcome
+import io.github.sepfins.limitguard.domain.change.LimitChangePolicyName
+import io.github.sepfins.limitguard.domain.change.LimitChangePolicyPhase
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeEventType
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeRequest
 import io.github.sepfins.limitguard.domain.change.LimitRuleRevisionEventType
@@ -27,6 +34,7 @@ import io.github.sepfins.limitguard.domain.common.BankWorkerId
 import io.github.sepfins.limitguard.domain.common.CurrencyCode
 import io.github.sepfins.limitguard.domain.common.EffectiveWindow
 import io.github.sepfins.limitguard.domain.common.LimitConfigurationId
+import io.github.sepfins.limitguard.domain.common.LimitChangePolicyId
 import io.github.sepfins.limitguard.domain.common.LimitChangeRequestId
 import io.github.sepfins.limitguard.domain.common.LimitRuleId
 import io.github.sepfins.limitguard.domain.common.MandateId
@@ -50,6 +58,9 @@ import io.github.sepfins.limitguard.domain.funding.FundingSourceScope
 import io.github.sepfins.limitguard.domain.mandate.Mandate
 import io.github.sepfins.limitguard.domain.mandate.MandateName
 import io.github.sepfins.limitguard.domain.mandate.MandateScope
+import io.github.sepfins.limitguard.domain.policy.PolicyEvaluationContext
+import io.github.sepfins.limitguard.domain.policy.PolicyEvaluationResult
+import io.github.sepfins.limitguard.port.policy.PolicyEngine
 import io.github.sepfins.limitguard.support.DirectTransactionRunner
 import io.github.sepfins.limitguard.support.FixedClockProvider
 import io.github.sepfins.limitguard.support.SequentialIdGenerator
@@ -75,6 +86,10 @@ class DefaultLimitChangeServiceTest {
     private val pendingRequestId = LimitChangeRequestId.of(UUID.fromString("00000000-0000-0000-0000-000000000008"))
     private val approverId = UUID.fromString("00000000-0000-0000-0000-000000000009")
     private val mandateId = MandateId.of(UUID.fromString("00000000-0000-0000-0000-000000000010"))
+    private val authorizationPolicyId =
+        LimitChangePolicyId.of(UUID.fromString("00000000-0000-0000-0000-000000000011"))
+    private val reviewPolicyId =
+        LimitChangePolicyId.of(UUID.fromString("00000000-0000-0000-0000-000000000012"))
 
     @Test
     fun `requestLimitRuleChange applies create request with complete audit history`() {
@@ -106,6 +121,7 @@ class DefaultLimitChangeServiceTest {
         assertEquals(
             listOf(
                 LimitRuleChangeEventType.REQUESTED,
+                LimitRuleChangeEventType.POLICY_EVALUATED,
                 LimitRuleChangeEventType.APPROVED,
                 LimitRuleChangeEventType.APPLIED,
             ),
@@ -122,6 +138,194 @@ class DefaultLimitChangeServiceTest {
         assertEquals(1, revisions.size)
         assertEquals(rule.id, revisions.single().limitRuleId)
         assertEquals(rule.version.value, revisions.single().revisionNumber.value)
+
+        val evaluation = repositories.limitChangePolicyEvaluations
+            .findByChangeRequest(tenantId, insertedRequest.id)
+            .single()
+        assertEquals(authorizationPolicyId, evaluation.policyId)
+        assertEquals(LimitChangePolicyDecision.ALLOW, evaluation.decision)
+        assertEquals(LimitChangePolicyEvaluationOutcome.APPLIED, evaluation.outcome)
+        assertEquals("AUTHORIZE_LIMIT_CHANGE", evaluation.policySnapshot.value["code"])
+        assertEquals(
+            result.id.toString(),
+            (evaluation.inputContext.value["changeRequest"] as Map<*, *>)["id"],
+        )
+        assertEquals(authorizationPolicyId, events[1].policyId)
+        assertEquals(authorizationPolicyId, events[2].policyId)
+    }
+
+    @Test
+    fun `require approval policy leaves public request open for manual approval`() {
+        val repositories = repositoriesWithConfiguration(LimitChangePolicyDecision.REQUIRE_APPROVAL)
+        val service = limitChangeService(repositories)
+
+        val requested = service.requestLimitRuleChange(command(idempotencyKey = "manual-approval"))
+
+        assertEquals(LimitRuleChangeStatus.REQUESTED, requested.status)
+        assertEquals(null, requested.limitRuleId)
+        assertEquals(
+            listOf(
+                LimitRuleChangeEventType.REQUESTED,
+                LimitRuleChangeEventType.POLICY_EVALUATED,
+            ),
+            repositories.limitRuleChangeEvents
+                .findByChangeRequest(tenantId, LimitChangeRequestId.of(requested.id))
+                .map { it.eventType },
+        )
+
+        val approved = service.approveLimitRuleChange(
+            ApproveLimitRuleChangeCommand(
+                tenantId = tenantId.value,
+                changeRequestId = requested.id,
+                approvedBy = LimitChangeActorCommand(
+                    actorType = LimitChangeActorType.BANK_WORKER,
+                    bankWorkerId = approverId,
+                ),
+                decisionReason = "Approved after review",
+            )
+        )
+
+        assertEquals(LimitRuleChangeStatus.APPLIED, approved.status)
+        assertNotNull(approved.limitRuleId)
+        assertEquals(
+            listOf(
+                LimitRuleChangeEventType.REQUESTED,
+                LimitRuleChangeEventType.POLICY_EVALUATED,
+                LimitRuleChangeEventType.APPROVED,
+                LimitRuleChangeEventType.APPLIED,
+            ),
+            repositories.limitRuleChangeEvents
+                .findByChangeRequest(tenantId, LimitChangeRequestId.of(requested.id))
+                .map { it.eventType },
+        )
+    }
+
+    @Test
+    fun `require approval policy leaves public request open for manual rejection`() {
+        val repositories = repositoriesWithConfiguration(LimitChangePolicyDecision.REQUIRE_APPROVAL)
+        val service = limitChangeService(repositories)
+        val requested = service.requestLimitRuleChange(command(idempotencyKey = "manual-rejection"))
+
+        val rejected = service.rejectLimitRuleChange(
+            RejectLimitRuleChangeCommand(
+                tenantId = tenantId.value,
+                changeRequestId = requested.id,
+                rejectedBy = LimitChangeActorCommand(LimitChangeActorType.SYSTEM),
+                decisionReason = "Rejected after review",
+            )
+        )
+
+        assertEquals(LimitRuleChangeStatus.REJECTED, rejected.status)
+        assertEquals(null, rejected.limitRuleId)
+        assertEquals(
+            listOf(
+                LimitRuleChangeEventType.REQUESTED,
+                LimitRuleChangeEventType.POLICY_EVALUATED,
+                LimitRuleChangeEventType.REJECTED,
+            ),
+            repositories.limitRuleChangeEvents
+                .findByChangeRequest(tenantId, LimitChangeRequestId.of(requested.id))
+                .map { it.eventType },
+        )
+    }
+
+    @Test
+    fun `first matching policy by priority controls authorization`() {
+        val repositories = repositoriesWithConfiguration(LimitChangePolicyDecision.ALLOW)
+        repositories.limitChangePolicies.insert(
+            tenantId,
+            authorizationPolicy(
+                decision = LimitChangePolicyDecision.REQUIRE_APPROVAL,
+                id = reviewPolicyId,
+                code = "REVIEW_LIMIT_CHANGE",
+                priority = 10,
+            ),
+        )
+        val service = limitChangeService(repositories)
+
+        val result = service.requestLimitRuleChange(command())
+
+        assertEquals(LimitRuleChangeStatus.REQUESTED, result.status)
+        val evaluations = repositories.limitChangePolicyEvaluations
+            .findByChangeRequest(tenantId, LimitChangeRequestId.of(result.id))
+        assertEquals(listOf(reviewPolicyId), evaluations.map { it.policyId })
+    }
+
+    @Test
+    fun `deny policy rejects the public request without creating a rule`() {
+        val repositories = repositoriesWithConfiguration(LimitChangePolicyDecision.DENY)
+        val service = limitChangeService(repositories)
+
+        val result = service.requestLimitRuleChange(command(idempotencyKey = "policy-denial"))
+
+        assertEquals(LimitRuleChangeStatus.REJECTED, result.status)
+        assertEquals("Change denied by test policy", result.decisionReason)
+        assertEquals(null, result.limitRuleId)
+        assertEquals(emptyList(), repositories.limitRuleRevisions.findByChangeRequest(
+            tenantId,
+            LimitChangeRequestId.of(result.id),
+        ))
+        val evaluation = repositories.limitChangePolicyEvaluations
+            .findByChangeRequest(tenantId, LimitChangeRequestId.of(result.id))
+            .single()
+        assertEquals(LimitChangePolicyDecision.DENY, evaluation.decision)
+        assertEquals(LimitChangePolicyEvaluationOutcome.DENIED, evaluation.outcome)
+        assertEquals(
+            listOf(
+                LimitRuleChangeEventType.REQUESTED,
+                LimitRuleChangeEventType.POLICY_EVALUATED,
+                LimitRuleChangeEventType.REJECTED,
+            ),
+            repositories.limitRuleChangeEvents
+                .findByChangeRequest(tenantId, LimitChangeRequestId.of(result.id))
+                .map { it.eventType },
+        )
+    }
+
+    @Test
+    fun `request requires manual approval when no authorization policy applies`() {
+        val repositories = repositoriesWithConfiguration(authorizationDecision = null)
+        val service = limitChangeService(repositories)
+
+        val result = service.requestLimitRuleChange(command())
+
+        assertEquals(LimitRuleChangeStatus.REQUESTED, result.status)
+        assertEquals(
+            listOf(LimitRuleChangeEventType.REQUESTED),
+            repositories.limitRuleChangeEvents
+                .findByChangeRequest(tenantId, LimitChangeRequestId.of(result.id))
+                .map { it.eventType },
+        )
+        assertEquals(
+            emptyList(),
+            repositories.limitChangePolicyEvaluations
+                .findByChangeRequest(tenantId, LimitChangeRequestId.of(result.id)),
+        )
+    }
+
+    @Test
+    fun `missing policy engine fails closed with an auditable request`() {
+        val repositories = repositoriesWithConfiguration()
+        val service = limitChangeService(repositories, policyEngines = emptyList())
+
+        val result = service.requestLimitRuleChange(command())
+
+        assertEquals(LimitRuleChangeStatus.FAILED, result.status)
+        assertEquals(null, result.limitRuleId)
+        val evaluation = repositories.limitChangePolicyEvaluations
+            .findByChangeRequest(tenantId, LimitChangeRequestId.of(result.id))
+            .single()
+        assertEquals(LimitChangePolicyEvaluationOutcome.ERROR, evaluation.outcome)
+        assertEquals(
+            listOf(
+                LimitRuleChangeEventType.REQUESTED,
+                LimitRuleChangeEventType.POLICY_EVALUATED,
+                LimitRuleChangeEventType.FAILED,
+            ),
+            repositories.limitRuleChangeEvents
+                .findByChangeRequest(tenantId, LimitChangeRequestId.of(result.id))
+                .map { it.eventType },
+        )
     }
 
     @Test
@@ -199,12 +403,16 @@ class DefaultLimitChangeServiceTest {
         val second = service.requestLimitRuleChange(command(idempotencyKey = "request-1"))
 
         assertEquals(first.id, second.id)
-        assertEquals(3, repositories.limitRuleChangeEvents.findByChangeRequest(
+        assertEquals(4, repositories.limitRuleChangeEvents.findByChangeRequest(
             tenantId,
             LimitChangeRequestId.of(first.id),
         ).size)
         assertEquals(1, repositories.limitRules.findActiveForOwner(tenantId, PartyProfileId.of(ownerId), now).size)
         assertEquals(1, repositories.limitRuleRevisions.findByChangeRequest(
+            tenantId,
+            LimitChangeRequestId.of(first.id),
+        ).size)
+        assertEquals(1, repositories.limitChangePolicyEvaluations.findByChangeRequest(
             tenantId,
             LimitChangeRequestId.of(first.id),
         ).size)
@@ -406,6 +614,7 @@ class DefaultLimitChangeServiceTest {
         assertEquals(
             listOf(
                 LimitRuleChangeEventType.REQUESTED,
+                LimitRuleChangeEventType.POLICY_EVALUATED,
                 LimitRuleChangeEventType.APPROVED,
                 LimitRuleChangeEventType.SCHEDULED,
             ),
@@ -764,6 +973,7 @@ class DefaultLimitChangeServiceTest {
         assertEquals(
             listOf(
                 LimitRuleChangeEventType.REQUESTED,
+                LimitRuleChangeEventType.POLICY_EVALUATED,
                 LimitRuleChangeEventType.APPROVED,
                 LimitRuleChangeEventType.SCHEDULED,
                 LimitRuleChangeEventType.APPLIED,
@@ -870,7 +1080,9 @@ class DefaultLimitChangeServiceTest {
         }
     }
 
-    private fun repositoriesWithConfiguration(): InMemoryLimitguardRepositories {
+    private fun repositoriesWithConfiguration(
+        authorizationDecision: LimitChangePolicyDecision? = LimitChangePolicyDecision.ALLOW,
+    ): InMemoryLimitguardRepositories {
         val repositories = InMemoryLimitguardRepositories()
         repositories.limitConfigurations.insert(
             tenantId,
@@ -894,8 +1106,40 @@ class DefaultLimitChangeServiceTest {
                 createdAt = now,
             )
         )
+        if (authorizationDecision != null) {
+            repositories.limitChangePolicies.insert(
+                tenantId,
+                authorizationPolicy(authorizationDecision),
+            )
+        }
         return repositories
     }
+
+    private fun authorizationPolicy(
+        decision: LimitChangePolicyDecision,
+        id: LimitChangePolicyId = authorizationPolicyId,
+        code: String = "AUTHORIZE_LIMIT_CHANGE",
+        priority: Int = 100,
+    ): LimitChangePolicy =
+        LimitChangePolicy(
+            id = id,
+            tenantId = tenantId,
+            code = LimitChangePolicyCode.of(code),
+            name = LimitChangePolicyName.of(code.replace('_', ' ').lowercase()),
+            phase = LimitChangePolicyPhase.AUTHORIZATION,
+            effectiveWindow = EffectiveWindow(now.minusSeconds(60), null),
+            engine = LimitChangePolicyEngine.JSON_LOGIC,
+            decision = decision,
+            priority = LimitPriority.of(priority),
+            denialCode = if (decision == LimitChangePolicyDecision.DENY) "LIMIT_CHANGE_DENIED" else null,
+            denialMessage = if (decision == LimitChangePolicyDecision.DENY) {
+                "Change denied by test policy"
+            } else {
+                null
+            },
+            createdAt = now,
+            updatedAt = now,
+        )
 
     private fun insertRequestedCreate(
         repositories: InMemoryLimitguardRepositories,
@@ -930,6 +1174,7 @@ class DefaultLimitChangeServiceTest {
     private fun limitChangeService(
         repositories: InMemoryLimitguardRepositories,
         clock: FixedClockProvider = FixedClockProvider(now),
+        policyEngines: Collection<PolicyEngine> = listOf(TestPolicyEngine),
     ): DefaultLimitChangeService {
         val idGenerator = SequentialIdGenerator(startAt = 100L)
         val changeEventFactory = LimitChangeEventFactory(idGenerator)
@@ -939,6 +1184,14 @@ class DefaultLimitChangeServiceTest {
             changeEventRepository = repositories.limitRuleChangeEvents,
             limitRuleRepository = repositories.limitRules,
             limitRuleRevisionRepository = repositories.limitRuleRevisions,
+            changeEventFactory = changeEventFactory,
+            idGenerator = idGenerator,
+        )
+        val policyRunner = LimitChangePolicyRunner(
+            policyRepository = repositories.limitChangePolicies,
+            evaluationRepository = repositories.limitChangePolicyEvaluations,
+            changeEventRepository = repositories.limitRuleChangeEvents,
+            engineRegistry = PolicyEngineRegistry(policyEngines),
             changeEventFactory = changeEventFactory,
             idGenerator = idGenerator,
         )
@@ -954,6 +1207,7 @@ class DefaultLimitChangeServiceTest {
                 mandateValidator = mandateValidator,
                 changeRequestFactory = LimitChangeRequestFactory(),
                 changeEventFactory = changeEventFactory,
+                policyRunner = policyRunner,
                 applicationWorkflow = applicationWorkflow,
                 changeRequestRepository = repositories.limitChangeRequests,
                 changeEventRepository = repositories.limitRuleChangeEvents,
@@ -1108,4 +1362,30 @@ class DefaultLimitChangeServiceTest {
             requestChannelId = channelId,
             idempotencyKey = idempotencyKey,
         )
+
+    private object TestPolicyEngine : PolicyEngine {
+        override val engine: LimitChangePolicyEngine = LimitChangePolicyEngine.JSON_LOGIC
+
+        override fun evaluate(
+            policy: LimitChangePolicy,
+            context: PolicyEvaluationContext,
+        ): PolicyEvaluationResult {
+            require(policy.phase == context.phase)
+            val matched = policy.conditionExpression.value["matched"] != false
+            val outcome = when {
+                !matched -> LimitChangePolicyEvaluationOutcome.NOT_MATCHED
+                policy.decision == LimitChangePolicyDecision.DENY ->
+                    LimitChangePolicyEvaluationOutcome.DENIED
+                policy.decision == LimitChangePolicyDecision.NO_OP ->
+                    LimitChangePolicyEvaluationOutcome.MATCHED
+                else -> LimitChangePolicyEvaluationOutcome.APPLIED
+            }
+            return PolicyEvaluationResult(
+                matched = matched,
+                outcome = outcome,
+                decision = policy.decision,
+            )
+        }
+    }
+
 }

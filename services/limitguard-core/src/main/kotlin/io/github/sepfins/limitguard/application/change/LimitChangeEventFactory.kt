@@ -1,9 +1,11 @@
 package io.github.sepfins.limitguard.application.change
 
 import io.github.sepfins.limitguard.domain.change.ChangeActor
+import io.github.sepfins.limitguard.domain.change.LimitChangePolicyEvaluation
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeEvent
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeEventType
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeRequest
+import io.github.sepfins.limitguard.domain.common.LimitChangePolicyId
 import io.github.sepfins.limitguard.domain.common.LimitRuleChangeEventId
 import io.github.sepfins.limitguard.domain.common.Metadata
 import io.github.sepfins.limitguard.port.ids.IdGenerator
@@ -43,6 +45,7 @@ internal class LimitChangeEventFactory(
         now: Instant,
         actor: ChangeActor = ChangeActor.System,
         eventPayload: Metadata = Metadata.EMPTY,
+        policyId: LimitChangePolicyId? = null,
     ): LimitRuleChangeEvent =
         LimitRuleChangeEvent(
             id = LimitRuleChangeEventId.of(idGenerator.newId()),
@@ -50,6 +53,7 @@ internal class LimitChangeEventFactory(
             changeRequestId = after.id,
             eventType = LimitRuleChangeEventType.APPROVED,
             actor = actor,
+            policyId = policyId,
             beforeStatus = before.status,
             afterStatus = after.status,
             beforeRule = before.requestedRule,
@@ -65,6 +69,7 @@ internal class LimitChangeEventFactory(
         now: Instant,
         actor: ChangeActor,
         eventPayload: Metadata = Metadata.EMPTY,
+        policyId: LimitChangePolicyId? = null,
     ): LimitRuleChangeEvent =
         LimitRuleChangeEvent(
             id = LimitRuleChangeEventId.of(idGenerator.newId()),
@@ -72,12 +77,43 @@ internal class LimitChangeEventFactory(
             changeRequestId = after.id,
             eventType = LimitRuleChangeEventType.REJECTED,
             actor = actor,
+            policyId = policyId,
             beforeStatus = before.status,
             afterStatus = after.status,
             beforeRule = before.requestedRule,
             afterRule = after.requestedRule,
             eventPayload = eventPayload,
             message = "Limit rule change rejected",
+            createdAt = now,
+        )
+
+    fun policyEvaluated(
+        request: LimitRuleChangeRequest,
+        evaluation: LimitChangePolicyEvaluation,
+        now: Instant,
+    ): LimitRuleChangeEvent =
+        LimitRuleChangeEvent(
+            id = LimitRuleChangeEventId.of(idGenerator.newId()),
+            tenantId = request.tenantId,
+            changeRequestId = request.id,
+            eventType = LimitRuleChangeEventType.POLICY_EVALUATED,
+            actor = ChangeActor.System,
+            policyId = evaluation.policyId,
+            beforeStatus = request.status,
+            afterStatus = request.status,
+            beforeRule = request.requestedRule,
+            afterRule = request.requestedRule,
+            eventPayload = Metadata(
+                mapOf(
+                    "evaluationId" to evaluation.id.value.toString(),
+                    "phase" to evaluation.phase.name,
+                    "outcome" to evaluation.outcome.name,
+                    "decision" to evaluation.decision.name,
+                    "matched" to evaluation.matched,
+                    "actionResult" to evaluation.actionResult.value,
+                )
+            ),
+            message = evaluation.message ?: "Limit change policy evaluated",
             createdAt = now,
         )
 
@@ -108,6 +144,8 @@ internal class LimitChangeEventFactory(
         after: LimitRuleChangeRequest,
         now: Instant,
         failureReason: String,
+        policyId: LimitChangePolicyId? = null,
+        eventPayload: Metadata = Metadata.EMPTY,
     ): LimitRuleChangeEvent =
         LimitRuleChangeEvent(
             id = LimitRuleChangeEventId.of(idGenerator.newId()),
@@ -115,11 +153,12 @@ internal class LimitChangeEventFactory(
             changeRequestId = after.id,
             eventType = LimitRuleChangeEventType.FAILED,
             actor = ChangeActor.System,
+            policyId = policyId,
             beforeStatus = before.status,
             afterStatus = after.status,
             beforeRule = before.approvedRule ?: before.requestedRule,
             afterRule = after.approvedRule ?: after.requestedRule,
-            eventPayload = Metadata(mapOf("reason" to failureReason)),
+            eventPayload = Metadata(mapOf("reason" to failureReason) + eventPayload.value),
             message = "Limit rule change application failed",
             createdAt = now,
         )

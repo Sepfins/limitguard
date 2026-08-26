@@ -2,6 +2,10 @@ package io.github.sepfins.limitguard.support.persistence
 
 import io.github.sepfins.limitguard.api.errors.ConflictException
 import io.github.sepfins.limitguard.api.errors.NotFoundException
+import io.github.sepfins.limitguard.domain.change.LimitChangePolicy
+import io.github.sepfins.limitguard.domain.change.LimitChangePolicyCode
+import io.github.sepfins.limitguard.domain.change.LimitChangePolicyEvaluation
+import io.github.sepfins.limitguard.domain.change.LimitChangePolicyPhase
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeEvent
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeRequest
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeStatus
@@ -20,6 +24,8 @@ import io.github.sepfins.limitguard.domain.common.FundingSourceId
 import io.github.sepfins.limitguard.domain.common.FundingSourceOwnerId
 import io.github.sepfins.limitguard.domain.common.FundingSourceProductId
 import io.github.sepfins.limitguard.domain.common.IdempotencyKey
+import io.github.sepfins.limitguard.domain.common.LimitChangePolicyEvaluationId
+import io.github.sepfins.limitguard.domain.common.LimitChangePolicyId
 import io.github.sepfins.limitguard.domain.common.LimitChangeRequestId
 import io.github.sepfins.limitguard.domain.common.LimitConfigurationId
 import io.github.sepfins.limitguard.domain.common.LimitRuleChangeEventId
@@ -79,6 +85,8 @@ import io.github.sepfins.limitguard.port.persistence.FundingSourceProductReposit
 import io.github.sepfins.limitguard.port.persistence.FundingSourceRepository
 import io.github.sepfins.limitguard.port.persistence.IndividualRepository
 import io.github.sepfins.limitguard.port.persistence.LegalEntityRepository
+import io.github.sepfins.limitguard.port.persistence.LimitChangePolicyEvaluationRepository
+import io.github.sepfins.limitguard.port.persistence.LimitChangePolicyRepository
 import io.github.sepfins.limitguard.port.persistence.LimitChangeRequestRepository
 import io.github.sepfins.limitguard.port.persistence.LimitConfigurationRepository
 import io.github.sepfins.limitguard.port.persistence.LimitRuleChangeEventRepository
@@ -114,6 +122,9 @@ class InMemoryLimitguardRepositories(
         InMemoryFundingSourceGroupMemberRepository(),
     val mandates: InMemoryMandateRepository = InMemoryMandateRepository(),
     val limitConfigurations: InMemoryLimitConfigurationRepository = InMemoryLimitConfigurationRepository(),
+    val limitChangePolicies: InMemoryLimitChangePolicyRepository = InMemoryLimitChangePolicyRepository(),
+    val limitChangePolicyEvaluations: InMemoryLimitChangePolicyEvaluationRepository =
+        InMemoryLimitChangePolicyEvaluationRepository(),
     val limitRules: InMemoryLimitRuleRepository = InMemoryLimitRuleRepository(),
     val limitChangeRequests: InMemoryLimitChangeRequestRepository = InMemoryLimitChangeRequestRepository(),
     val limitRuleChangeEvents: InMemoryLimitRuleChangeEventRepository = InMemoryLimitRuleChangeEventRepository(),
@@ -707,6 +718,83 @@ class InMemoryLimitConfigurationRepository : LimitConfigurationRepository {
         )
         configurations[TenantScopedKey(tenantId, limitConfiguration.id)] = limitConfiguration
         limitConfiguration
+    }
+}
+
+class InMemoryLimitChangePolicyRepository : LimitChangePolicyRepository {
+    private val lock = Any()
+    private val policies = ConcurrentHashMap<TenantScopedKey<LimitChangePolicyId>, LimitChangePolicy>()
+
+    override fun findById(tenantId: TenantId, id: LimitChangePolicyId): LimitChangePolicy? =
+        policies[TenantScopedKey(tenantId, id)]
+
+    override fun findByCode(tenantId: TenantId, code: LimitChangePolicyCode): LimitChangePolicy? =
+        policies.tenantValues(tenantId).firstOrNull { it.code == code }
+
+    override fun findActiveByPhase(
+        tenantId: TenantId,
+        phase: LimitChangePolicyPhase,
+        at: Instant,
+    ): List<LimitChangePolicy> =
+        policies.tenantValues(tenantId)
+            .filter { it.phase == phase && it.isEffectiveAt(at) }
+            .sortedWith(compareBy<LimitChangePolicy> { it.priority.value }.thenBy { it.code.value })
+
+    override fun insert(tenantId: TenantId, policy: LimitChangePolicy): LimitChangePolicy = synchronized(lock) {
+        requireSameTenant(tenantId, policy.tenantId)
+        requireAbsent(
+            findById(tenantId, policy.id) != null,
+            "limit change policy id already exists: ${policy.id.value}",
+        )
+        requireAbsent(
+            findByCode(tenantId, policy.code) != null,
+            "limit change policy code already exists: ${policy.code.value}",
+        )
+        policies[TenantScopedKey(tenantId, policy.id)] = policy
+        policy
+    }
+
+    override fun update(tenantId: TenantId, policy: LimitChangePolicy): LimitChangePolicy = synchronized(lock) {
+        requireSameTenant(tenantId, policy.tenantId)
+        requirePresent(findById(tenantId, policy.id) != null, "limit change policy not found: ${policy.id.value}")
+        requireAbsent(
+            policies.tenantValues(tenantId).any { it.id != policy.id && it.code == policy.code },
+            "limit change policy code already exists: ${policy.code.value}",
+        )
+        policies[TenantScopedKey(tenantId, policy.id)] = policy
+        policy
+    }
+}
+
+class InMemoryLimitChangePolicyEvaluationRepository : LimitChangePolicyEvaluationRepository {
+    private val lock = Any()
+    private val evaluations =
+        ConcurrentHashMap<TenantScopedKey<LimitChangePolicyEvaluationId>, LimitChangePolicyEvaluation>()
+
+    override fun findById(
+        tenantId: TenantId,
+        id: LimitChangePolicyEvaluationId,
+    ): LimitChangePolicyEvaluation? = evaluations[TenantScopedKey(tenantId, id)]
+
+    override fun findByChangeRequest(
+        tenantId: TenantId,
+        changeRequestId: LimitChangeRequestId,
+    ): List<LimitChangePolicyEvaluation> =
+        evaluations.tenantValues(tenantId)
+            .filter { it.changeRequestId == changeRequestId }
+            .sortedWith(compareBy<LimitChangePolicyEvaluation> { it.evaluatedAt }.thenBy { it.id.value })
+
+    override fun insert(
+        tenantId: TenantId,
+        evaluation: LimitChangePolicyEvaluation,
+    ): LimitChangePolicyEvaluation = synchronized(lock) {
+        requireSameTenant(tenantId, evaluation.tenantId)
+        requireAbsent(
+            findById(tenantId, evaluation.id) != null,
+            "limit change policy evaluation id already exists: ${evaluation.id.value}",
+        )
+        evaluations[TenantScopedKey(tenantId, evaluation.id)] = evaluation
+        evaluation
     }
 }
 

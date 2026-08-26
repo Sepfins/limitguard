@@ -13,11 +13,13 @@ import io.github.sepfins.limitguard.application.change.ChangeReferenceResolver
 import io.github.sepfins.limitguard.application.change.DefaultLimitChangeService
 import io.github.sepfins.limitguard.application.change.LimitChangeApplicationWorkflow
 import io.github.sepfins.limitguard.application.change.LimitChangeEventFactory
+import io.github.sepfins.limitguard.application.change.LimitChangePolicyRunner
 import io.github.sepfins.limitguard.application.change.LimitChangeRequestFactory
 import io.github.sepfins.limitguard.application.change.LimitRuleCandidateFactory
 import io.github.sepfins.limitguard.application.change.LimitRuleMandateValidator
 import io.github.sepfins.limitguard.application.change.RequestLimitRuleChangeWorkflow
 import io.github.sepfins.limitguard.application.change.RejectLimitRuleChangeWorkflow
+import io.github.sepfins.limitguard.application.change.PolicyEngineRegistry
 import io.github.sepfins.limitguard.application.evaluation.AuthorizationEvaluator
 import io.github.sepfins.limitguard.application.evaluation.DefaultLimitEvaluationService
 import io.github.sepfins.limitguard.application.evaluation.LimitRuleMatcher
@@ -37,6 +39,8 @@ import io.github.sepfins.limitguard.port.persistence.FundingSourceRepository
 import io.github.sepfins.limitguard.port.persistence.IndividualRepository
 import io.github.sepfins.limitguard.port.persistence.LegalEntityRepository
 import io.github.sepfins.limitguard.port.persistence.LimitChangeRequestRepository
+import io.github.sepfins.limitguard.port.persistence.LimitChangePolicyEvaluationRepository
+import io.github.sepfins.limitguard.port.persistence.LimitChangePolicyRepository
 import io.github.sepfins.limitguard.port.persistence.LimitConfigurationRepository
 import io.github.sepfins.limitguard.port.persistence.LimitRuleChangeEventRepository
 import io.github.sepfins.limitguard.port.persistence.LimitRuleRepository
@@ -51,6 +55,7 @@ import io.github.sepfins.limitguard.port.persistence.TransactionEventRepository
 import io.github.sepfins.limitguard.port.persistence.TransactionRepository
 import io.github.sepfins.limitguard.port.persistence.UsageBucketRepository
 import io.github.sepfins.limitguard.port.persistence.UsageEventRepository
+import io.github.sepfins.limitguard.port.policy.PolicyEngine
 import io.github.sepfins.limitguard.port.time.ClockProvider
 import io.github.sepfins.limitguard.port.transactions.TransactionRunner
 
@@ -70,6 +75,8 @@ class DefaultLimitguard(
     fundingSourceGroupMemberRepository: FundingSourceGroupMemberRepository,
     mandateRepository: MandateRepository,
     limitConfigurationRepository: LimitConfigurationRepository,
+    limitChangePolicyRepository: LimitChangePolicyRepository,
+    limitChangePolicyEvaluationRepository: LimitChangePolicyEvaluationRepository,
     limitChangeRequestRepository: LimitChangeRequestRepository,
     limitChangeEventRepository: LimitRuleChangeEventRepository,
     limitRuleRepository: LimitRuleRepository,
@@ -78,12 +85,21 @@ class DefaultLimitguard(
     transactionEventRepository: TransactionEventRepository,
     usageBucketRepository: UsageBucketRepository,
     usageEventRepository: UsageEventRepository,
+    policyEngines: Collection<PolicyEngine>,
     idGenerator: IdGenerator,
     clockProvider: ClockProvider,
     transactionRunner: TransactionRunner,
 ) : Limitguard {
     private val limitChangeEventFactory = LimitChangeEventFactory(idGenerator)
     private val limitRuleMandateValidator = LimitRuleMandateValidator(mandateRepository)
+    private val limitChangePolicyRunner = LimitChangePolicyRunner(
+        policyRepository = limitChangePolicyRepository,
+        evaluationRepository = limitChangePolicyEvaluationRepository,
+        changeEventRepository = limitChangeEventRepository,
+        engineRegistry = PolicyEngineRegistry(policyEngines),
+        changeEventFactory = limitChangeEventFactory,
+        idGenerator = idGenerator,
+    )
     private val limitChangeApplicationWorkflow = LimitChangeApplicationWorkflow(
         changeRequestRepository = limitChangeRequestRepository,
         changeEventRepository = limitChangeEventRepository,
@@ -124,6 +140,7 @@ class DefaultLimitguard(
             mandateValidator = limitRuleMandateValidator,
             changeRequestFactory = LimitChangeRequestFactory(),
             changeEventFactory = limitChangeEventFactory,
+            policyRunner = limitChangePolicyRunner,
             applicationWorkflow = limitChangeApplicationWorkflow,
             changeRequestRepository = limitChangeRequestRepository,
             changeEventRepository = limitChangeEventRepository,

@@ -29,4 +29,6 @@ data class LimitChangePolicy(
     val metadata: Metadata = Metadata.EMPTY,
     val createdAt: Instant? = null,
     val updatedAt: Instant? = null
-)
+) {
+    fun isEffectiveAt(at: Instant): Boolean = isActive && effectiveWindow.contains(at)
+}

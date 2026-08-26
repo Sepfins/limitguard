@@ -14,6 +14,7 @@ import io.github.sepfins.limitguard.domain.common.CurrencyCode
 import io.github.sepfins.limitguard.domain.common.IdempotencyKey
 import io.github.sepfins.limitguard.domain.common.LimitChangeRequestId
 import io.github.sepfins.limitguard.domain.common.LimitRuleId
+import io.github.sepfins.limitguard.domain.common.Metadata
 import io.github.sepfins.limitguard.domain.common.Money
 import io.github.sepfins.limitguard.domain.common.PartyProfileDelegationId
 import io.github.sepfins.limitguard.domain.common.PartyProfileId
@@ -35,6 +36,7 @@ internal class RequestLimitRuleChangeWorkflow(
     private val mandateValidator: LimitRuleMandateValidator,
     private val changeRequestFactory: LimitChangeRequestFactory,
     private val changeEventFactory: LimitChangeEventFactory,
+    private val policyRunner: LimitChangePolicyRunner,
     private val applicationWorkflow: LimitChangeApplicationWorkflow,
     private val changeRequestRepository: LimitChangeRequestRepository,
     private val changeEventRepository: LimitRuleChangeEventRepository,
@@ -82,16 +84,85 @@ internal class RequestLimitRuleChangeWorkflow(
             val requested = changeRequestRepository.insert(tenantId, request)
             changeEventRepository.insert(tenantId, changeEventFactory.requested(requested, now))
 
-            val approved = requested.approve(
-                approvedRule = requested.requestedRule,
-                reason = "Automatically approved",
-                at = now,
-            )
-            val persistedApproved = changeRequestRepository.update(tenantId, approved)
-            changeEventRepository.insert(
-                tenantId,
-                changeEventFactory.approved(requested, persistedApproved, now),
-            )
+            val authorization = policyRunner.authorize(requested, now)
+            val persistedApproved = when (authorization) {
+                is LimitChangeAuthorization.Failed -> {
+                    val reason = authorization.evaluation.message
+                        ?: "Policy ${authorization.policy.code.value} evaluation failed"
+                    val failed = changeRequestRepository.update(
+                        tenantId,
+                        requested.fail(reason, now),
+                    )
+                    changeEventRepository.insert(
+                        tenantId,
+                        changeEventFactory.failed(
+                            before = requested,
+                            after = failed,
+                            now = now,
+                            failureReason = reason,
+                            policyId = authorization.policy.id,
+                            eventPayload = Metadata(
+                                mapOf("evaluationId" to authorization.evaluation.id.value.toString())
+                            ),
+                        ),
+                    )
+                    return@inTransaction failed.toResult()
+                }
+                is LimitChangeAuthorization.ManualApprovalRequired ->
+                    return@inTransaction requested.toResult()
+                is LimitChangeAuthorization.Denied -> {
+                    val reason = authorization.policy.denialMessage
+                        ?: authorization.evaluation.message
+                        ?: "Denied by policy ${authorization.policy.code.value}"
+                    val rejected = changeRequestRepository.update(
+                        tenantId,
+                        requested.reject(reason, now),
+                    )
+                    changeEventRepository.insert(
+                        tenantId,
+                        changeEventFactory.rejected(
+                            before = requested,
+                            after = rejected,
+                            now = now,
+                            actor = ChangeActor.System,
+                            eventPayload = Metadata(
+                                mapOf(
+                                    "policyCode" to authorization.policy.code.value,
+                                    "denialCode" to authorization.policy.denialCode,
+                                    "evaluationId" to authorization.evaluation.id.value.toString(),
+                                )
+                            ),
+                            policyId = authorization.policy.id,
+                        ),
+                    )
+                    return@inTransaction rejected.toResult()
+                }
+                is LimitChangeAuthorization.Allowed -> {
+                    val approved = requested.approve(
+                        approvedRule = requested.requestedRule,
+                        reason = authorization.evaluation.message
+                            ?: "Automatically approved by policy ${authorization.policy.code.value}",
+                        at = now,
+                    )
+                    changeRequestRepository.update(tenantId, approved).also { persisted ->
+                        changeEventRepository.insert(
+                            tenantId,
+                            changeEventFactory.approved(
+                                before = requested,
+                                after = persisted,
+                                now = now,
+                                eventPayload = Metadata(
+                                    mapOf(
+                                        "policyCode" to authorization.policy.code.value,
+                                        "evaluationId" to authorization.evaluation.id.value.toString(),
+                                    )
+                                ),
+                                policyId = authorization.policy.id,
+                            ),
+                        )
+                    }
+                }
+            }
 
             if (command.effectiveAt != null && command.effectiveAt > now) {
                 val scheduled = persistedApproved.schedule(command.effectiveAt, now)

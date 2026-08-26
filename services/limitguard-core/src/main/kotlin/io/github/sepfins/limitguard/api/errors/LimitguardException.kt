@@ -53,3 +53,8 @@ class IdempotencyConflictException(
     message: String,
     cause: Throwable? = null,
 ) : LimitguardException(LimitguardErrorCode.IDEMPOTENCY_CONFLICT, message, cause)
+
+class InfrastructureException(
+    message: String,
+    cause: Throwable? = null,
+) : LimitguardException(LimitguardErrorCode.INFRASTRUCTURE_FAILURE, message, cause)
