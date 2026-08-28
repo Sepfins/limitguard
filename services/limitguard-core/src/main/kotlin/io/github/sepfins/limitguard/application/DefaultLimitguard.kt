@@ -29,6 +29,7 @@ import io.github.sepfins.limitguard.application.transaction.TransactionRecorder
 import io.github.sepfins.limitguard.application.usage.UsageMutationService
 import io.github.sepfins.limitguard.application.usage.UsageReservationService
 import io.github.sepfins.limitguard.application.usage.UsageWindowCalculator
+import io.github.sepfins.limitguard.infrastructure.policy.jsonlogic.JsonLogicPolicyEngine
 import io.github.sepfins.limitguard.port.ids.IdGenerator
 import io.github.sepfins.limitguard.port.persistence.ChannelGroupMemberRepository
 import io.github.sepfins.limitguard.port.persistence.ChannelRepository
@@ -85,7 +86,7 @@ class DefaultLimitguard(
     transactionEventRepository: TransactionEventRepository,
     usageBucketRepository: UsageBucketRepository,
     usageEventRepository: UsageEventRepository,
-    policyEngines: Collection<PolicyEngine>,
+    policyEngines: Collection<PolicyEngine> = listOf(JsonLogicPolicyEngine()),
     idGenerator: IdGenerator,
     clockProvider: ClockProvider,
     transactionRunner: TransactionRunner,

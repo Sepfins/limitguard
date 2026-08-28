@@ -52,7 +52,6 @@ class InMemorySupportSmokeTest {
             transactionEventRepository = repositories.transactionEvents,
             usageBucketRepository = repositories.usageBuckets,
             usageEventRepository = repositories.usageEvents,
-            policyEngines = emptyList(),
             idGenerator = ids,
             clockProvider = clock,
             transactionRunner = transactions,

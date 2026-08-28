@@ -71,6 +71,8 @@ java {
 dependencies {
     implementation("org.jooq:jooq:$jooqVersion")
     implementation("com.apicatalog:titanium-jcs:3.0.0-M3")
+    implementation("io.github.jamsesso:json-logic-java:1.1.0")
+    implementation("com.google.code.gson:gson:2.14.0")
     testImplementation(kotlin("test-junit5"))
     testRuntimeOnly("org.junit.platform:junit-platform-launcher:6.0.3")
     jooqGenerator("org.postgresql:postgresql:42.7.8")

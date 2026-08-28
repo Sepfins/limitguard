@@ -58,8 +58,7 @@ import io.github.sepfins.limitguard.domain.funding.FundingSourceScope
 import io.github.sepfins.limitguard.domain.mandate.Mandate
 import io.github.sepfins.limitguard.domain.mandate.MandateName
 import io.github.sepfins.limitguard.domain.mandate.MandateScope
-import io.github.sepfins.limitguard.domain.policy.PolicyEvaluationContext
-import io.github.sepfins.limitguard.domain.policy.PolicyEvaluationResult
+import io.github.sepfins.limitguard.infrastructure.policy.jsonlogic.JsonLogicPolicyEngine
 import io.github.sepfins.limitguard.port.policy.PolicyEngine
 import io.github.sepfins.limitguard.support.DirectTransactionRunner
 import io.github.sepfins.limitguard.support.FixedClockProvider
@@ -230,7 +229,7 @@ class DefaultLimitChangeServiceTest {
     }
 
     @Test
-    fun `first matching policy by priority controls authorization`() {
+    fun `matching JSON Logic policy by priority controls authorization`() {
         val repositories = repositoriesWithConfiguration(LimitChangePolicyDecision.ALLOW)
         repositories.limitChangePolicies.insert(
             tenantId,
@@ -239,16 +238,48 @@ class DefaultLimitChangeServiceTest {
                 id = reviewPolicyId,
                 code = "REVIEW_LIMIT_CHANGE",
                 priority = 10,
+                conditionExpression = amountGreaterThan(600),
             ),
         )
         val service = limitChangeService(repositories)
 
-        val result = service.requestLimitRuleChange(command())
+        val result = service.requestLimitRuleChange(command(amount = "700.00"))
 
         assertEquals(LimitRuleChangeStatus.REQUESTED, result.status)
         val evaluations = repositories.limitChangePolicyEvaluations
             .findByChangeRequest(tenantId, LimitChangeRequestId.of(result.id))
         assertEquals(listOf(reviewPolicyId), evaluations.map { it.policyId })
+        assertEquals(mapOf("conditionResult" to true), evaluations.single().actionResult.value)
+    }
+
+    @Test
+    fun `non-matching JSON Logic policy continues to the next policy`() {
+        val repositories = repositoriesWithConfiguration(LimitChangePolicyDecision.ALLOW)
+        repositories.limitChangePolicies.insert(
+            tenantId,
+            authorizationPolicy(
+                decision = LimitChangePolicyDecision.REQUIRE_APPROVAL,
+                id = reviewPolicyId,
+                code = "REVIEW_LIMIT_CHANGE",
+                priority = 10,
+                conditionExpression = amountGreaterThan(600),
+            ),
+        )
+        val service = limitChangeService(repositories)
+
+        val result = service.requestLimitRuleChange(command(amount = "500.00"))
+
+        assertEquals(LimitRuleChangeStatus.APPLIED, result.status)
+        val evaluations = repositories.limitChangePolicyEvaluations
+            .findByChangeRequest(tenantId, LimitChangeRequestId.of(result.id))
+        assertEquals(listOf(reviewPolicyId, authorizationPolicyId), evaluations.map { it.policyId })
+        assertEquals(
+            listOf(
+                LimitChangePolicyEvaluationOutcome.NOT_MATCHED,
+                LimitChangePolicyEvaluationOutcome.APPLIED,
+            ),
+            evaluations.map { it.outcome },
+        )
     }
 
     @Test
@@ -315,6 +346,42 @@ class DefaultLimitChangeServiceTest {
         val evaluation = repositories.limitChangePolicyEvaluations
             .findByChangeRequest(tenantId, LimitChangeRequestId.of(result.id))
             .single()
+        assertEquals(LimitChangePolicyEvaluationOutcome.ERROR, evaluation.outcome)
+        assertEquals(
+            listOf(
+                LimitRuleChangeEventType.REQUESTED,
+                LimitRuleChangeEventType.POLICY_EVALUATED,
+                LimitRuleChangeEventType.FAILED,
+            ),
+            repositories.limitRuleChangeEvents
+                .findByChangeRequest(tenantId, LimitChangeRequestId.of(result.id))
+                .map { it.eventType },
+        )
+    }
+
+    @Test
+    fun `invalid JSON Logic expression fails closed with an auditable request`() {
+        val repositories = repositoriesWithConfiguration(LimitChangePolicyDecision.ALLOW)
+        repositories.limitChangePolicies.insert(
+            tenantId,
+            authorizationPolicy(
+                decision = LimitChangePolicyDecision.REQUIRE_APPROVAL,
+                id = reviewPolicyId,
+                code = "INVALID_LIMIT_CHANGE_POLICY",
+                priority = 10,
+                conditionExpression = mapOf("unsupported_operation" to emptyList<Any?>()),
+            ),
+        )
+        val service = limitChangeService(repositories)
+
+        val result = service.requestLimitRuleChange(command())
+
+        assertEquals(LimitRuleChangeStatus.FAILED, result.status)
+        assertEquals(null, result.limitRuleId)
+        val evaluation = repositories.limitChangePolicyEvaluations
+            .findByChangeRequest(tenantId, LimitChangeRequestId.of(result.id))
+            .single()
+        assertEquals(reviewPolicyId, evaluation.policyId)
         assertEquals(LimitChangePolicyEvaluationOutcome.ERROR, evaluation.outcome)
         assertEquals(
             listOf(
@@ -1120,6 +1187,7 @@ class DefaultLimitChangeServiceTest {
         id: LimitChangePolicyId = authorizationPolicyId,
         code: String = "AUTHORIZE_LIMIT_CHANGE",
         priority: Int = 100,
+        conditionExpression: Map<String, Any?> = emptyMap(),
     ): LimitChangePolicy =
         LimitChangePolicy(
             id = id,
@@ -1131,6 +1199,7 @@ class DefaultLimitChangeServiceTest {
             engine = LimitChangePolicyEngine.JSON_LOGIC,
             decision = decision,
             priority = LimitPriority.of(priority),
+            conditionExpression = Metadata(conditionExpression),
             denialCode = if (decision == LimitChangePolicyDecision.DENY) "LIMIT_CHANGE_DENIED" else null,
             denialMessage = if (decision == LimitChangePolicyDecision.DENY) {
                 "Change denied by test policy"
@@ -1139,6 +1208,14 @@ class DefaultLimitChangeServiceTest {
             },
             createdAt = now,
             updatedAt = now,
+        )
+
+    private fun amountGreaterThan(amount: Int): Map<String, Any?> =
+        mapOf(
+            ">" to listOf(
+                mapOf("var" to "changeRequest.requestedRule.amount"),
+                amount,
+            )
         )
 
     private fun insertRequestedCreate(
@@ -1174,7 +1251,7 @@ class DefaultLimitChangeServiceTest {
     private fun limitChangeService(
         repositories: InMemoryLimitguardRepositories,
         clock: FixedClockProvider = FixedClockProvider(now),
-        policyEngines: Collection<PolicyEngine> = listOf(TestPolicyEngine),
+        policyEngines: Collection<PolicyEngine> = listOf(JsonLogicPolicyEngine()),
     ): DefaultLimitChangeService {
         val idGenerator = SequentialIdGenerator(startAt = 100L)
         val changeEventFactory = LimitChangeEventFactory(idGenerator)
@@ -1362,30 +1439,5 @@ class DefaultLimitChangeServiceTest {
             requestChannelId = channelId,
             idempotencyKey = idempotencyKey,
         )
-
-    private object TestPolicyEngine : PolicyEngine {
-        override val engine: LimitChangePolicyEngine = LimitChangePolicyEngine.JSON_LOGIC
-
-        override fun evaluate(
-            policy: LimitChangePolicy,
-            context: PolicyEvaluationContext,
-        ): PolicyEvaluationResult {
-            require(policy.phase == context.phase)
-            val matched = policy.conditionExpression.value["matched"] != false
-            val outcome = when {
-                !matched -> LimitChangePolicyEvaluationOutcome.NOT_MATCHED
-                policy.decision == LimitChangePolicyDecision.DENY ->
-                    LimitChangePolicyEvaluationOutcome.DENIED
-                policy.decision == LimitChangePolicyDecision.NO_OP ->
-                    LimitChangePolicyEvaluationOutcome.MATCHED
-                else -> LimitChangePolicyEvaluationOutcome.APPLIED
-            }
-            return PolicyEvaluationResult(
-                matched = matched,
-                outcome = outcome,
-                decision = policy.decision,
-            )
-        }
-    }
 
 }

@@ -1,17 +1,16 @@
 package io.github.sepfins.limitguard.application.change
 
-import io.github.sepfins.limitguard.domain.change.ChangeActor
 import io.github.sepfins.limitguard.domain.change.LimitChangePolicy
 import io.github.sepfins.limitguard.domain.change.LimitChangePolicyDecision
 import io.github.sepfins.limitguard.domain.change.LimitChangePolicyEvaluation
 import io.github.sepfins.limitguard.domain.change.LimitChangePolicyEvaluationOutcome
 import io.github.sepfins.limitguard.domain.change.LimitChangePolicyPhase
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeRequest
-import io.github.sepfins.limitguard.domain.change.RequestActorContext
 import io.github.sepfins.limitguard.domain.common.LimitChangePolicyEvaluationId
 import io.github.sepfins.limitguard.domain.common.Metadata
 import io.github.sepfins.limitguard.domain.policy.PolicyEvaluationContext
 import io.github.sepfins.limitguard.domain.policy.PolicyEvaluationResult
+import io.github.sepfins.limitguard.internal.policy.toPolicyEvaluationInput
 import io.github.sepfins.limitguard.port.ids.IdGenerator
 import io.github.sepfins.limitguard.port.persistence.LimitChangePolicyEvaluationRepository
 import io.github.sepfins.limitguard.port.persistence.LimitChangePolicyRepository
@@ -38,7 +37,7 @@ internal class LimitChangePolicyRunner(
             facts = request.policyContext,
             evaluatedAt = at,
         )
-        val inputContext = context.toSnapshot()
+        val inputContext = context.toPolicyEvaluationInput()
         val policies = policyRepository
             .findActiveByPhase(request.tenantId, context.phase, at)
             .sortedWith(compareBy<LimitChangePolicy> { it.priority.value }.thenBy { it.code.value })
@@ -94,7 +93,7 @@ internal class LimitChangePolicyRunner(
     ): PolicyEvaluationResult {
         val result = try {
             engineRegistry.get(policy.engine).evaluate(policy, context)
-        } catch (exception: RuntimeException) {
+        } catch (exception: Exception) {
             val detail = exception.message ?: exception::class.simpleName ?: "unknown error"
             return PolicyEvaluationResult(
                 matched = false,
@@ -187,67 +186,3 @@ private fun LimitChangePolicy.toSnapshot(): Metadata =
             "updatedAt" to updatedAt?.toString(),
         )
     )
-
-private fun PolicyEvaluationContext.toSnapshot(): Metadata =
-    Metadata(
-        mapOf(
-            "phase" to phase.name,
-            "evaluatedAt" to evaluatedAt.toString(),
-            "changeRequest" to changeRequest.toPolicyInput(),
-            "currentRule" to currentRule?.value,
-            "facts" to facts.value,
-        )
-    )
-
-private fun LimitRuleChangeRequest.toPolicyInput(): Map<String, Any?> =
-    mapOf(
-        "id" to id.value.toString(),
-        "tenantId" to tenantId.value.toString(),
-        "changeType" to changeType.name,
-        "status" to status.name,
-        "limitRuleId" to limitRuleId?.value?.toString(),
-        "requestedBy" to requestedBy.toPolicyInput(),
-        "requestActorContext" to requestActorContext.toPolicyInput(),
-        "requesterPartyProfileId" to requesterPartyProfileId?.value?.toString(),
-        "authorityDelegationId" to authorityDelegationId?.value?.toString(),
-        "targetOwnerPartyProfileId" to targetOwnerPartyProfileId.value.toString(),
-        "targetMandateId" to targetMandateId?.value?.toString(),
-        "targetScope" to targetScope.value,
-        "targetScopeHash" to targetScopeHash.value,
-        "beforeRule" to beforeRule?.value,
-        "requestedRule" to requestedRule.value,
-        "effectiveAt" to effectiveAt?.toString(),
-        "expiresAt" to expiresAt?.toString(),
-        "policyContext" to policyContext.value,
-        "idempotencyKey" to idempotencyKey?.value,
-        "metadata" to metadata.value,
-    )
-
-private fun ChangeActor.toPolicyInput(): Map<String, Any?> =
-    when (this) {
-        ChangeActor.System -> mapOf("actorType" to "SYSTEM")
-        is ChangeActor.PartyProfileActor -> mapOf(
-            "actorType" to "PARTY_PROFILE",
-            "partyProfileId" to partyProfileId.value.toString(),
-        )
-        is ChangeActor.BankWorkerActor -> mapOf(
-            "actorType" to "BANK_WORKER",
-            "bankWorkerId" to bankWorkerId.value.toString(),
-        )
-    }
-
-private fun RequestActorContext.toPolicyInput(): Map<String, Any?> =
-    when (this) {
-        RequestActorContext.System -> mapOf("actorType" to "SYSTEM")
-        is RequestActorContext.PartyProfile -> mapOf(
-            "actorType" to "PARTY_PROFILE",
-            "requesterPartyProfileId" to requesterPartyProfileId.value.toString(),
-            "requesterChannelId" to requesterChannelId.value.toString(),
-        )
-        is RequestActorContext.BankWorker -> mapOf(
-            "actorType" to "BANK_WORKER",
-            "bankWorkerId" to bankWorkerId.value.toString(),
-            "requesterChannelId" to requesterChannelId.value.toString(),
-        )
-        else -> mapOf("actorType" to (this::class.simpleName ?: "UNKNOWN"))
-    }
