@@ -9,5 +9,6 @@ data class PolicyEvaluationResult(
     val outcome: LimitChangePolicyEvaluationOutcome,
     val decision: LimitChangePolicyDecision,
     val actionResult: Metadata = Metadata.EMPTY,
-    val message: String? = null
+    val message: String? = null,
+    val actions: List<PolicyAction> = emptyList(),
 )

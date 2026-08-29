@@ -32,6 +32,7 @@ internal class LimitChangeEventFactory(
                 mapOf(
                     "changeType" to changeRequest.changeType.name,
                     "targetScopeHash" to changeRequest.targetScopeHash.value,
+                    "effectiveAt" to changeRequest.effectiveAt?.toString(),
                 )
             ),
             message = "Limit rule change requested",
@@ -88,21 +89,22 @@ internal class LimitChangeEventFactory(
         )
 
     fun policyEvaluated(
-        request: LimitRuleChangeRequest,
+        before: LimitRuleChangeRequest,
+        after: LimitRuleChangeRequest,
         evaluation: LimitChangePolicyEvaluation,
         now: Instant,
     ): LimitRuleChangeEvent =
         LimitRuleChangeEvent(
             id = LimitRuleChangeEventId.of(idGenerator.newId()),
-            tenantId = request.tenantId,
-            changeRequestId = request.id,
+            tenantId = after.tenantId,
+            changeRequestId = after.id,
             eventType = LimitRuleChangeEventType.POLICY_EVALUATED,
             actor = ChangeActor.System,
             policyId = evaluation.policyId,
-            beforeStatus = request.status,
-            afterStatus = request.status,
-            beforeRule = request.requestedRule,
-            afterRule = request.requestedRule,
+            beforeStatus = before.status,
+            afterStatus = after.status,
+            beforeRule = before.requestedRule,
+            afterRule = after.requestedRule,
             eventPayload = Metadata(
                 mapOf(
                     "evaluationId" to evaluation.id.value.toString(),

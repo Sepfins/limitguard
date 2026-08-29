@@ -238,7 +238,7 @@ class DefaultLimitChangeServiceTest {
                 id = reviewPolicyId,
                 code = "REVIEW_LIMIT_CHANGE",
                 priority = 10,
-                conditionExpression = amountGreaterThan(600),
+                conditionExpression = amountGreaterThan("600.00"),
             ),
         )
         val service = limitChangeService(repositories)
@@ -262,7 +262,7 @@ class DefaultLimitChangeServiceTest {
                 id = reviewPolicyId,
                 code = "REVIEW_LIMIT_CHANGE",
                 priority = 10,
-                conditionExpression = amountGreaterThan(600),
+                conditionExpression = amountGreaterThan("600.00"),
             ),
         )
         val service = limitChangeService(repositories)
@@ -279,6 +279,160 @@ class DefaultLimitChangeServiceTest {
                 LimitChangePolicyEvaluationOutcome.APPLIED,
             ),
             evaluations.map { it.outcome },
+        )
+    }
+
+    @Test
+    fun `exact decimal policy comparison preserves precision`() {
+        val repositories = repositoriesWithConfiguration(LimitChangePolicyDecision.ALLOW)
+        repositories.limitChangePolicies.insert(
+            tenantId,
+            authorizationPolicy(
+                decision = LimitChangePolicyDecision.REQUIRE_APPROVAL,
+                id = reviewPolicyId,
+                code = "REVIEW_PRECISE_EXPOSURE",
+                priority = 10,
+                conditionExpression = mapOf(
+                    "decimal_gt" to listOf(
+                        mapOf("var" to "facts.requestedExposure"),
+                        "9999999999999999.0000",
+                    )
+                ),
+            ),
+        )
+        val service = limitChangeService(repositories)
+
+        val result = service.requestLimitRuleChange(
+            command().copy(
+                policyContext = mapOf("requestedExposure" to "9999999999999999.0001")
+            )
+        )
+
+        assertEquals(LimitRuleChangeStatus.REQUESTED, result.status)
+        val evaluation = repositories.limitChangePolicyEvaluations
+            .findByChangeRequest(tenantId, LimitChangeRequestId.of(result.id))
+            .single()
+        assertEquals(reviewPolicyId, evaluation.policyId)
+        assertEquals(mapOf("conditionResult" to true), evaluation.actionResult.value)
+    }
+
+    @Test
+    fun `policy action caps the requested amount before automatic approval`() {
+        val repositories = repositoriesWithConfiguration(LimitChangePolicyDecision.ALLOW)
+        repositories.limitChangePolicies.insert(
+            tenantId,
+            authorizationPolicy(
+                decision = LimitChangePolicyDecision.NO_OP,
+                id = reviewPolicyId,
+                code = "CAP_REQUESTED_AMOUNT",
+                priority = 10,
+                actionExpression = listOf(
+                    mapOf(
+                        "type" to "CAP_REQUESTED_AMOUNT",
+                        "amount" to "600.00",
+                    )
+                ),
+            ),
+        )
+        val service = limitChangeService(repositories)
+        val requestCommand = command(idempotencyKey = "policy-cap", amount = "700.00")
+
+        val result = service.requestLimitRuleChange(requestCommand)
+        val replayed = service.requestLimitRuleChange(requestCommand)
+
+        assertEquals(result, replayed)
+        assertFailsWith<IdempotencyConflictException> {
+            service.requestLimitRuleChange(command(idempotencyKey = "policy-cap", amount = "600.00"))
+        }
+        assertEquals(LimitRuleChangeStatus.APPLIED, result.status)
+        val rule = assertNotNull(
+            repositories.limitRules.findById(tenantId, LimitRuleId.of(assertNotNull(result.limitRuleId)))
+        )
+        assertEquals(BigDecimal("600.0000"), rule.amount.amount)
+        val request = assertNotNull(
+            repositories.limitChangeRequests.findById(tenantId, LimitChangeRequestId.of(result.id))
+        )
+        assertEquals("600.0000", request.requestedRule.value["amount"])
+        assertEquals("600.0000", request.approvedRule?.value?.get("amount"))
+        val capEvaluation = repositories.limitChangePolicyEvaluations
+            .findByChangeRequest(tenantId, request.id)
+            .first()
+        assertEquals(LimitChangePolicyEvaluationOutcome.APPLIED, capEvaluation.outcome)
+        assertEquals(
+            listOf(
+                mapOf(
+                    "type" to "CAP_REQUESTED_AMOUNT",
+                    "maximum" to "600.0000",
+                    "currency" to "EUR",
+                    "before" to "700.0000",
+                    "after" to "600.0000",
+                    "changed" to true,
+                )
+            ),
+            capEvaluation.actionResult.value["actions"],
+        )
+        val capEvent = repositories.limitRuleChangeEvents
+            .findByChangeRequest(tenantId, request.id)
+            .single {
+                it.eventType == LimitRuleChangeEventType.POLICY_EVALUATED &&
+                    it.policyId == reviewPolicyId
+            }
+        assertEquals("700.0000", capEvent.beforeRule?.value?.get("amount"))
+        assertEquals("600.0000", capEvent.afterRule?.value?.get("amount"))
+    }
+
+    @Test
+    fun `policy action schedules an automatically approved request`() {
+        val repositories = repositoriesWithConfiguration(LimitChangePolicyDecision.ALLOW)
+        val scheduledAt = now.plusSeconds(3600)
+        repositories.limitChangePolicies.insert(
+            tenantId,
+            authorizationPolicy(
+                decision = LimitChangePolicyDecision.ALLOW,
+                id = reviewPolicyId,
+                code = "DELAY_LIMIT_INCREASE",
+                priority = 10,
+                actionExpression = listOf(
+                    mapOf(
+                        "type" to "SET_EFFECTIVE_AT",
+                        "instant" to mapOf("var" to "facts.scheduleAt"),
+                    )
+                ),
+            ),
+        )
+        val service = limitChangeService(repositories)
+        val requestCommand = command(idempotencyKey = "policy-schedule").copy(
+            policyContext = mapOf("scheduleAt" to scheduledAt.toString())
+        )
+
+        val result = service.requestLimitRuleChange(requestCommand)
+        val replayed = service.requestLimitRuleChange(requestCommand)
+
+        assertEquals(result, replayed)
+        assertFailsWith<IdempotencyConflictException> {
+            service.requestLimitRuleChange(
+                command(idempotencyKey = "policy-schedule").copy(
+                    policyContext = requestCommand.policyContext,
+                    effectiveAt = scheduledAt,
+                )
+            )
+        }
+        assertEquals(LimitRuleChangeStatus.PENDING_EFFECTIVE_DATE, result.status)
+        assertEquals(scheduledAt, result.effectiveAt)
+        assertEquals(null, result.limitRuleId)
+        val evaluation = repositories.limitChangePolicyEvaluations
+            .findByChangeRequest(tenantId, LimitChangeRequestId.of(result.id))
+            .single()
+        assertEquals(
+            listOf(
+                mapOf(
+                    "type" to "SET_EFFECTIVE_AT",
+                    "before" to null,
+                    "after" to scheduledAt.toString(),
+                    "changed" to true,
+                )
+            ),
+            evaluation.actionResult.value["actions"],
         )
     }
 
@@ -393,6 +547,60 @@ class DefaultLimitChangeServiceTest {
                 .findByChangeRequest(tenantId, LimitChangeRequestId.of(result.id))
                 .map { it.eventType },
         )
+    }
+
+    @Test
+    fun `invalid policy action fails closed before it can approve a request`() {
+        val repositories = repositoriesWithConfiguration(LimitChangePolicyDecision.ALLOW)
+        repositories.limitChangePolicies.insert(
+            tenantId,
+            authorizationPolicy(
+                decision = LimitChangePolicyDecision.ALLOW,
+                id = reviewPolicyId,
+                code = "UNSUPPORTED_POLICY_ACTION",
+                priority = 10,
+                actionExpression = listOf(mapOf("type" to "CANCEL_PENDING")),
+            ),
+        )
+        val service = limitChangeService(repositories)
+
+        val result = service.requestLimitRuleChange(command())
+
+        assertEquals(LimitRuleChangeStatus.FAILED, result.status)
+        val evaluation = repositories.limitChangePolicyEvaluations
+            .findByChangeRequest(tenantId, LimitChangeRequestId.of(result.id))
+            .single()
+        assertEquals(LimitChangePolicyEvaluationOutcome.ERROR, evaluation.outcome)
+        assertEquals(false, evaluation.matched)
+    }
+
+    @Test
+    fun `inexact monetary comparison is rejected by policy validation`() {
+        val repositories = repositoriesWithConfiguration(LimitChangePolicyDecision.ALLOW)
+        repositories.limitChangePolicies.insert(
+            tenantId,
+            authorizationPolicy(
+                decision = LimitChangePolicyDecision.ALLOW,
+                id = reviewPolicyId,
+                code = "INEXACT_AMOUNT_POLICY",
+                priority = 10,
+                conditionExpression = mapOf(
+                    ">" to listOf(
+                        mapOf("var" to "changeRequest.requestedRule.amount"),
+                        600,
+                    )
+                ),
+            ),
+        )
+        val service = limitChangeService(repositories)
+
+        val result = service.requestLimitRuleChange(command(amount = "700.00"))
+
+        assertEquals(LimitRuleChangeStatus.FAILED, result.status)
+        val evaluation = repositories.limitChangePolicyEvaluations
+            .findByChangeRequest(tenantId, LimitChangeRequestId.of(result.id))
+            .single()
+        assertEquals(LimitChangePolicyEvaluationOutcome.ERROR, evaluation.outcome)
     }
 
     @Test
@@ -1188,6 +1396,7 @@ class DefaultLimitChangeServiceTest {
         code: String = "AUTHORIZE_LIMIT_CHANGE",
         priority: Int = 100,
         conditionExpression: Map<String, Any?> = emptyMap(),
+        actionExpression: List<Map<String, Any?>> = emptyList(),
     ): LimitChangePolicy =
         LimitChangePolicy(
             id = id,
@@ -1200,6 +1409,7 @@ class DefaultLimitChangeServiceTest {
             decision = decision,
             priority = LimitPriority.of(priority),
             conditionExpression = Metadata(conditionExpression),
+            actionExpression = actionExpression,
             denialCode = if (decision == LimitChangePolicyDecision.DENY) "LIMIT_CHANGE_DENIED" else null,
             denialMessage = if (decision == LimitChangePolicyDecision.DENY) {
                 "Change denied by test policy"
@@ -1210,9 +1420,9 @@ class DefaultLimitChangeServiceTest {
             updatedAt = now,
         )
 
-    private fun amountGreaterThan(amount: Int): Map<String, Any?> =
+    private fun amountGreaterThan(amount: String): Map<String, Any?> =
         mapOf(
-            ">" to listOf(
+            "decimal_gt" to listOf(
                 mapOf("var" to "changeRequest.requestedRule.amount"),
                 amount,
             )
