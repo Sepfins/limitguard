@@ -47,12 +47,12 @@ internal class ApproveLimitRuleChangeWorkflow(
         val now = clockProvider.now()
 
         transactionRunner.inTransaction {
-            val request = changeRequestRepository.findById(tenantId, changeRequestId)
+            val request = changeRequestRepository.findByIdForUpdate(tenantId, changeRequestId)
                 ?: throw NotFoundException("limit change request not found: ${changeRequestId.value}")
             requireOpenRequest(request, now)
 
             val currentRule = request.limitRuleId?.let { limitRuleId ->
-                limitRuleRepository.findById(tenantId, limitRuleId)
+                limitRuleRepository.findByIdForUpdate(tenantId, limitRuleId)
                     ?: throw NotFoundException("limit rule not found: ${limitRuleId.value}")
             }
             requireCurrentRuleVersion(request, currentRule)
@@ -192,6 +192,8 @@ internal class ApproveLimitRuleChangeWorkflow(
         targetScopeHash: ScopeHash,
         now: Instant,
     ) {
+        changeRequestRepository.lockTarget(request.tenantId, targetScopeHash)
+
         if (candidate.isActive) {
             val candidateEffectiveAt = maxOf(
                 now,

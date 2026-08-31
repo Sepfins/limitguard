@@ -72,6 +72,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
 
 class DefaultLimitChangeServiceTest {
     private val now = Instant.parse("2026-06-26T12:00:00Z")
@@ -115,6 +116,11 @@ class DefaultLimitChangeServiceTest {
         assertEquals("500.0000", insertedRequest.requestedRule.value["amount"])
         assertEquals("PER_TRANSACTION", insertedRequest.targetScope.value["kind"])
         assertEquals(limitRuleId, insertedRequest.limitRuleId?.value)
+        assertTrue(
+            repositories.limitChangeRequests.lockedTargetHashes.contains(
+                tenantId to insertedRequest.targetScopeHash
+            )
+        )
 
         val events = repositories.limitRuleChangeEvents.findByChangeRequest(tenantId, insertedRequest.id)
         assertEquals(
@@ -186,6 +192,11 @@ class DefaultLimitChangeServiceTest {
 
         assertEquals(LimitRuleChangeStatus.APPLIED, approved.status)
         assertNotNull(approved.limitRuleId)
+        assertTrue(
+            repositories.limitChangeRequests.lockedRequestIds.contains(
+                tenantId to LimitChangeRequestId.of(requested.id)
+            )
+        )
         assertEquals(
             listOf(
                 LimitRuleChangeEventType.REQUESTED,
@@ -216,6 +227,11 @@ class DefaultLimitChangeServiceTest {
 
         assertEquals(LimitRuleChangeStatus.REJECTED, rejected.status)
         assertEquals(null, rejected.limitRuleId)
+        assertTrue(
+            repositories.limitChangeRequests.lockedRequestIds.contains(
+                tenantId to LimitChangeRequestId.of(requested.id)
+            )
+        )
         assertEquals(
             listOf(
                 LimitRuleChangeEventType.REQUESTED,
@@ -738,6 +754,12 @@ class DefaultLimitChangeServiceTest {
         assertEquals("Updated ATM limit", updated.name.value)
         assertEquals(BigDecimal("650.0000"), updated.amount.amount)
         assertEquals(2, updated.version.value)
+        assertTrue(repositories.limitRules.lockedRuleIds.contains(tenantId to currentRule.id))
+        assertTrue(
+            repositories.limitRules.conditionalUpdates.contains(
+                Triple(tenantId, currentRule.id, Version.INITIAL)
+            )
+        )
         val revision = repositories.limitRuleRevisions
             .findByChangeRequest(tenantId, LimitChangeRequestId.of(result.id))
             .single()
@@ -1232,6 +1254,12 @@ class DefaultLimitChangeServiceTest {
         assertEquals(0, result.failedCount)
         assertEquals(listOf(scheduled.id), result.appliedChangeRequestIds)
         assertEquals(emptyList(), result.failedChangeRequestIds)
+        assertEquals(Triple(tenantId, dueAt, 100), repositories.limitChangeRequests.dueClaims.last())
+        assertTrue(
+            repositories.limitChangeRequests.lockedRequestIds.contains(
+                tenantId to LimitChangeRequestId.of(scheduled.id)
+            )
+        )
 
         val appliedRequest = assertNotNull(
             repositories.limitChangeRequests.findById(tenantId, LimitChangeRequestId.of(scheduled.id))

@@ -42,6 +42,7 @@ import io.github.sepfins.limitguard.domain.common.TransactionEventId
 import io.github.sepfins.limitguard.domain.common.UsageBucketId
 import io.github.sepfins.limitguard.domain.common.UsageEventId
 import io.github.sepfins.limitguard.domain.common.UsageWindow
+import io.github.sepfins.limitguard.domain.common.Version
 import io.github.sepfins.limitguard.domain.funding.FundingSource
 import io.github.sepfins.limitguard.domain.funding.FundingSourceCategory
 import io.github.sepfins.limitguard.domain.funding.FundingSourceGroupMember
@@ -801,9 +802,18 @@ class InMemoryLimitChangePolicyEvaluationRepository : LimitChangePolicyEvaluatio
 class InMemoryLimitRuleRepository : LimitRuleRepository {
     private val lock = Any()
     private val limitRules = ConcurrentHashMap<TenantScopedKey<LimitRuleId>, LimitRule>()
+    val lockedRuleIds = mutableListOf<Pair<TenantId, LimitRuleId>>()
+    val conditionalUpdates = mutableListOf<Triple<TenantId, LimitRuleId, Version>>()
 
     override fun findById(tenantId: TenantId, id: LimitRuleId): LimitRule? =
         limitRules[TenantScopedKey(tenantId, id)]
+
+    override fun findByIdForUpdate(tenantId: TenantId, id: LimitRuleId): LimitRule? {
+        synchronized(lock) {
+            lockedRuleIds += tenantId to id
+        }
+        return findById(tenantId, id)
+    }
 
     override fun findActiveForOwner(tenantId: TenantId, owner: PartyProfileId, at: Instant): List<LimitRule> =
         limitRules.tenantValues(tenantId).filter { it.ownerPartyProfileId == owner && it.isEffectiveAt(at) }
@@ -816,13 +826,26 @@ class InMemoryLimitRuleRepository : LimitRuleRepository {
         limitRule
     }
 
-    override fun update(tenantId: TenantId, limitRule: LimitRule): LimitRule = synchronized(lock) {
+    override fun updateIfVersion(
+        tenantId: TenantId,
+        limitRule: LimitRule,
+        expectedVersion: Version,
+    ): LimitRule? = synchronized(lock) {
         requireSameTenant(tenantId, limitRule.tenantId)
-        requirePresent(findById(tenantId, limitRule.id) != null, "limit rule not found: ${limitRule.id.value}")
+        conditionalUpdates += Triple(tenantId, limitRule.id, expectedVersion)
+        val currentRule = findById(tenantId, limitRule.id) ?: return@synchronized null
+        if (currentRule.version != expectedVersion) return@synchronized null
         requireLimitRuleNameUnique(tenantId, limitRule)
         limitRules[TenantScopedKey(tenantId, limitRule.id)] = limitRule
         limitRule
     }
+
+    fun update(tenantId: TenantId, limitRule: LimitRule): LimitRule =
+        updateIfVersion(
+            tenantId = tenantId,
+            limitRule = limitRule,
+            expectedVersion = requireNotNull(findById(tenantId, limitRule.id)).version,
+        ) ?: error("limit rule not found: ${limitRule.id.value}")
 
     private fun requireLimitRuleNameUnique(tenantId: TenantId, limitRule: LimitRule) {
         requireAbsent(
@@ -839,9 +862,22 @@ class InMemoryLimitRuleRepository : LimitRuleRepository {
 class InMemoryLimitChangeRequestRepository : LimitChangeRequestRepository {
     private val lock = Any()
     private val requests = ConcurrentHashMap<TenantScopedKey<LimitChangeRequestId>, LimitRuleChangeRequest>()
+    val lockedRequestIds = mutableListOf<Pair<TenantId, LimitChangeRequestId>>()
+    val lockedTargetHashes = mutableListOf<Pair<TenantId, ScopeHash>>()
+    val dueClaims = mutableListOf<Triple<TenantId, Instant, Int>>()
 
     override fun findById(tenantId: TenantId, id: LimitChangeRequestId): LimitRuleChangeRequest? =
         requests[TenantScopedKey(tenantId, id)]
+
+    override fun findByIdForUpdate(
+        tenantId: TenantId,
+        id: LimitChangeRequestId,
+    ): LimitRuleChangeRequest? {
+        synchronized(lock) {
+            lockedRequestIds += tenantId to id
+        }
+        return findById(tenantId, id)
+    }
 
     override fun findByIdempotencyKey(tenantId: TenantId, key: IdempotencyKey): LimitRuleChangeRequest? =
         requests.tenantValues(tenantId).firstOrNull { it.idempotencyKey == key }
@@ -860,8 +896,19 @@ class InMemoryLimitChangeRequestRepository : LimitChangeRequestRepository {
                 (it.expiresAt == null || it.expiresAt > at)
         }
 
-    override fun findDueForApplication(tenantId: TenantId, dueAt: Instant, limit: Int): List<LimitRuleChangeRequest> =
-        requests.tenantValues(tenantId)
+    override fun lockTarget(tenantId: TenantId, targetScopeHash: ScopeHash) {
+        synchronized(lock) {
+            lockedTargetHashes += tenantId to targetScopeHash
+        }
+    }
+
+    override fun claimDueForApplication(
+        tenantId: TenantId,
+        dueAt: Instant,
+        limit: Int,
+    ): List<LimitRuleChangeRequest> = synchronized(lock) {
+        dueClaims += Triple(tenantId, dueAt, limit)
+        val claimed = requests.tenantValues(tenantId)
             .filter {
                 it.status in DUE_FOR_APPLICATION_STATUSES &&
                     (it.effectiveAt == null || it.effectiveAt <= dueAt) &&
@@ -869,6 +916,9 @@ class InMemoryLimitChangeRequestRepository : LimitChangeRequestRepository {
             }
             .sortedBy { it.createdAt }
             .take(limit)
+        lockedRequestIds += claimed.map { tenantId to it.id }
+        claimed
+    }
 
     override fun findByRequesterContext(
         tenantId: TenantId,

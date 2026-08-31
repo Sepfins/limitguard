@@ -238,6 +238,8 @@ internal class RequestLimitRuleChangeWorkflow(
         request: LimitRuleChangeRequest,
         now: Instant,
     ) {
+        changeRequestRepository.lockTarget(tenantId, request.targetScopeHash)
+
         request.limitRuleId?.let { limitRuleId ->
             val pendingForRule = changeRequestRepository.findByLimitRule(tenantId, limitRuleId)
                 .any {

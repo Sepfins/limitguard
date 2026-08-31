@@ -12,10 +12,33 @@ import java.time.Instant
 
 interface LimitChangeRequestRepository {
     fun findById(tenantId: TenantId, id: LimitChangeRequestId): LimitRuleChangeRequest?
+
+    fun findByIdForUpdate(tenantId: TenantId, id: LimitChangeRequestId): LimitRuleChangeRequest?
+
     fun findByIdempotencyKey(tenantId: TenantId, key: IdempotencyKey): LimitRuleChangeRequest?
     fun findByLimitRule(tenantId: TenantId, limitRuleId: LimitRuleId): List<LimitRuleChangeRequest>
     fun findPendingForTarget(tenantId: TenantId, targetScopeHash: ScopeHash, at: Instant): List<LimitRuleChangeRequest>
-    fun findDueForApplication(tenantId: TenantId, dueAt: Instant, limit: Int): List<LimitRuleChangeRequest>
+
+    /**
+     * Locks the logical target for the surrounding transaction, including when
+     * neither a request nor a rule exists yet. Implementations must serialize
+     * callers for the same tenant and target hash; locking only existing rows is
+     * insufficient for concurrent CREATE requests.
+     */
+    fun lockTarget(tenantId: TenantId, targetScopeHash: ScopeHash)
+
+    /**
+     * Claims due request rows for the surrounding transaction. Database
+     * implementations must use non-blocking row claims (for example,
+     * FOR UPDATE SKIP LOCKED) so concurrent schedulers receive disjoint work.
+     * The returned requests must be processed before that transaction ends.
+     */
+    fun claimDueForApplication(
+        tenantId: TenantId,
+        dueAt: Instant,
+        limit: Int,
+    ): List<LimitRuleChangeRequest>
+
     fun findByRequesterContext(tenantId: TenantId, requestActorContext: RequestActorContext): List<LimitRuleChangeRequest>
     fun findByRequester(tenantId: TenantId, requester: PartyProfileId): List<LimitRuleChangeRequest>
     fun insert(tenantId: TenantId, request: LimitRuleChangeRequest): LimitRuleChangeRequest

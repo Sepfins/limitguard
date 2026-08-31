@@ -31,7 +31,7 @@ internal class CancelLimitRuleChangeWorkflow(
         val now = clockProvider.now()
 
         transactionRunner.inTransaction {
-            val request = changeRequestRepository.findById(tenantId, changeRequestId)
+            val request = changeRequestRepository.findByIdForUpdate(tenantId, changeRequestId)
                 ?: throw NotFoundException("limit change request not found: ${changeRequestId.value}")
             if (request.status !in CANCELLABLE_STATUSES) {
                 throw ConflictException("limit change request cannot be cancelled: ${request.id.value}")

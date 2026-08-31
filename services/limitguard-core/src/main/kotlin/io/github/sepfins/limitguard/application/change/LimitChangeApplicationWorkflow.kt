@@ -42,12 +42,13 @@ internal class LimitChangeApplicationWorkflow(
             throw ConflictException("limit change request has expired: ${request.id.value}")
         }
         requireCandidateMatchesRequest(request, candidate)
+        changeRequestRepository.lockTarget(request.tenantId, request.targetScopeHash)
 
         val candidateAtApplication = candidate.copy(updatedAt = applicationTime)
         val persistedRule = when (request.changeType) {
             LimitRuleChangeType.CREATE -> limitRuleRepository.insert(request.tenantId, candidateAtApplication)
             else -> {
-                val currentRule = limitRuleRepository.findById(
+                val currentRule = limitRuleRepository.findByIdForUpdate(
                     request.tenantId,
                     requireNotNull(request.limitRuleId),
                 ) ?: throw NotFoundException("limit rule not found: ${request.limitRuleId.value}")
@@ -61,7 +62,16 @@ internal class LimitChangeApplicationWorkflow(
                 if (candidateAtApplication.version.value != currentRule.version.next().value) {
                     throw ConflictException("approved rule has an invalid version: ${candidateAtApplication.version.value}")
                 }
-                limitRuleRepository.update(request.tenantId, candidateAtApplication)
+                limitRuleRepository.updateIfVersion(
+                    tenantId = request.tenantId,
+                    limitRule = candidateAtApplication,
+                    expectedVersion = currentRule.version,
+                ) ?: run {
+                    val actualVersion = limitRuleRepository.findById(request.tenantId, currentRule.id)?.version?.value
+                    throw ConflictException(
+                        "limit rule version conflict: expected $expectedVersion, found ${actualVersion ?: "missing"}"
+                    )
+                }
             }
         }
 
