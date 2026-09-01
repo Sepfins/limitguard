@@ -335,8 +335,8 @@ class DefaultTenantCatalogService(
         val tenantId = TenantId.of(command.tenantId)
         requireTenantExists(tenantId)
         val parentConfigurationId = command.parentConfigurationId?.let { LimitConfigurationId.of(it) }
-        if (parentConfigurationId != null) {
-            requireLimitConfigurationExists(tenantId, parentConfigurationId)
+        val parentConfiguration = parentConfigurationId?.let {
+            requireLimitConfigurationExists(tenantId, it)
         }
         val now = clockProvider.now()
         val limitConfiguration = LimitConfiguration(
@@ -430,6 +430,9 @@ class DefaultTenantCatalogService(
             metadata = Metadata(command.metadata),
             createdAt = now
         )
+        if (parentConfiguration != null) {
+            limitConfiguration.validateAgainstParent(parentConfiguration)
+        }
 
         return limitConfigurationRepository.insert(tenantId, limitConfiguration).toResult()
     }

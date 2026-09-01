@@ -5,11 +5,13 @@ import io.github.sepfins.limitguard.api.errors.ConflictException
 import io.github.sepfins.limitguard.api.errors.NotFoundException
 import io.github.sepfins.limitguard.api.errors.ValidationException
 import io.github.sepfins.limitguard.api.results.ApplyDueChangesResult
+import io.github.sepfins.limitguard.application.configuration.resolveHierarchy
 import io.github.sepfins.limitguard.domain.change.ChangeActor
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeRequest
 import io.github.sepfins.limitguard.domain.common.LimitChangeRequestId
 import io.github.sepfins.limitguard.domain.common.TenantId
 import io.github.sepfins.limitguard.port.persistence.LimitChangeRequestRepository
+import io.github.sepfins.limitguard.port.persistence.LimitConfigurationRepository
 import io.github.sepfins.limitguard.port.persistence.LimitRuleChangeEventRepository
 import io.github.sepfins.limitguard.port.persistence.LimitRuleRepository
 import io.github.sepfins.limitguard.port.time.ClockProvider
@@ -22,6 +24,7 @@ internal class ApplyDueLimitChangesWorkflow(
     private val changeEventFactory: LimitChangeEventFactory,
     private val changeRequestRepository: LimitChangeRequestRepository,
     private val changeEventRepository: LimitRuleChangeEventRepository,
+    private val limitConfigurationRepository: LimitConfigurationRepository,
     private val limitRuleRepository: LimitRuleRepository,
     private val clockProvider: ClockProvider,
     private val transactionRunner: TransactionRunner,
@@ -48,6 +51,9 @@ internal class ApplyDueLimitChangesWorkflow(
                     markFailed(request, dueAt, exception)
                     failedRequestIds += request.id
                 } catch (exception: NotFoundException) {
+                    markFailed(request, dueAt, exception)
+                    failedRequestIds += request.id
+                } catch (exception: IllegalArgumentException) {
                     markFailed(request, dueAt, exception)
                     failedRequestIds += request.id
                 }
@@ -79,6 +85,11 @@ internal class ApplyDueLimitChangesWorkflow(
             createdAt = currentRule?.createdAt ?: request.createdAt,
             updatedAt = dueAt,
         )
+        if (candidate.isActive && candidate.configurationId != null) {
+            val configurationId = candidate.configurationId
+            val hierarchy = limitConfigurationRepository.resolveHierarchy(request.tenantId, configurationId)
+            candidate.validateAgainst(hierarchy.first(), hierarchy.drop(1))
+        }
         mandateValidator.validate(candidate, dueAt)
 
         applicationWorkflow.applyInCurrentTransaction(

@@ -21,6 +21,7 @@ import io.github.sepfins.limitguard.api.commands.RegisterPartyProfileCommand
 import io.github.sepfins.limitguard.api.commands.RegisterTenantCommand
 import io.github.sepfins.limitguard.api.errors.ConflictException
 import io.github.sepfins.limitguard.api.errors.NotFoundException
+import io.github.sepfins.limitguard.api.errors.ValidationException
 import io.github.sepfins.limitguard.domain.common.MandateId
 import io.github.sepfins.limitguard.domain.common.Metadata
 import io.github.sepfins.limitguard.domain.common.PartyId
@@ -504,6 +505,37 @@ class DefaultTenantCatalogServiceTest {
                     channelScope = LimitChannelScope.CHANNEL,
                     channelId = UUID(0L, 999L),
                 )
+            )
+        }
+    }
+
+    @Test
+    fun `create limit configuration rejects a child cap above its parent`() {
+        val repositories = InMemoryLimitguardRepositories()
+        seedTenant(repositories, tenantOne)
+        val service = catalogService(repositories)
+        val parent = service.createLimitConfiguration(
+            CreateLimitConfigurationCommand(
+                tenantId = tenantOne,
+                code = "TRANSFER_CAP",
+                name = "Transfer cap",
+                limitKind = LimitKind.PER_TRANSACTION,
+                currency = "EUR",
+                maxAssignableAmount = BigDecimal("1000.00"),
+            ),
+        )
+
+        assertFailsWith<ValidationException> {
+            service.createLimitConfiguration(
+                CreateLimitConfigurationCommand(
+                    tenantId = tenantOne,
+                    code = "PREMIUM_TRANSFER_CAP",
+                    name = "Premium transfer cap",
+                    limitKind = LimitKind.PER_TRANSACTION,
+                    currency = "EUR",
+                    maxAssignableAmount = BigDecimal("1000.01"),
+                    parentConfigurationId = parent.id,
+                ),
             )
         }
     }

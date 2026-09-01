@@ -10,4 +10,8 @@ data class EffectiveWindow(val startsAt: Instant, val endsAt: Instant?) {
     fun contains(time: Instant): Boolean {
         return time >= startsAt && (endsAt == null || time < endsAt)
     }
+
+    fun contains(other: EffectiveWindow): Boolean =
+        other.startsAt >= startsAt &&
+            (endsAt == null || (other.endsAt != null && other.endsAt <= endsAt))
 }

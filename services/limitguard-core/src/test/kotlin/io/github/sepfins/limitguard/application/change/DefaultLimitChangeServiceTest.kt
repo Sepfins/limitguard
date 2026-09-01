@@ -1370,6 +1370,36 @@ class DefaultLimitChangeServiceTest {
     }
 
     @Test
+    fun `applyDueLimitChanges revalidates the configuration before creating the rule`() {
+        val repositories = repositoriesWithConfiguration()
+        val service = limitChangeService(repositories)
+        val dueAt = now.plusSeconds(3600)
+        val scheduled = service.requestLimitRuleChange(
+            command().copy(effectiveAt = dueAt),
+        )
+        val configuration = assertNotNull(
+            repositories.limitConfigurations.findById(tenantId, configurationId),
+        )
+        repositories.limitConfigurations.update(
+            tenantId,
+            configuration.copy(isActive = false),
+        )
+
+        val result = service.applyDueLimitChanges(
+            ApplyDueLimitChangesCommand(tenantId.value, dueAt),
+        )
+
+        assertEquals(0, result.appliedCount)
+        assertEquals(1, result.failedCount)
+        assertEquals(listOf(scheduled.id), result.failedChangeRequestIds)
+        val failedRequest = assertNotNull(
+            repositories.limitChangeRequests.findById(tenantId, LimitChangeRequestId.of(scheduled.id)),
+        )
+        assertEquals(DomainLimitRuleChangeStatus.FAILED, failedRequest.status)
+        assertEquals("configuration must be active", failedRequest.decisionReason)
+    }
+
+    @Test
     fun `applyDueLimitChanges uses the current time and validates the batch limit`() {
         val service = limitChangeService(repositoriesWithConfiguration())
 
@@ -1563,6 +1593,7 @@ class DefaultLimitChangeServiceTest {
                 changeEventFactory = changeEventFactory,
                 changeRequestRepository = repositories.limitChangeRequests,
                 changeEventRepository = repositories.limitRuleChangeEvents,
+                limitConfigurationRepository = repositories.limitConfigurations,
                 limitRuleRepository = repositories.limitRules,
                 clockProvider = clock,
                 transactionRunner = DirectTransactionRunner(),

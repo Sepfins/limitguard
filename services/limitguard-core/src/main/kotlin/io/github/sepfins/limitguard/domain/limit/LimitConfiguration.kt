@@ -46,4 +46,29 @@ data class LimitConfiguration(
 
     fun isEffectiveAt(instant: Instant): Boolean =
         isActive && effectiveWindow.contains(instant)
+
+    fun validateAgainstParent(parent: LimitConfiguration): LimitConfiguration {
+        require(parentConfigurationId == parent.id) {
+            "parent configuration id must match parentConfigurationId"
+        }
+        require(parent.tenantId == tenantId) {
+            "parent configuration tenant must match child tenant"
+        }
+        require(parent.limitKind == limitKind) {
+            "child configuration limit kind must match parent limit kind"
+        }
+        require(parent.maxAssignableAmount.currency == maxAssignableAmount.currency) {
+            "child configuration currency must match parent currency"
+        }
+        require(maxAssignableAmount <= parent.maxAssignableAmount) {
+            "child configuration maxAssignableAmount must be less than or equal to parent maxAssignableAmount"
+        }
+        require(defaultAmount == null || defaultAmount <= parent.maxAssignableAmount) {
+            "child configuration defaultAmount must be less than or equal to parent maxAssignableAmount"
+        }
+        require(parent.effectiveWindow.contains(effectiveWindow)) {
+            "child configuration effective window must be contained by parent effective window"
+        }
+        return this
+    }
 }

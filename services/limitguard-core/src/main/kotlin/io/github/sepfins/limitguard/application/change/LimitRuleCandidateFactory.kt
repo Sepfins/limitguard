@@ -144,10 +144,7 @@ internal class LimitRuleCandidateFactory {
     ): LimitRule {
         val configuration = facts.configuration
         if (configuration != null && changeType in CONFIGURATION_VALIDATED_CHANGES) {
-            require(configuration.isEffectiveAt(rule.effectiveWindow.startsAt)) {
-                "limit configuration is not active at requested rule start: ${configuration.id.value}"
-            }
-            rule.validateAgainst(configuration)
+            rule.validateAgainst(configuration, facts.ancestorConfigurations)
         }
         return rule
     }

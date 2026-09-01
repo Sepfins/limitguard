@@ -4,6 +4,7 @@ import io.github.sepfins.limitguard.api.LimitRuleChangeType
 import io.github.sepfins.limitguard.api.commands.RequestLimitRuleChangeCommand
 import io.github.sepfins.limitguard.api.errors.ConflictException
 import io.github.sepfins.limitguard.api.errors.NotFoundException
+import io.github.sepfins.limitguard.application.configuration.resolveHierarchy
 import io.github.sepfins.limitguard.domain.change.LimitRuleRevisionEventType
 import io.github.sepfins.limitguard.domain.change.ResolvedLimitChangeFacts
 import io.github.sepfins.limitguard.domain.common.LimitConfigurationId
@@ -58,14 +59,14 @@ internal class ChangeReferenceResolver(
         if (command.changeType == LimitRuleChangeType.CREATE && configurationId == null) {
             throw IllegalArgumentException("requestedRule.configurationId is required")
         }
-        val configuration = configurationId?.let {
-            limitConfigurationRepository.findById(tenantId, it)
-                ?: throw NotFoundException("limit configuration not found: ${it.value}")
-        }
+        val configurationHierarchy = configurationId
+            ?.let { limitConfigurationRepository.resolveHierarchy(tenantId, it) }
+            .orEmpty()
 
         return ResolvedLimitChangeFacts(
             currentRule = currentRule,
-            configuration = configuration,
+            configuration = configurationHierarchy.firstOrNull(),
+            ancestorConfigurations = configurationHierarchy.drop(1),
         )
     }
 

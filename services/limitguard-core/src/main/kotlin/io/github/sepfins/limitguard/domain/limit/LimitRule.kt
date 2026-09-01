@@ -44,14 +44,23 @@ data class LimitRule(
     fun isEffectiveAt(instant: Instant): Boolean =
         isActive && effectiveWindow.contains(instant)
 
-    fun validateAgainst(configuration: LimitConfiguration): LimitRule {
+    fun validateAgainst(configuration: LimitConfiguration): LimitRule =
+        validateAgainst(configuration, emptyList())
+
+    /**
+     * The selected configuration owns the rule's channel, operation, and priority.
+     * Funding scope remains configuration-owned and is inherited during transaction matching.
+     * [ancestorConfigurations] must be ordered from the immediate parent to the root.
+     */
+    fun validateAgainst(
+        configuration: LimitConfiguration,
+        ancestorConfigurations: List<LimitConfiguration>,
+    ): LimitRule {
         require(configuration.tenantId == tenantId) {
             "configuration tenant must match rule tenant"
         }
-        if (configurationId != null) {
-            require(configuration.id == configurationId) {
-                "configuration id must match rule configurationId"
-            }
+        require(configuration.id == configurationId) {
+            "configuration id must match rule configurationId"
         }
         require(configuration.limitKind == limitKind) {
             "configuration limit kind must match rule limit kind"
@@ -61,6 +70,39 @@ data class LimitRule(
         }
         require(amount <= configuration.maxAssignableAmount) {
             "rule amount must be less than or equal to configuration maxAssignableAmount"
+        }
+        require(configuration.channelScope == channelScope) {
+            "rule channel scope must match configuration channel scope"
+        }
+        require(configuration.operationScope == operationScope) {
+            "rule operation scope must match configuration operation scope"
+        }
+        require(configuration.priority == priority) {
+            "rule priority must match configuration priority"
+        }
+        require(configuration.isActive) {
+            "configuration must be active"
+        }
+        require(configuration.effectiveWindow.contains(effectiveWindow)) {
+            "rule effective window must be contained by configuration effective window"
+        }
+
+        var child = configuration
+        ancestorConfigurations.forEach { parent ->
+            child.validateAgainstParent(parent)
+            require(parent.isActive) {
+                "ancestor configuration must be active"
+            }
+            require(amount <= parent.maxAssignableAmount) {
+                "rule amount must be less than or equal to ancestor configuration maxAssignableAmount"
+            }
+            require(parent.effectiveWindow.contains(effectiveWindow)) {
+                "rule effective window must be contained by ancestor configuration effective window"
+            }
+            child = parent
+        }
+        require(child.parentConfigurationId == null) {
+            "complete configuration ancestry is required to validate parent caps"
         }
         return this
     }

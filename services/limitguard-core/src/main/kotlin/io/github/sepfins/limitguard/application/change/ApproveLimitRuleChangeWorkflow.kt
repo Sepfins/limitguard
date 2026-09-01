@@ -5,6 +5,7 @@ import io.github.sepfins.limitguard.api.errors.ConflictException
 import io.github.sepfins.limitguard.api.errors.NotFoundException
 import io.github.sepfins.limitguard.api.errors.ValidationException
 import io.github.sepfins.limitguard.api.results.LimitChangeRequestResult
+import io.github.sepfins.limitguard.application.configuration.resolveHierarchy
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeRequest
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeStatus
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeType
@@ -177,12 +178,8 @@ internal class ApproveLimitRuleChangeWorkflow(
             requireNotNull(configurationId) { "approvedRule.configurationId is required" }
         }
         if (configurationId != null && request.changeType in CONFIGURATION_VALIDATED_CHANGE_TYPES) {
-            val configuration = limitConfigurationRepository.findById(request.tenantId, configurationId)
-                ?: throw NotFoundException("limit configuration not found: ${configurationId.value}")
-            require(configuration.isEffectiveAt(candidate.effectiveWindow.startsAt)) {
-                "limit configuration is not active at approved rule start: ${configuration.id.value}"
-            }
-            candidate.validateAgainst(configuration)
+            val hierarchy = limitConfigurationRepository.resolveHierarchy(request.tenantId, configurationId)
+            candidate.validateAgainst(hierarchy.first(), hierarchy.drop(1))
         }
     }
 

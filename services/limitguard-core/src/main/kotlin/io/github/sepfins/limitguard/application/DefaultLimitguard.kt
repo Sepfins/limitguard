@@ -182,6 +182,7 @@ class DefaultLimitguard(
             changeEventFactory = limitChangeEventFactory,
             changeRequestRepository = limitChangeRequestRepository,
             changeEventRepository = limitChangeEventRepository,
+            limitConfigurationRepository = limitConfigurationRepository,
             limitRuleRepository = limitRuleRepository,
             clockProvider = clockProvider,
             transactionRunner = transactionRunner,
