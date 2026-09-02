@@ -20,6 +20,7 @@ CREATE TABLE identifier_scheme (
     is_primary BOOLEAN NOT NULL DEFAULT false,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (tenant_id, entity_type, scheme_name),
+    UNIQUE (id, entity_type),
     CONSTRAINT chk_identifier_scheme_max_length CHECK (
         max_length IS NULL OR max_length > 0
     )
@@ -33,10 +34,12 @@ CREATE TABLE entity_identifier (
     id UUID PRIMARY KEY DEFAULT uuidv7(),
     entity_type VARCHAR(50) NOT NULL,
     entity_id UUID NOT NULL,
-    scheme_id UUID NOT NULL REFERENCES identifier_scheme(id),
+    scheme_id UUID NOT NULL,
     identifier VARCHAR(500) NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (scheme_id, identifier)
+    UNIQUE (scheme_id, identifier),
+    FOREIGN KEY (scheme_id, entity_type)
+        REFERENCES identifier_scheme(id, entity_type)
 );
 
 CREATE INDEX idx_entity_identifier_entity
@@ -103,9 +106,13 @@ CREATE TABLE party_profile (
     id UUID PRIMARY KEY DEFAULT uuidv7(),
     party_id UUID NOT NULL REFERENCES party(id),
     tenant_id UUID NOT NULL REFERENCES tenant(id),
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (party_id, tenant_id),
-    UNIQUE (tenant_id, id)
+    UNIQUE (tenant_id, id),
+    CONSTRAINT chk_party_profile_metadata CHECK (
+        jsonb_typeof(metadata) = 'object'
+    )
 );
 
 CREATE TYPE party_profile_delegation_type AS ENUM (

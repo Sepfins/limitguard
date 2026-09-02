@@ -14,16 +14,21 @@ import io.github.sepfins.limitguard.domain.change.RequestActorContext
 import io.github.sepfins.limitguard.domain.change.ScopeHash
 import io.github.sepfins.limitguard.domain.channel.Channel
 import io.github.sepfins.limitguard.domain.channel.ChannelCode
+import io.github.sepfins.limitguard.domain.channel.ChannelGroup
+import io.github.sepfins.limitguard.domain.channel.ChannelGroupCode
 import io.github.sepfins.limitguard.domain.channel.ChannelGroupMember
+import io.github.sepfins.limitguard.domain.common.BankWorkerId
 import io.github.sepfins.limitguard.domain.common.ChannelGroupId
 import io.github.sepfins.limitguard.domain.common.CurrencyCode
 import io.github.sepfins.limitguard.domain.common.ChannelId
 import io.github.sepfins.limitguard.domain.common.ExternalReference
+import io.github.sepfins.limitguard.domain.common.EntityIdentifierId
 import io.github.sepfins.limitguard.domain.common.FundingSourceGroupId
 import io.github.sepfins.limitguard.domain.common.FundingSourceId
 import io.github.sepfins.limitguard.domain.common.FundingSourceOwnerId
 import io.github.sepfins.limitguard.domain.common.FundingSourceProductId
 import io.github.sepfins.limitguard.domain.common.IdempotencyKey
+import io.github.sepfins.limitguard.domain.common.IdentifierSchemeId
 import io.github.sepfins.limitguard.domain.common.LimitChangePolicyEvaluationId
 import io.github.sepfins.limitguard.domain.common.LimitChangePolicyId
 import io.github.sepfins.limitguard.domain.common.LimitChangeRequestId
@@ -35,6 +40,7 @@ import io.github.sepfins.limitguard.domain.common.MandateId
 import io.github.sepfins.limitguard.domain.common.OperationTypeId
 import io.github.sepfins.limitguard.domain.common.PartyId
 import io.github.sepfins.limitguard.domain.common.PartyLegalIdentifierId
+import io.github.sepfins.limitguard.domain.common.PartyProfileDelegationId
 import io.github.sepfins.limitguard.domain.common.PartyProfileId
 import io.github.sepfins.limitguard.domain.common.PaymentTransactionId
 import io.github.sepfins.limitguard.domain.common.TenantId
@@ -45,11 +51,18 @@ import io.github.sepfins.limitguard.domain.common.UsageWindow
 import io.github.sepfins.limitguard.domain.common.Version
 import io.github.sepfins.limitguard.domain.funding.FundingSource
 import io.github.sepfins.limitguard.domain.funding.FundingSourceCategory
+import io.github.sepfins.limitguard.domain.funding.FundingSourceGroup
+import io.github.sepfins.limitguard.domain.funding.FundingSourceGroupCode
 import io.github.sepfins.limitguard.domain.funding.FundingSourceGroupMember
 import io.github.sepfins.limitguard.domain.funding.FundingSourceOwner
 import io.github.sepfins.limitguard.domain.funding.FundingSourceProduct
 import io.github.sepfins.limitguard.domain.funding.FundingSourceProductCode
 import io.github.sepfins.limitguard.domain.funding.FundingSourceScope
+import io.github.sepfins.limitguard.domain.identifier.EntityIdentifier
+import io.github.sepfins.limitguard.domain.identifier.EntityType
+import io.github.sepfins.limitguard.domain.identifier.IdentifierScheme
+import io.github.sepfins.limitguard.domain.identifier.IdentifierValue
+import io.github.sepfins.limitguard.domain.identifier.SchemeName
 import io.github.sepfins.limitguard.domain.limit.LimitChannelScope
 import io.github.sepfins.limitguard.domain.limit.LimitConfiguration
 import io.github.sepfins.limitguard.domain.limit.LimitConfigurationCode
@@ -69,6 +82,7 @@ import io.github.sepfins.limitguard.domain.party.LegalIdentifierValue
 import io.github.sepfins.limitguard.domain.party.Party
 import io.github.sepfins.limitguard.domain.party.PartyLegalIdentifier
 import io.github.sepfins.limitguard.domain.party.PartyProfile
+import io.github.sepfins.limitguard.domain.party.PartyProfileDelegation
 import io.github.sepfins.limitguard.domain.tenant.Tenant
 import io.github.sepfins.limitguard.domain.tenant.TenantName
 import io.github.sepfins.limitguard.domain.transaction.PaymentTransaction
@@ -78,13 +92,19 @@ import io.github.sepfins.limitguard.domain.transaction.TransactionResultSnapshot
 import io.github.sepfins.limitguard.domain.usage.LimitUsageBucket
 import io.github.sepfins.limitguard.domain.usage.LimitUsageEvent
 import io.github.sepfins.limitguard.domain.usage.LimitUsageEventType
+import io.github.sepfins.limitguard.domain.worker.BankWorker
+import io.github.sepfins.limitguard.port.persistence.BankWorkerRepository
+import io.github.sepfins.limitguard.port.persistence.ChannelGroupRepository
 import io.github.sepfins.limitguard.port.persistence.ChannelRepository
 import io.github.sepfins.limitguard.port.persistence.ChannelGroupMemberRepository
+import io.github.sepfins.limitguard.port.persistence.EntityIdentifierRepository
 import io.github.sepfins.limitguard.port.persistence.FundingSourceGroupMemberRepository
+import io.github.sepfins.limitguard.port.persistence.FundingSourceGroupRepository
 import io.github.sepfins.limitguard.port.persistence.FundingSourceOwnerRepository
 import io.github.sepfins.limitguard.port.persistence.FundingSourceProductRepository
 import io.github.sepfins.limitguard.port.persistence.FundingSourceRepository
 import io.github.sepfins.limitguard.port.persistence.IndividualRepository
+import io.github.sepfins.limitguard.port.persistence.IdentifierSchemeRepository
 import io.github.sepfins.limitguard.port.persistence.LegalEntityRepository
 import io.github.sepfins.limitguard.port.persistence.LimitChangePolicyEvaluationRepository
 import io.github.sepfins.limitguard.port.persistence.LimitChangePolicyRepository
@@ -97,6 +117,7 @@ import io.github.sepfins.limitguard.port.persistence.MandateRepository
 import io.github.sepfins.limitguard.port.persistence.OperationTypeRepository
 import io.github.sepfins.limitguard.port.persistence.PartyLegalIdentifierRepository
 import io.github.sepfins.limitguard.port.persistence.PartyProfileRepository
+import io.github.sepfins.limitguard.port.persistence.PartyProfileDelegationRepository
 import io.github.sepfins.limitguard.port.persistence.PartyRepository
 import io.github.sepfins.limitguard.port.persistence.TenantRepository
 import io.github.sepfins.limitguard.port.persistence.TransactionEventRepository
@@ -108,17 +129,23 @@ import java.time.Instant
 
 class InMemoryLimitguardRepositories(
     val tenants: InMemoryTenantRepository = InMemoryTenantRepository(),
+    val identifierSchemes: InMemoryIdentifierSchemeRepository = InMemoryIdentifierSchemeRepository(),
+    val entityIdentifiers: InMemoryEntityIdentifierRepository = InMemoryEntityIdentifierRepository(),
     val parties: InMemoryPartyRepository = InMemoryPartyRepository(),
     val individuals: InMemoryIndividualRepository = InMemoryIndividualRepository(),
     val legalEntities: InMemoryLegalEntityRepository = InMemoryLegalEntityRepository(),
     val partyLegalIdentifiers: InMemoryPartyLegalIdentifierRepository = InMemoryPartyLegalIdentifierRepository(),
     val partyProfiles: InMemoryPartyProfileRepository = InMemoryPartyProfileRepository(),
+    val partyProfileDelegations: InMemoryPartyProfileDelegationRepository = InMemoryPartyProfileDelegationRepository(),
+    val bankWorkers: InMemoryBankWorkerRepository = InMemoryBankWorkerRepository(),
     val channels: InMemoryChannelRepository = InMemoryChannelRepository(),
+    val channelGroups: InMemoryChannelGroupRepository = InMemoryChannelGroupRepository(),
     val channelGroupMembers: InMemoryChannelGroupMemberRepository = InMemoryChannelGroupMemberRepository(),
     val operationTypes: InMemoryOperationTypeRepository = InMemoryOperationTypeRepository(),
     val fundingSourceProducts: InMemoryFundingSourceProductRepository = InMemoryFundingSourceProductRepository(),
     val fundingSources: InMemoryFundingSourceRepository = InMemoryFundingSourceRepository(),
     val fundingSourceOwners: InMemoryFundingSourceOwnerRepository = InMemoryFundingSourceOwnerRepository(),
+    val fundingSourceGroups: InMemoryFundingSourceGroupRepository = InMemoryFundingSourceGroupRepository(),
     val fundingSourceGroupMembers: InMemoryFundingSourceGroupMemberRepository =
         InMemoryFundingSourceGroupMemberRepository(),
     val mandates: InMemoryMandateRepository = InMemoryMandateRepository(),
@@ -165,6 +192,103 @@ class InMemoryTenantRepository : TenantRepository {
     }
 }
 
+class InMemoryIdentifierSchemeRepository : IdentifierSchemeRepository {
+    private val lock = Any()
+    private val schemes = ConcurrentHashMap<TenantScopedKey<IdentifierSchemeId>, IdentifierScheme>()
+
+    override fun findById(tenantId: TenantId, id: IdentifierSchemeId): IdentifierScheme? =
+        schemes[TenantScopedKey(tenantId, id)]
+
+    override fun findByName(
+        tenantId: TenantId,
+        entityType: EntityType,
+        schemeName: SchemeName,
+    ): IdentifierScheme? =
+        schemes.tenantValues(tenantId).firstOrNull {
+            it.entityType == entityType && it.schemeName == schemeName
+        }
+
+    override fun findPrimary(tenantId: TenantId, entityType: EntityType): IdentifierScheme? =
+        schemes.tenantValues(tenantId).firstOrNull {
+            it.entityType == entityType && it.isPrimary
+        }
+
+    override fun insert(tenantId: TenantId, scheme: IdentifierScheme): IdentifierScheme = synchronized(lock) {
+        requireSameTenant(tenantId, scheme.tenantId)
+        requireAbsent(findById(tenantId, scheme.id) != null, "identifier scheme id already exists: ${scheme.id.value}")
+        requireUnique(tenantId, scheme)
+        schemes[TenantScopedKey(tenantId, scheme.id)] = scheme
+        scheme
+    }
+
+    override fun update(tenantId: TenantId, scheme: IdentifierScheme): IdentifierScheme = synchronized(lock) {
+        requireSameTenant(tenantId, scheme.tenantId)
+        requirePresent(findById(tenantId, scheme.id) != null, "identifier scheme not found: ${scheme.id.value}")
+        requireUnique(tenantId, scheme)
+        schemes[TenantScopedKey(tenantId, scheme.id)] = scheme
+        scheme
+    }
+
+    private fun requireUnique(tenantId: TenantId, scheme: IdentifierScheme) {
+        requireAbsent(
+            schemes.tenantValues(tenantId).any {
+                it.id != scheme.id &&
+                    it.entityType == scheme.entityType &&
+                    it.schemeName == scheme.schemeName
+            },
+            "identifier scheme name already exists for entity type: ${scheme.entityType.value}/${scheme.schemeName.value}",
+        )
+        requireAbsent(
+            scheme.isPrimary && schemes.tenantValues(tenantId).any {
+                it.id != scheme.id && it.entityType == scheme.entityType && it.isPrimary
+            },
+            "primary identifier scheme already exists for entity type: ${scheme.entityType.value}",
+        )
+    }
+}
+
+class InMemoryEntityIdentifierRepository : EntityIdentifierRepository {
+    private val lock = Any()
+    private val identifiers = ConcurrentHashMap<TenantScopedKey<EntityIdentifierId>, EntityIdentifier>()
+
+    override fun findById(tenantId: TenantId, id: EntityIdentifierId): EntityIdentifier? =
+        identifiers[TenantScopedKey(tenantId, id)]
+
+    override fun findByEntity(
+        tenantId: TenantId,
+        entityType: EntityType,
+        entityId: java.util.UUID,
+    ): List<EntityIdentifier> =
+        identifiers.tenantValues(tenantId).filter {
+            it.entityType == entityType && it.entityId == entityId
+        }
+
+    override fun findByValue(
+        tenantId: TenantId,
+        schemeId: IdentifierSchemeId,
+        identifier: IdentifierValue,
+    ): EntityIdentifier? =
+        identifiers.tenantValues(tenantId).firstOrNull {
+            it.schemeId == schemeId && it.identifier == identifier
+        }
+
+    override fun insert(
+        tenantId: TenantId,
+        entityIdentifier: EntityIdentifier,
+    ): EntityIdentifier = synchronized(lock) {
+        requireAbsent(
+            findById(tenantId, entityIdentifier.id) != null,
+            "entity identifier id already exists: ${entityIdentifier.id.value}",
+        )
+        requireAbsent(
+            findByValue(tenantId, entityIdentifier.schemeId, entityIdentifier.identifier) != null,
+            "entity identifier already exists for scheme and value",
+        )
+        identifiers[TenantScopedKey(tenantId, entityIdentifier.id)] = entityIdentifier
+        entityIdentifier
+    }
+}
+
 class InMemoryChannelRepository : ChannelRepository {
     private val lock = Any()
     private val channels = ConcurrentHashMap<TenantScopedKey<ChannelId>, Channel>()
@@ -198,9 +322,42 @@ class InMemoryChannelRepository : ChannelRepository {
     }
 }
 
+class InMemoryChannelGroupRepository : ChannelGroupRepository {
+    private val lock = Any()
+    private val groups = ConcurrentHashMap<TenantScopedKey<ChannelGroupId>, ChannelGroup>()
+
+    override fun findById(tenantId: TenantId, id: ChannelGroupId): ChannelGroup? =
+        groups[TenantScopedKey(tenantId, id)]
+
+    override fun findByCode(tenantId: TenantId, code: ChannelGroupCode): ChannelGroup? =
+        groups.tenantValues(tenantId).firstOrNull { it.code == code }
+
+    override fun insert(tenantId: TenantId, channelGroup: ChannelGroup): ChannelGroup = synchronized(lock) {
+        requireSameTenant(tenantId, channelGroup.tenantId)
+        requireAbsent(findById(tenantId, channelGroup.id) != null, "channel group id already exists: ${channelGroup.id.value}")
+        requireAbsent(findByCode(tenantId, channelGroup.code) != null, "channel group code already exists: ${channelGroup.code.value}")
+        groups[TenantScopedKey(tenantId, channelGroup.id)] = channelGroup
+        channelGroup
+    }
+
+    override fun update(tenantId: TenantId, channelGroup: ChannelGroup): ChannelGroup = synchronized(lock) {
+        requireSameTenant(tenantId, channelGroup.tenantId)
+        requirePresent(findById(tenantId, channelGroup.id) != null, "channel group not found: ${channelGroup.id.value}")
+        requireAbsent(
+            groups.tenantValues(tenantId).any { it.id != channelGroup.id && it.code == channelGroup.code },
+            "channel group code already exists: ${channelGroup.code.value}",
+        )
+        groups[TenantScopedKey(tenantId, channelGroup.id)] = channelGroup
+        channelGroup
+    }
+}
+
 class InMemoryChannelGroupMemberRepository : ChannelGroupMemberRepository {
     private val lock = Any()
     private val members = ConcurrentHashMap<ChannelGroupMemberKey, ChannelGroupMember>()
+
+    override fun findByGroup(tenantId: TenantId, groupId: ChannelGroupId): List<ChannelGroupMember> =
+        members.values.filter { it.tenantId == tenantId && it.groupId == groupId }
 
     override fun findGroupIdsContaining(
         tenantId: TenantId,
@@ -211,7 +368,7 @@ class InMemoryChannelGroupMemberRepository : ChannelGroupMemberRepository {
             .filter { it.tenantId == tenantId && it.channelId == channelId }
             .mapTo(linkedSetOf()) { it.groupId }
 
-    fun add(
+    override fun insert(
         tenantId: TenantId,
         member: ChannelGroupMember,
     ): ChannelGroupMember = synchronized(lock) {
@@ -221,6 +378,9 @@ class InMemoryChannelGroupMemberRepository : ChannelGroupMemberRepository {
         members[key] = member
         member
     }
+
+    fun add(tenantId: TenantId, member: ChannelGroupMember): ChannelGroupMember =
+        insert(tenantId, member)
 }
 
 class InMemoryOperationTypeRepository : OperationTypeRepository {
@@ -394,9 +554,70 @@ class InMemoryFundingSourceOwnerRepository : FundingSourceOwnerRepository {
     }
 }
 
+class InMemoryFundingSourceGroupRepository : FundingSourceGroupRepository {
+    private val lock = Any()
+    private val groups = ConcurrentHashMap<TenantScopedKey<FundingSourceGroupId>, FundingSourceGroup>()
+
+    override fun findById(tenantId: TenantId, id: FundingSourceGroupId): FundingSourceGroup? =
+        groups[TenantScopedKey(tenantId, id)]
+
+    override fun findByCode(
+        tenantId: TenantId,
+        ownerPartyProfileId: PartyProfileId,
+        code: FundingSourceGroupCode,
+    ): FundingSourceGroup? =
+        groups.tenantValues(tenantId).firstOrNull {
+            it.ownerPartyProfileId == ownerPartyProfileId && it.code == code
+        }
+
+    override fun insert(
+        tenantId: TenantId,
+        fundingSourceGroup: FundingSourceGroup,
+    ): FundingSourceGroup = synchronized(lock) {
+        requireSameTenant(tenantId, fundingSourceGroup.tenantId)
+        requireAbsent(
+            findById(tenantId, fundingSourceGroup.id) != null,
+            "funding source group id already exists: ${fundingSourceGroup.id.value}",
+        )
+        requireAbsent(
+            findByCode(tenantId, fundingSourceGroup.ownerPartyProfileId, fundingSourceGroup.code) != null,
+            "funding source group code already exists for owner: ${fundingSourceGroup.code.value}",
+        )
+        groups[TenantScopedKey(tenantId, fundingSourceGroup.id)] = fundingSourceGroup
+        fundingSourceGroup
+    }
+
+    override fun update(
+        tenantId: TenantId,
+        fundingSourceGroup: FundingSourceGroup,
+    ): FundingSourceGroup = synchronized(lock) {
+        requireSameTenant(tenantId, fundingSourceGroup.tenantId)
+        requirePresent(
+            findById(tenantId, fundingSourceGroup.id) != null,
+            "funding source group not found: ${fundingSourceGroup.id.value}",
+        )
+        requireAbsent(
+            groups.tenantValues(tenantId).any {
+                it.id != fundingSourceGroup.id &&
+                    it.ownerPartyProfileId == fundingSourceGroup.ownerPartyProfileId &&
+                    it.code == fundingSourceGroup.code
+            },
+            "funding source group code already exists for owner: ${fundingSourceGroup.code.value}",
+        )
+        groups[TenantScopedKey(tenantId, fundingSourceGroup.id)] = fundingSourceGroup
+        fundingSourceGroup
+    }
+}
+
 class InMemoryFundingSourceGroupMemberRepository : FundingSourceGroupMemberRepository {
     private val lock = Any()
     private val members = ConcurrentHashMap<FundingSourceGroupMemberKey, FundingSourceGroupMember>()
+
+    override fun findByGroup(
+        tenantId: TenantId,
+        groupId: FundingSourceGroupId,
+    ): List<FundingSourceGroupMember> =
+        members.values.filter { it.tenantId == tenantId && it.groupId == groupId }
 
     override fun findGroupIdsContaining(
         tenantId: TenantId,
@@ -412,7 +633,7 @@ class InMemoryFundingSourceGroupMemberRepository : FundingSourceGroupMemberRepos
             }
             .mapTo(linkedSetOf()) { it.groupId }
 
-    fun add(
+    override fun insert(
         tenantId: TenantId,
         member: FundingSourceGroupMember,
     ): FundingSourceGroupMember = synchronized(lock) {
@@ -422,6 +643,9 @@ class InMemoryFundingSourceGroupMemberRepository : FundingSourceGroupMemberRepos
         members[key] = member
         member
     }
+
+    fun add(tenantId: TenantId, member: FundingSourceGroupMember): FundingSourceGroupMember =
+        insert(tenantId, member)
 }
 
 class InMemoryPartyRepository : PartyRepository {
@@ -593,6 +817,104 @@ class InMemoryPartyProfileRepository : PartyProfileRepository {
         )
         profiles[TenantScopedKey(tenantId, partyProfile.id)] = partyProfile
         partyProfile
+    }
+}
+
+class InMemoryPartyProfileDelegationRepository : PartyProfileDelegationRepository {
+    private val lock = Any()
+    private val delegations =
+        ConcurrentHashMap<TenantScopedKey<PartyProfileDelegationId>, PartyProfileDelegation>()
+
+    override fun findById(
+        tenantId: TenantId,
+        id: PartyProfileDelegationId,
+    ): PartyProfileDelegation? = delegations[TenantScopedKey(tenantId, id)]
+
+    override fun findByOwner(
+        tenantId: TenantId,
+        ownerPartyProfileId: PartyProfileId,
+    ): List<PartyProfileDelegation> =
+        delegations.tenantValues(tenantId).filter {
+            it.ownerPartyProfileId == ownerPartyProfileId
+        }
+
+    override fun insert(
+        tenantId: TenantId,
+        delegation: PartyProfileDelegation,
+    ): PartyProfileDelegation = synchronized(lock) {
+        requireSameTenant(tenantId, delegation.tenantId)
+        requireAbsent(
+            findById(tenantId, delegation.id) != null,
+            "party profile delegation id already exists: ${delegation.id.value}",
+        )
+        requireUnique(tenantId, delegation)
+        delegations[TenantScopedKey(tenantId, delegation.id)] = delegation
+        delegation
+    }
+
+    override fun update(
+        tenantId: TenantId,
+        delegation: PartyProfileDelegation,
+    ): PartyProfileDelegation = synchronized(lock) {
+        requireSameTenant(tenantId, delegation.tenantId)
+        requirePresent(
+            findById(tenantId, delegation.id) != null,
+            "party profile delegation not found: ${delegation.id.value}",
+        )
+        requireUnique(tenantId, delegation)
+        delegations[TenantScopedKey(tenantId, delegation.id)] = delegation
+        delegation
+    }
+
+    private fun requireUnique(tenantId: TenantId, delegation: PartyProfileDelegation) {
+        requireAbsent(
+            delegations.tenantValues(tenantId).any {
+                it.id != delegation.id &&
+                    it.ownerPartyProfileId == delegation.ownerPartyProfileId &&
+                    it.delegatePartyProfileId == delegation.delegatePartyProfileId &&
+                    it.delegationType == delegation.delegationType
+            },
+            "party profile delegation already exists for owner, delegate, and type",
+        )
+    }
+}
+
+class InMemoryBankWorkerRepository : BankWorkerRepository {
+    private val lock = Any()
+    private val workers = ConcurrentHashMap<TenantScopedKey<BankWorkerId>, BankWorker>()
+
+    override fun findById(tenantId: TenantId, id: BankWorkerId): BankWorker? =
+        workers[TenantScopedKey(tenantId, id)]
+
+    override fun findByExternalReference(
+        tenantId: TenantId,
+        externalReference: ExternalReference,
+    ): BankWorker? =
+        workers.tenantValues(tenantId).firstOrNull { it.externalReference == externalReference }
+
+    override fun insert(tenantId: TenantId, bankWorker: BankWorker): BankWorker = synchronized(lock) {
+        requireSameTenant(tenantId, bankWorker.tenantId)
+        requireAbsent(findById(tenantId, bankWorker.id) != null, "bank worker id already exists: ${bankWorker.id.value}")
+        requireExternalReferenceUnique(tenantId, bankWorker)
+        workers[TenantScopedKey(tenantId, bankWorker.id)] = bankWorker
+        bankWorker
+    }
+
+    override fun update(tenantId: TenantId, bankWorker: BankWorker): BankWorker = synchronized(lock) {
+        requireSameTenant(tenantId, bankWorker.tenantId)
+        requirePresent(findById(tenantId, bankWorker.id) != null, "bank worker not found: ${bankWorker.id.value}")
+        requireExternalReferenceUnique(tenantId, bankWorker)
+        workers[TenantScopedKey(tenantId, bankWorker.id)] = bankWorker
+        bankWorker
+    }
+
+    private fun requireExternalReferenceUnique(tenantId: TenantId, bankWorker: BankWorker) {
+        requireAbsent(
+            workers.tenantValues(tenantId).any {
+                it.id != bankWorker.id && it.externalReference == bankWorker.externalReference
+            },
+            "bank worker external reference already exists: ${bankWorker.externalReference.value}",
+        )
     }
 }
 

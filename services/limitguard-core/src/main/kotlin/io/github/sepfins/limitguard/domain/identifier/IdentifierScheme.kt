@@ -16,6 +16,10 @@ data class IdentifierScheme(
     val createdAt: Instant? = null
 ) {
     init {
+        require(formatRegex == null || formatRegex.length <= 500) {
+            "formatRegex cannot be longer than 500 characters"
+        }
+        formatRegex?.let { Regex(it) }
         require(maxLength == null || maxLength > 0) { "maxLength must be positive when set" }
     }
 }

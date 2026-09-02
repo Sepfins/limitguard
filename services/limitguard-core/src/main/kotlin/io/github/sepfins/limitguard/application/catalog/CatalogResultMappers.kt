@@ -3,26 +3,47 @@ package io.github.sepfins.limitguard.application.catalog
 import io.github.sepfins.limitguard.api.FundingSourceCategory as ApiFundingSourceCategory
 import io.github.sepfins.limitguard.api.FundingSourceOwnerRole as ApiFundingSourceOwnerRole
 import io.github.sepfins.limitguard.api.LimitChannelScope as ApiLimitChannelScope
+import io.github.sepfins.limitguard.api.LimitChangePolicyDecision as ApiLimitChangePolicyDecision
+import io.github.sepfins.limitguard.api.LimitChangePolicyEngine as ApiLimitChangePolicyEngine
+import io.github.sepfins.limitguard.api.LimitChangePolicyPhase as ApiLimitChangePolicyPhase
 import io.github.sepfins.limitguard.api.LimitConfigurationFundingScope as ApiLimitConfigurationFundingScope
 import io.github.sepfins.limitguard.api.LimitFundingScope as ApiLimitFundingScope
 import io.github.sepfins.limitguard.api.LimitKind as ApiLimitKind
 import io.github.sepfins.limitguard.api.LimitPeriod as ApiLimitPeriod
+import io.github.sepfins.limitguard.api.PartyType as ApiPartyType
 import io.github.sepfins.limitguard.api.ProductNodeType as ApiProductNodeType
+import io.github.sepfins.limitguard.api.PartyProfileDelegationType as ApiPartyProfileDelegationType
+import io.github.sepfins.limitguard.api.results.BankWorkerResult
+import io.github.sepfins.limitguard.api.results.ChannelGroupMemberResult
+import io.github.sepfins.limitguard.api.results.ChannelGroupResult
 import io.github.sepfins.limitguard.api.results.ChannelResult
+import io.github.sepfins.limitguard.api.results.EntityIdentifierResult
+import io.github.sepfins.limitguard.api.results.FundingSourceGroupMemberResult
+import io.github.sepfins.limitguard.api.results.FundingSourceGroupResult
 import io.github.sepfins.limitguard.api.results.FundingSourceOwnerResult
 import io.github.sepfins.limitguard.api.results.FundingSourceProductResult
 import io.github.sepfins.limitguard.api.results.FundingSourceResult
+import io.github.sepfins.limitguard.api.results.IdentifierSchemeResult
+import io.github.sepfins.limitguard.api.results.LimitChangePolicyResult
 import io.github.sepfins.limitguard.api.results.LimitConfigurationResult
 import io.github.sepfins.limitguard.api.results.MandateResult
 import io.github.sepfins.limitguard.api.results.OperationTypeResult
 import io.github.sepfins.limitguard.api.results.PartyLegalIdentifierResult
+import io.github.sepfins.limitguard.api.results.PartyProfileDelegationResult
 import io.github.sepfins.limitguard.api.results.PartyProfileResult
 import io.github.sepfins.limitguard.api.results.TenantResult
 import io.github.sepfins.limitguard.domain.channel.Channel
+import io.github.sepfins.limitguard.domain.channel.ChannelGroup
+import io.github.sepfins.limitguard.domain.channel.ChannelGroupMember
+import io.github.sepfins.limitguard.domain.change.LimitChangePolicy
+import io.github.sepfins.limitguard.domain.funding.FundingSourceGroup
+import io.github.sepfins.limitguard.domain.funding.FundingSourceGroupMember
 import io.github.sepfins.limitguard.domain.funding.FundingSource
 import io.github.sepfins.limitguard.domain.funding.FundingSourceOwner
 import io.github.sepfins.limitguard.domain.funding.FundingSourceProduct
 import io.github.sepfins.limitguard.domain.funding.FundingSourceScope
+import io.github.sepfins.limitguard.domain.identifier.EntityIdentifier
+import io.github.sepfins.limitguard.domain.identifier.IdentifierScheme
 import io.github.sepfins.limitguard.domain.limit.LimitChannelScope as DomainLimitChannelScope
 import io.github.sepfins.limitguard.domain.limit.LimitConfiguration
 import io.github.sepfins.limitguard.domain.limit.LimitConfigurationFundingScope as DomainLimitConfigurationFundingScope
@@ -36,8 +57,9 @@ import io.github.sepfins.limitguard.domain.party.LegalEntity
 import io.github.sepfins.limitguard.domain.party.Party
 import io.github.sepfins.limitguard.domain.party.PartyLegalIdentifier
 import io.github.sepfins.limitguard.domain.party.PartyProfile
+import io.github.sepfins.limitguard.domain.party.PartyProfileDelegation
 import io.github.sepfins.limitguard.domain.tenant.Tenant
-import io.github.sepfins.limitguard.api.PartyType as ApiPartyType
+import io.github.sepfins.limitguard.domain.worker.BankWorker
 
 internal fun Tenant.toResult(): TenantResult =
     TenantResult(
@@ -46,6 +68,34 @@ internal fun Tenant.toResult(): TenantResult =
         config = config.value,
         createdAt = requireNotNull(createdAt) {
             "Tenant.createdAt is required when mapping to TenantResult"
+        },
+    )
+
+internal fun IdentifierScheme.toResult(): IdentifierSchemeResult =
+    IdentifierSchemeResult(
+        id = id.value,
+        tenantId = tenantId.value,
+        entityType = entityType.value,
+        schemeName = schemeName.value,
+        formatRegex = formatRegex,
+        maxLength = maxLength,
+        isPrimary = isPrimary,
+        createdAt = requireNotNull(createdAt) {
+            "IdentifierScheme.createdAt is required when mapping to IdentifierSchemeResult"
+        },
+    )
+
+internal fun EntityIdentifier.toResult(scheme: IdentifierScheme): EntityIdentifierResult =
+    EntityIdentifierResult(
+        id = id.value,
+        tenantId = scheme.tenantId.value,
+        entityType = entityType.value,
+        entityId = entityId,
+        schemeId = schemeId.value,
+        schemeName = scheme.schemeName.value,
+        identifier = identifier.value,
+        createdAt = requireNotNull(createdAt) {
+            "EntityIdentifier.createdAt is required when mapping to EntityIdentifierResult"
         },
     )
 
@@ -59,6 +109,28 @@ internal fun Channel.toResult(): ChannelResult =
         metadata = metadata.value,
         createdAt = requireNotNull(createdAt) {
             "Channel.createdAt is required when mapping to ChannelResult"
+        },
+    )
+
+internal fun ChannelGroup.toResult(): ChannelGroupResult =
+    ChannelGroupResult(
+        id = id.value,
+        tenantId = tenantId.value,
+        code = code.value,
+        name = name.value,
+        metadata = metadata.value,
+        createdAt = requireNotNull(createdAt) {
+            "ChannelGroup.createdAt is required when mapping to ChannelGroupResult"
+        },
+    )
+
+internal fun ChannelGroupMember.toResult(): ChannelGroupMemberResult =
+    ChannelGroupMemberResult(
+        tenantId = tenantId.value,
+        channelGroupId = groupId.value,
+        channelId = channelId.value,
+        createdAt = requireNotNull(createdAt) {
+            "ChannelGroupMember.createdAt is required when mapping to ChannelGroupMemberResult"
         },
     )
 
@@ -81,6 +153,7 @@ internal fun PartyProfile.toResult(
     individual: Individual?,
     legalEntity: LegalEntity?,
     legalIdentifiers: List<PartyLegalIdentifier>,
+    externalIdentifiers: List<EntityIdentifierResult> = emptyList(),
     partyCreated: Boolean,
 ): PartyProfileResult =
     PartyProfileResult(
@@ -95,9 +168,11 @@ internal fun PartyProfile.toResult(
         legalName = legalEntity?.legalName?.value,
         legalForm = legalEntity?.legalForm?.value,
         legalIdentifiers = legalIdentifiers.map { it.toResult() },
+        externalIdentifiers = externalIdentifiers,
         createdAt = requireNotNull(createdAt) {
             "PartyProfile.createdAt is required when mapping to PartyProfileResult"
         },
+        metadata = metadata.value,
     )
 
 internal fun PartyLegalIdentifier.toResult(): PartyLegalIdentifierResult =
@@ -110,6 +185,35 @@ internal fun PartyLegalIdentifier.toResult(): PartyLegalIdentifierResult =
         metadata = metadata.value,
         createdAt = requireNotNull(createdAt) {
             "PartyLegalIdentifier.createdAt is required when mapping to PartyLegalIdentifierResult"
+        },
+    )
+
+internal fun BankWorker.toResult(): BankWorkerResult =
+    BankWorkerResult(
+        id = id.value,
+        tenantId = tenantId.value,
+        externalReference = externalReference.value,
+        displayName = displayName.value,
+        branchCode = branchCode?.value,
+        isActive = isActive,
+        metadata = metadata.value,
+        createdAt = requireNotNull(createdAt) {
+            "BankWorker.createdAt is required when mapping to BankWorkerResult"
+        },
+    )
+
+internal fun PartyProfileDelegation.toResult(): PartyProfileDelegationResult =
+    PartyProfileDelegationResult(
+        id = id.value,
+        tenantId = tenantId.value,
+        ownerPartyProfileId = ownerPartyProfileId.value,
+        delegatePartyProfileId = delegatePartyProfileId.value,
+        delegationType = ApiPartyProfileDelegationType.valueOf(delegationType.name),
+        startsAt = effectiveWindow.startsAt,
+        endsAt = effectiveWindow.endsAt,
+        metadata = metadata.value,
+        createdAt = requireNotNull(createdAt) {
+            "PartyProfileDelegation.createdAt is required when mapping to PartyProfileDelegationResult"
         },
     )
 
@@ -155,6 +259,30 @@ internal fun FundingSourceOwner.toResult(): FundingSourceOwnerResult =
         },
     )
 
+internal fun FundingSourceGroup.toResult(): FundingSourceGroupResult =
+    FundingSourceGroupResult(
+        id = id.value,
+        tenantId = tenantId.value,
+        ownerPartyProfileId = ownerPartyProfileId.value,
+        code = code.value,
+        name = name.value,
+        metadata = metadata.value,
+        createdAt = requireNotNull(createdAt) {
+            "FundingSourceGroup.createdAt is required when mapping to FundingSourceGroupResult"
+        },
+    )
+
+internal fun FundingSourceGroupMember.toResult(): FundingSourceGroupMemberResult =
+    FundingSourceGroupMemberResult(
+        tenantId = tenantId.value,
+        fundingSourceGroupId = groupId.value,
+        ownerPartyProfileId = ownerPartyProfileId.value,
+        fundingSourceId = fundingSourceId.value,
+        createdAt = requireNotNull(createdAt) {
+            "FundingSourceGroupMember.createdAt is required when mapping to FundingSourceGroupMemberResult"
+        },
+    )
+
 internal fun Mandate.toResult(): MandateResult {
     val createdAt = requireNotNull(createdAt) {
         "Mandate.createdAt is required when mapping to MandateResult"
@@ -165,6 +293,7 @@ internal fun Mandate.toResult(): MandateResult {
         tenantId = tenantId.value,
         ownerPartyProfileId = ownerPartyProfileId.value,
         assigneePartyProfileId = assigneePartyProfileId.value,
+        authorityDelegationId = authorityDelegationId?.value,
         name = name.value,
         description = description,
         fundingScope = fundingScope.toApiFundingScope(),
@@ -237,6 +366,36 @@ internal fun LimitConfiguration.toResult(): LimitConfigurationResult {
         defaultAmount = defaultAmount?.amount,
         priority = priority.value,
         isActive = isActive,
+        startsAt = effectiveWindow.startsAt,
+        endsAt = effectiveWindow.endsAt,
+        metadata = metadata.value,
+        createdAt = createdAt,
+        updatedAt = updatedAt ?: createdAt,
+    )
+}
+
+internal fun LimitChangePolicy.toResult(): LimitChangePolicyResult {
+    val createdAt = requireNotNull(createdAt) {
+        "LimitChangePolicy.createdAt is required when mapping to LimitChangePolicyResult"
+    }
+
+    return LimitChangePolicyResult(
+        id = id.value,
+        tenantId = tenantId.value,
+        code = code.value,
+        name = name.value,
+        description = description,
+        phase = ApiLimitChangePolicyPhase.valueOf(phase.name),
+        engine = ApiLimitChangePolicyEngine.valueOf(engine.name),
+        decision = ApiLimitChangePolicyDecision.valueOf(decision.name),
+        limitConfigurationId = limitConfigurationId?.value,
+        priority = priority.value,
+        isActive = isActive,
+        appliesTo = appliesTo.value,
+        conditionExpression = conditionExpression.value,
+        actionExpression = actionExpression,
+        denialCode = denialCode,
+        denialMessage = denialMessage,
         startsAt = effectiveWindow.startsAt,
         endsAt = effectiveWindow.endsAt,
         metadata = metadata.value,

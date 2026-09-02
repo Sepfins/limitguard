@@ -28,7 +28,10 @@ class InMemorySupportSmokeTest {
 
         val limitguard = DefaultLimitguard(
             tenantRepository = repositories.tenants,
+            identifierSchemeRepository = repositories.identifierSchemes,
+            entityIdentifierRepository = repositories.entityIdentifiers,
             channelRepository = repositories.channels,
+            channelGroupRepository = repositories.channelGroups,
             channelGroupMemberRepository = repositories.channelGroupMembers,
             operationTypeRepository = repositories.operationTypes,
             partyRepository = repositories.parties,
@@ -36,9 +39,12 @@ class InMemorySupportSmokeTest {
             legalEntityRepository = repositories.legalEntities,
             partyLegalIdentifierRepository = repositories.partyLegalIdentifiers,
             partyProfileRepository = repositories.partyProfiles,
+            partyProfileDelegationRepository = repositories.partyProfileDelegations,
+            bankWorkerRepository = repositories.bankWorkers,
             fundingSourceRepository = repositories.fundingSources,
             fundingSourceProductRepository = repositories.fundingSourceProducts,
             fundingSourceOwnerRepository = repositories.fundingSourceOwners,
+            fundingSourceGroupRepository = repositories.fundingSourceGroups,
             fundingSourceGroupMemberRepository = repositories.fundingSourceGroupMembers,
             mandateRepository = repositories.mandates,
             limitConfigurationRepository = repositories.limitConfigurations,

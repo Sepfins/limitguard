@@ -5,6 +5,18 @@ enum class PartyType {
     LEGAL_ENTITY,
 }
 
+enum class PartyProfileDelegationType {
+    GUARDIAN,
+    LEGAL_REPRESENTATIVE,
+    DELEGATE,
+    AUTHORIZED_USER,
+}
+
+object EntityIdentifierTypes {
+    const val PARTY_PROFILE: String = "PARTY_PROFILE"
+    const val FUNDING_SOURCE: String = "FUNDING_SOURCE"
+}
+
 enum class FundingSourceCategory {
     TRANSACTIONAL,
     SAVINGS,
@@ -88,6 +100,34 @@ enum class LimitRuleChangeStatus {
     CANCELLED,
     SUPERSEDED,
     FAILED,
+}
+
+enum class LimitChangePolicyPhase {
+    REQUEST_VALIDATION,
+    AUTHORIZATION,
+    DEFAULTING,
+    SCHEDULING,
+    CONFLICT_RESOLUTION,
+    PRE_APPLY,
+    POST_APPLY,
+}
+
+enum class LimitChangePolicyEngine {
+    JSON_LOGIC,
+    CEL,
+    SQL_FUNCTION,
+    EXTERNAL_DECISION,
+}
+
+enum class LimitChangePolicyDecision {
+    ALLOW,
+    DENY,
+    MUTATE_REQUEST,
+    SCHEDULE_EFFECTIVE_AT,
+    CANCEL_PENDING,
+    CREATE_DEFAULT,
+    REQUIRE_APPROVAL,
+    NO_OP,
 }
 
 enum class AuthorizationDecision {

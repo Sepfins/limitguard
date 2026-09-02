@@ -32,6 +32,7 @@ import io.github.sepfins.limitguard.domain.party.LastName
 import io.github.sepfins.limitguard.domain.party.Party
 import io.github.sepfins.limitguard.domain.tenant.Tenant
 import io.github.sepfins.limitguard.domain.tenant.TenantName
+import io.github.sepfins.limitguard.infrastructure.policy.jsonlogic.JsonLogicPolicyEngine
 import io.github.sepfins.limitguard.support.DirectTransactionRunner
 import io.github.sepfins.limitguard.support.FixedClockProvider
 import io.github.sepfins.limitguard.support.SequentialIdGenerator
@@ -676,18 +677,28 @@ class DefaultTenantCatalogServiceTest {
     private fun catalogService(repositories: InMemoryLimitguardRepositories): DefaultTenantCatalogService =
         DefaultTenantCatalogService(
             tenantRepository = repositories.tenants,
+            identifierSchemeRepository = repositories.identifierSchemes,
+            entityIdentifierRepository = repositories.entityIdentifiers,
             channelRepository = repositories.channels,
+            channelGroupRepository = repositories.channelGroups,
+            channelGroupMemberRepository = repositories.channelGroupMembers,
             operationTypeRepository = repositories.operationTypes,
             partyRepository = repositories.parties,
             individualRepository = repositories.individuals,
             legalEntityRepository = repositories.legalEntities,
             partyLegalIdentifierRepository = repositories.partyLegalIdentifiers,
             partyProfileRepository = repositories.partyProfiles,
+            partyProfileDelegationRepository = repositories.partyProfileDelegations,
+            bankWorkerRepository = repositories.bankWorkers,
             fundingSourceRepository = repositories.fundingSources,
             fundingSourceProductRepository = repositories.fundingSourceProducts,
             fundingSourceOwnerRepository = repositories.fundingSourceOwners,
+            fundingSourceGroupRepository = repositories.fundingSourceGroups,
+            fundingSourceGroupMemberRepository = repositories.fundingSourceGroupMembers,
             mandateRepository = repositories.mandates,
             limitConfigurationRepository = repositories.limitConfigurations,
+            limitChangePolicyRepository = repositories.limitChangePolicies,
+            policyEngines = listOf(JsonLogicPolicyEngine()),
             idGenerator = SequentialIdGenerator(),
             clockProvider = FixedClockProvider(Instant.parse("2026-06-21T00:00:00Z")),
             transactionRunner = DirectTransactionRunner(),

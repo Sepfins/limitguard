@@ -31,13 +31,18 @@ import io.github.sepfins.limitguard.application.usage.UsageReservationService
 import io.github.sepfins.limitguard.application.usage.UsageWindowCalculator
 import io.github.sepfins.limitguard.infrastructure.policy.jsonlogic.JsonLogicPolicyEngine
 import io.github.sepfins.limitguard.port.ids.IdGenerator
+import io.github.sepfins.limitguard.port.persistence.BankWorkerRepository
 import io.github.sepfins.limitguard.port.persistence.ChannelGroupMemberRepository
+import io.github.sepfins.limitguard.port.persistence.ChannelGroupRepository
 import io.github.sepfins.limitguard.port.persistence.ChannelRepository
+import io.github.sepfins.limitguard.port.persistence.EntityIdentifierRepository
 import io.github.sepfins.limitguard.port.persistence.FundingSourceGroupMemberRepository
+import io.github.sepfins.limitguard.port.persistence.FundingSourceGroupRepository
 import io.github.sepfins.limitguard.port.persistence.FundingSourceOwnerRepository
 import io.github.sepfins.limitguard.port.persistence.FundingSourceProductRepository
 import io.github.sepfins.limitguard.port.persistence.FundingSourceRepository
 import io.github.sepfins.limitguard.port.persistence.IndividualRepository
+import io.github.sepfins.limitguard.port.persistence.IdentifierSchemeRepository
 import io.github.sepfins.limitguard.port.persistence.LegalEntityRepository
 import io.github.sepfins.limitguard.port.persistence.LimitChangeRequestRepository
 import io.github.sepfins.limitguard.port.persistence.LimitChangePolicyEvaluationRepository
@@ -50,6 +55,7 @@ import io.github.sepfins.limitguard.port.persistence.MandateRepository
 import io.github.sepfins.limitguard.port.persistence.OperationTypeRepository
 import io.github.sepfins.limitguard.port.persistence.PartyLegalIdentifierRepository
 import io.github.sepfins.limitguard.port.persistence.PartyProfileRepository
+import io.github.sepfins.limitguard.port.persistence.PartyProfileDelegationRepository
 import io.github.sepfins.limitguard.port.persistence.PartyRepository
 import io.github.sepfins.limitguard.port.persistence.TenantRepository
 import io.github.sepfins.limitguard.port.persistence.TransactionEventRepository
@@ -62,7 +68,10 @@ import io.github.sepfins.limitguard.port.transactions.TransactionRunner
 
 class DefaultLimitguard(
     tenantRepository: TenantRepository,
+    identifierSchemeRepository: IdentifierSchemeRepository,
+    entityIdentifierRepository: EntityIdentifierRepository,
     channelRepository: ChannelRepository,
+    channelGroupRepository: ChannelGroupRepository,
     channelGroupMemberRepository: ChannelGroupMemberRepository,
     operationTypeRepository: OperationTypeRepository,
     partyRepository: PartyRepository,
@@ -70,9 +79,12 @@ class DefaultLimitguard(
     legalEntityRepository: LegalEntityRepository,
     partyLegalIdentifierRepository: PartyLegalIdentifierRepository,
     partyProfileRepository: PartyProfileRepository,
+    partyProfileDelegationRepository: PartyProfileDelegationRepository,
+    bankWorkerRepository: BankWorkerRepository,
     fundingSourceRepository: FundingSourceRepository,
     fundingSourceProductRepository: FundingSourceProductRepository,
     fundingSourceOwnerRepository: FundingSourceOwnerRepository,
+    fundingSourceGroupRepository: FundingSourceGroupRepository,
     fundingSourceGroupMemberRepository: FundingSourceGroupMemberRepository,
     mandateRepository: MandateRepository,
     limitConfigurationRepository: LimitConfigurationRepository,
@@ -112,18 +124,28 @@ class DefaultLimitguard(
 
     override val tenantCatalogService: TenantCatalogService = DefaultTenantCatalogService(
         tenantRepository = tenantRepository,
+        identifierSchemeRepository = identifierSchemeRepository,
+        entityIdentifierRepository = entityIdentifierRepository,
         channelRepository = channelRepository,
+        channelGroupRepository = channelGroupRepository,
+        channelGroupMemberRepository = channelGroupMemberRepository,
         operationTypeRepository = operationTypeRepository,
         partyRepository = partyRepository,
         individualRepository = individualRepository,
         legalEntityRepository = legalEntityRepository,
         partyLegalIdentifierRepository = partyLegalIdentifierRepository,
         partyProfileRepository = partyProfileRepository,
+        partyProfileDelegationRepository = partyProfileDelegationRepository,
+        bankWorkerRepository = bankWorkerRepository,
         fundingSourceRepository = fundingSourceRepository,
         fundingSourceProductRepository = fundingSourceProductRepository,
         fundingSourceOwnerRepository = fundingSourceOwnerRepository,
+        fundingSourceGroupRepository = fundingSourceGroupRepository,
+        fundingSourceGroupMemberRepository = fundingSourceGroupMemberRepository,
         mandateRepository = mandateRepository,
         limitConfigurationRepository = limitConfigurationRepository,
+        limitChangePolicyRepository = limitChangePolicyRepository,
+        policyEngines = policyEngines,
         idGenerator = idGenerator,
         clockProvider = clockProvider,
         transactionRunner = transactionRunner,
