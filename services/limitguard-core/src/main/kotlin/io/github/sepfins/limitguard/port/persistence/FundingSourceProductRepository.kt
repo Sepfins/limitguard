@@ -13,6 +13,12 @@ interface FundingSourceProductRepository {
     fun findByAccountCategory(tenantId: TenantId, accountCategory: FundingSourceCategory): List<FundingSourceProduct>
     fun findByCode(tenantId: TenantId, code: FundingSourceProductCode): FundingSourceProduct?
     fun findById(tenantId: TenantId, id: FundingSourceProductId): FundingSourceProduct?
+
+    /**
+     * The product and its ancestors, in no particular order and without validating them. It stops
+     * at a missing parent and at a repeated node, so the caller detects both.
+     */
+    fun findPath(tenantId: TenantId, leafId: FundingSourceProductId): List<FundingSourceProduct>
     fun insert(tenantId: TenantId, product: FundingSourceProduct): FundingSourceProduct
     fun update(tenantId: TenantId, product: FundingSourceProduct): FundingSourceProduct
 }

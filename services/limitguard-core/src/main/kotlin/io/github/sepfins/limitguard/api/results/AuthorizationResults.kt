@@ -6,10 +6,12 @@ import io.github.sepfins.limitguard.api.LimitPeriod
 import io.github.sepfins.limitguard.api.LimitUsageEventType
 import io.github.sepfins.limitguard.api.TransactionStatus
 import java.math.BigDecimal
+import java.time.Instant
 import java.util.UUID
 
 data class AuthorizationResult(
     val tenantId: UUID,
+    val authorizationDecisionId: UUID,
     val decision: AuthorizationDecision,
     val paymentTransactionId: UUID?,
     val transactionEventId: UUID?,
@@ -57,4 +59,10 @@ data class UsageMutationEvent(
     val eventType: LimitUsageEventType,
     val amountDelta: BigDecimal,
     val currency: String,
+)
+
+data class ExpireDueAuthorizationsResult(
+    val tenantId: UUID,
+    val processedAt: Instant,
+    val expirations: List<UsageMutationResult>,
 )

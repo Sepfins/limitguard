@@ -7,18 +7,21 @@ import io.github.sepfins.limitguard.api.results.AuthorizationResult
 import io.github.sepfins.limitguard.api.results.LimitViolation as LimitViolationResult
 import io.github.sepfins.limitguard.api.results.MatchedLimitRule as MatchedLimitRuleResult
 import io.github.sepfins.limitguard.domain.common.TransactionEventId
+import io.github.sepfins.limitguard.domain.common.AuthorizationDecisionId
 import io.github.sepfins.limitguard.domain.limit.LimitKind as DomainLimitKind
 import io.github.sepfins.limitguard.domain.limit.LimitViolation
 import io.github.sepfins.limitguard.domain.limit.MatchedLimitRule
 import io.github.sepfins.limitguard.domain.transaction.PaymentTransaction
 
 internal fun PaymentTransaction.toAuthorizationResult(
+    authorizationDecisionId: AuthorizationDecisionId,
     decision: LimitDecision,
     transactionEventId: TransactionEventId? = null,
 ): AuthorizationResult =
     AuthorizationResult(
         tenantId = tenantId.value,
-        decision = if (decision.allowed) AuthorizationDecision.ALLOWED else AuthorizationDecision.DENIED,
+        authorizationDecisionId = authorizationDecisionId.value,
+        decision = AuthorizationDecision.valueOf(decision.outcome.name),
         paymentTransactionId = if (decision.allowed) id.value else null,
         transactionEventId = transactionEventId?.value,
         authorizedAmount = authorizedAmount.amount,

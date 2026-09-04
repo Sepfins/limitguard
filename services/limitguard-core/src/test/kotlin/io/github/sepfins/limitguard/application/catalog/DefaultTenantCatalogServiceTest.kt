@@ -7,6 +7,7 @@ import io.github.sepfins.limitguard.api.LimitConfigurationFundingScope
 import io.github.sepfins.limitguard.api.LimitFundingScope
 import io.github.sepfins.limitguard.api.LimitKind
 import io.github.sepfins.limitguard.api.LimitPeriod
+import io.github.sepfins.limitguard.api.NoMatchingRuleBehavior
 import io.github.sepfins.limitguard.api.PartyType
 import io.github.sepfins.limitguard.api.ProductNodeType
 import io.github.sepfins.limitguard.api.commands.AssignFundingSourceOwnerCommand
@@ -67,11 +68,13 @@ class DefaultTenantCatalogServiceTest {
             RegisterTenantCommand(
                 name = "Retail Bank",
                 config = mapOf("country" to "IT"),
+                noMatchingRuleBehavior = NoMatchingRuleBehavior.NOT_APPLICABLE,
             )
         )
 
         assertEquals("Retail Bank", result.name)
         assertEquals(mapOf("country" to "IT"), result.config)
+        assertEquals(NoMatchingRuleBehavior.NOT_APPLICABLE, result.noMatchingRuleBehavior)
         assertEquals(fixedNow, result.createdAt)
         assertTrue(repositories.tenants.exists(TenantId.of(result.id)))
     }
@@ -81,8 +84,9 @@ class DefaultTenantCatalogServiceTest {
         val repositories = InMemoryLimitguardRepositories()
         val service = catalogService(repositories)
 
-        service.registerTenant(RegisterTenantCommand(name = "Retail Bank"))
+        val result = service.registerTenant(RegisterTenantCommand(name = "Retail Bank"))
 
+        assertEquals(NoMatchingRuleBehavior.DENY, result.noMatchingRuleBehavior)
         assertFailsWith<ConflictException> {
             service.registerTenant(RegisterTenantCommand(name = "Retail Bank"))
         }

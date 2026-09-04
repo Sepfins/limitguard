@@ -10,15 +10,34 @@ import io.github.sepfins.limitguard.domain.limit.LimitUsageConsumptionMode
 import io.github.sepfins.limitguard.domain.limit.LimitViolation
 import io.github.sepfins.limitguard.domain.limit.MatchedLimitRule
 import io.github.sepfins.limitguard.domain.transaction.PaymentTransaction
+import io.github.sepfins.limitguard.domain.transaction.AuthorizationDecisionOutcome
+import io.github.sepfins.limitguard.domain.tenant.NoMatchingRuleBehavior
 import io.github.sepfins.limitguard.domain.usage.UsageMutation
 import java.time.Instant
 
 internal data class LimitDecision(
+    val outcome: AuthorizationDecisionOutcome,
     val matchedRules: List<MatchedLimitRule>,
     val violations: List<LimitViolation>,
 ) {
+    init {
+        when (outcome) {
+            AuthorizationDecisionOutcome.ALLOWED -> require(violations.isEmpty()) {
+                "Allowed authorization decisions must not contain violations"
+            }
+            AuthorizationDecisionOutcome.DENIED -> require(violations.isNotEmpty()) {
+                "Denied authorization decisions must contain at least one violation"
+            }
+            AuthorizationDecisionOutcome.NOT_APPLICABLE -> {
+                require(matchedRules.isEmpty() && violations.isEmpty()) {
+                    "Not-applicable decisions must not contain matched rules or violations"
+                }
+            }
+        }
+    }
+
     val allowed: Boolean
-        get() = violations.isEmpty()
+        get() = outcome == AuthorizationDecisionOutcome.ALLOWED
 }
 
 internal data class AuthorizationEvaluation(
@@ -36,8 +55,36 @@ internal class AuthorizationEvaluator(
     fun evaluate(
         transaction: PaymentTransaction,
         matchedRules: List<LimitRule>,
+        noMatchingRuleBehavior: NoMatchingRuleBehavior,
         now: Instant,
     ): AuthorizationEvaluation {
+        if (matchedRules.isEmpty()) {
+            when (noMatchingRuleBehavior) {
+                NoMatchingRuleBehavior.ALLOW -> Unit
+                NoMatchingRuleBehavior.DENY -> return denied(
+                    rules = emptyList(),
+                    violations = listOf(
+                        LimitViolation(
+                            code = "NO_MATCHING_LIMIT_RULE",
+                            message = "No active limit rule applies to this authorization",
+                            limitRuleId = null,
+                            limitAmount = null,
+                            attemptedAmount = transaction.authorizedAmount,
+                            remainingAmount = null,
+                        ),
+                    ),
+                )
+                NoMatchingRuleBehavior.NOT_APPLICABLE -> return AuthorizationEvaluation(
+                    decision = LimitDecision(
+                        outcome = AuthorizationDecisionOutcome.NOT_APPLICABLE,
+                        matchedRules = emptyList(),
+                        violations = emptyList(),
+                    ),
+                    reservationPlan = null,
+                )
+            }
+        }
+
         val evaluatedRules = selectRulesForEvaluation(matchedRules)
         val currencyViolations = evaluatedRules
             .filter { it.amount.currency != transaction.authorizedAmount.currency }
@@ -126,6 +173,11 @@ internal class AuthorizationEvaluator(
         violations: List<LimitViolation>,
     ): LimitDecision =
         LimitDecision(
+            outcome = if (violations.isEmpty()) {
+                AuthorizationDecisionOutcome.ALLOWED
+            } else {
+                AuthorizationDecisionOutcome.DENIED
+            },
             matchedRules = rules.map { it.toMatchedRule() },
             violations = violations,
         )
@@ -166,6 +218,7 @@ internal class AuthorizationEvaluator(
     companion object {
         fun actorNotAuthorized(attemptedAmount: Money): LimitDecision =
             LimitDecision(
+                outcome = AuthorizationDecisionOutcome.DENIED,
                 matchedRules = emptyList(),
                 violations = listOf(
                     LimitViolation(
@@ -178,5 +231,25 @@ internal class AuthorizationEvaluator(
                     ),
                 ),
             )
+
+        fun deniedForUnavailableReferences(
+            attemptedAmount: Money,
+            unavailableReferences: List<Pair<String, String>>,
+        ): LimitDecision =
+            LimitDecision(
+                outcome = AuthorizationDecisionOutcome.DENIED,
+                matchedRules = emptyList(),
+                violations = unavailableReferences.map { (code, message) ->
+                    LimitViolation(
+                        code = code,
+                        message = message,
+                        limitRuleId = null,
+                        limitAmount = null,
+                        attemptedAmount = attemptedAmount,
+                        remainingAmount = null,
+                    )
+                },
+            )
+
     }
 }

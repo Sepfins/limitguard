@@ -8,5 +8,6 @@ data class Tenant(
     val id: TenantId,
     val name: TenantName,
     val config: Metadata = Metadata.EMPTY,
+    val noMatchingRuleBehavior: NoMatchingRuleBehavior = NoMatchingRuleBehavior.DENY,
     val createdAt: Instant? = null
 )

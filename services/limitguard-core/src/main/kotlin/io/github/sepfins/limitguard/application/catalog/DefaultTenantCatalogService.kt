@@ -132,6 +132,7 @@ import io.github.sepfins.limitguard.domain.party.PartyProfileDelegationType
 import io.github.sepfins.limitguard.domain.party.PartyType as DomainPartyType
 import io.github.sepfins.limitguard.domain.tenant.Tenant
 import io.github.sepfins.limitguard.domain.tenant.TenantName
+import io.github.sepfins.limitguard.domain.tenant.NoMatchingRuleBehavior
 import io.github.sepfins.limitguard.domain.worker.BankWorker
 import io.github.sepfins.limitguard.domain.worker.BranchCode
 import io.github.sepfins.limitguard.domain.worker.DisplayName
@@ -197,6 +198,7 @@ class DefaultTenantCatalogService(
             id = TenantId.of(idGenerator.newId()),
             name = TenantName.of(command.name),
             config = Metadata(command.config),
+            noMatchingRuleBehavior = NoMatchingRuleBehavior.valueOf(command.noMatchingRuleBehavior.name),
             createdAt = clockProvider.now(),
         )
 

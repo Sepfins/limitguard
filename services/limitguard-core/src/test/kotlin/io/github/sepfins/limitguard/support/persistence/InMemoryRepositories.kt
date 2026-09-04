@@ -18,6 +18,7 @@ import io.github.sepfins.limitguard.domain.channel.ChannelGroup
 import io.github.sepfins.limitguard.domain.channel.ChannelGroupCode
 import io.github.sepfins.limitguard.domain.channel.ChannelGroupMember
 import io.github.sepfins.limitguard.domain.common.BankWorkerId
+import io.github.sepfins.limitguard.domain.common.AuthorizationDecisionId
 import io.github.sepfins.limitguard.domain.common.ChannelGroupId
 import io.github.sepfins.limitguard.domain.common.CurrencyCode
 import io.github.sepfins.limitguard.domain.common.ChannelId
@@ -86,6 +87,7 @@ import io.github.sepfins.limitguard.domain.party.PartyProfileDelegation
 import io.github.sepfins.limitguard.domain.tenant.Tenant
 import io.github.sepfins.limitguard.domain.tenant.TenantName
 import io.github.sepfins.limitguard.domain.transaction.PaymentTransaction
+import io.github.sepfins.limitguard.domain.transaction.AuthorizationDecisionRecord
 import io.github.sepfins.limitguard.domain.transaction.TransactionEvent
 import io.github.sepfins.limitguard.domain.transaction.TransactionEventType
 import io.github.sepfins.limitguard.domain.transaction.TransactionResultSnapshot
@@ -94,6 +96,7 @@ import io.github.sepfins.limitguard.domain.usage.LimitUsageEvent
 import io.github.sepfins.limitguard.domain.usage.LimitUsageEventType
 import io.github.sepfins.limitguard.domain.worker.BankWorker
 import io.github.sepfins.limitguard.port.persistence.BankWorkerRepository
+import io.github.sepfins.limitguard.port.persistence.AuthorizationDecisionRepository
 import io.github.sepfins.limitguard.port.persistence.ChannelGroupRepository
 import io.github.sepfins.limitguard.port.persistence.ChannelRepository
 import io.github.sepfins.limitguard.port.persistence.ChannelGroupMemberRepository
@@ -157,6 +160,7 @@ class InMemoryLimitguardRepositories(
     val limitChangeRequests: InMemoryLimitChangeRequestRepository = InMemoryLimitChangeRequestRepository(),
     val limitRuleChangeEvents: InMemoryLimitRuleChangeEventRepository = InMemoryLimitRuleChangeEventRepository(),
     val limitRuleRevisions: InMemoryLimitRuleRevisionRepository = InMemoryLimitRuleRevisionRepository(),
+    val authorizationDecisions: InMemoryAuthorizationDecisionRepository = InMemoryAuthorizationDecisionRepository(),
     val transactions: InMemoryTransactionRepository = InMemoryTransactionRepository(),
     val transactionEvents: InMemoryTransactionEventRepository = InMemoryTransactionEventRepository(),
     val usageBuckets: InMemoryUsageBucketRepository = InMemoryUsageBucketRepository(),
@@ -1321,6 +1325,48 @@ class InMemoryLimitRuleRevisionRepository : LimitRuleRevisionRepository {
     }
 }
 
+class InMemoryAuthorizationDecisionRepository : AuthorizationDecisionRepository {
+    private val lock = Any()
+    private val decisions =
+        ConcurrentHashMap<TenantScopedKey<AuthorizationDecisionId>, AuthorizationDecisionRecord>()
+
+    override fun findById(
+        tenantId: TenantId,
+        id: AuthorizationDecisionId,
+    ): AuthorizationDecisionRecord? =
+        decisions[TenantScopedKey(tenantId, id)]
+
+    override fun findByIdempotencyKey(
+        tenantId: TenantId,
+        key: IdempotencyKey,
+    ): AuthorizationDecisionRecord? =
+        decisions.tenantValues(tenantId).firstOrNull { it.idempotencyKey == key }
+
+    override fun findByTransaction(
+        tenantId: TenantId,
+        transactionId: PaymentTransactionId,
+    ): AuthorizationDecisionRecord? =
+        decisions.tenantValues(tenantId).singleOrNull { it.paymentTransactionId == transactionId }
+
+    override fun insert(
+        tenantId: TenantId,
+        decision: AuthorizationDecisionRecord,
+    ): AuthorizationDecisionRecord = synchronized(lock) {
+        requireSameTenant(tenantId, decision.tenantId)
+        requireAbsent(findById(tenantId, decision.id) != null, "authorization decision id already exists: ${decision.id.value}")
+        requireAbsent(
+            decision.idempotencyKey != null && findByIdempotencyKey(tenantId, decision.idempotencyKey) != null,
+            "authorization decision idempotency key already exists: ${decision.idempotencyKey?.value}",
+        )
+        requireAbsent(
+            decision.paymentTransactionId != null && findByTransaction(tenantId, decision.paymentTransactionId) != null,
+            "authorization decision already exists for transaction: ${decision.paymentTransactionId?.value}",
+        )
+        decisions[TenantScopedKey(tenantId, decision.id)] = decision
+        decision
+    }
+}
+
 class InMemoryTransactionRepository : TransactionRepository {
     private val lock = Any()
     private val transactions = ConcurrentHashMap<TenantScopedKey<PaymentTransactionId>, PaymentTransaction>()
@@ -1345,6 +1391,20 @@ class InMemoryTransactionRepository : TransactionRepository {
 
     override fun findByIdForUpdate(tenantId: TenantId, id: PaymentTransactionId): PaymentTransaction? =
         findById(tenantId, id)
+
+    override fun findDueForExpiry(
+        tenantId: TenantId,
+        at: Instant,
+        limit: Int,
+    ): List<PaymentTransaction> =
+        transactions
+            .tenantValues(tenantId)
+            .filter { it.isDueForExpiry(at) }
+            .sortedWith(
+                compareBy<PaymentTransaction> { checkNotNull(it.expiresAt) }
+                    .thenBy { it.id.value },
+            )
+            .take(limit)
 
     override fun insert(tenantId: TenantId, transaction: PaymentTransaction): PaymentTransaction = synchronized(lock) {
         requireSameTenant(tenantId, transaction.tenantId)

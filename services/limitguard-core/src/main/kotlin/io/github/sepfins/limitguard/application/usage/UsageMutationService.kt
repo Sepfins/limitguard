@@ -129,6 +129,13 @@ class UsageMutationService(
                     eventType = LimitUsageEventType.REVERSAL,
                     amountDelta = amount.amount.negate(),
                 )
+
+            TransactionMutationKind.EXPIRY ->
+                BucketUsageMutation(
+                    bucket = release(amount).copy(updatedAt = updatedAt),
+                    eventType = LimitUsageEventType.RELEASE,
+                    amountDelta = amount.amount.negate(),
+                )
         }
 
     private data class BucketUsageMutation(

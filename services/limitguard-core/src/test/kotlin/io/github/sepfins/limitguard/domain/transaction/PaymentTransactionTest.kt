@@ -8,6 +8,7 @@ import io.github.sepfins.limitguard.domain.common.OperationTypeId
 import io.github.sepfins.limitguard.domain.common.PartyProfileId
 import io.github.sepfins.limitguard.domain.common.PaymentTransactionId
 import io.github.sepfins.limitguard.domain.common.TenantId
+import java.time.Instant
 import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -78,6 +79,35 @@ class PaymentTransactionTest {
         assertFailsWith<IllegalArgumentException> {
             reversed.capture(Money.positive("1", eur))
         }
+    }
+
+    @Test
+    fun `expiry closes an uncaptured authorization but preserves its authorized fact`() {
+        val expiresAt = Instant.parse("2026-08-09T12:00:00Z")
+        val transaction = authorizedTransaction().copy(expiresAt = expiresAt)
+
+        assertEquals(false, transaction.isDueForExpiry(expiresAt.minusNanos(1)))
+        assertEquals(true, transaction.isDueForExpiry(expiresAt))
+
+        val expired = transaction.expire()
+
+        assertEquals(TransactionStatus.EXPIRED, expired.status)
+        assertEquals(Money.positive("100", eur), expired.authorizedAmount)
+        assertEquals(Money.zero(eur), expired.capturedAmount)
+    }
+
+    @Test
+    fun `expiry closes only the remaining authorization after partial capture`() {
+        val expiresAt = Instant.parse("2026-08-09T12:00:00Z")
+        val transaction = authorizedTransaction()
+            .copy(expiresAt = expiresAt)
+            .capture(Money.positive("25", eur))
+
+        val expired = transaction.expire()
+
+        assertEquals(TransactionStatus.CAPTURED, expired.status)
+        assertEquals(Money.positive("25", eur), expired.authorizedAmount)
+        assertEquals(Money.positive("25", eur), expired.capturedAmount)
     }
 
     private fun authorizedTransaction(): PaymentTransaction =

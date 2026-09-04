@@ -43,3 +43,8 @@ data class ReverseTransactionCommand(
     val idempotencyKey: String? = null,
     val metadata: Map<String, Any?> = emptyMap(),
 )
+
+data class ExpireDueAuthorizationsCommand(
+    val tenantId: UUID,
+    val batchSize: Int = 100,
+)

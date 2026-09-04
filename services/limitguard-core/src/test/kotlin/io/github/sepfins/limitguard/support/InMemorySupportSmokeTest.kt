@@ -54,6 +54,7 @@ class InMemorySupportSmokeTest {
             limitChangeEventRepository = repositories.limitRuleChangeEvents,
             limitRuleRepository = repositories.limitRules,
             limitRuleRevisionRepository = repositories.limitRuleRevisions,
+            authorizationDecisionRepository = repositories.authorizationDecisions,
             transactionRepository = repositories.transactions,
             transactionEventRepository = repositories.transactionEvents,
             usageBucketRepository = repositories.usageBuckets,
@@ -79,8 +80,22 @@ class InMemorySupportSmokeTest {
         val otherTenantId = TenantId.of(UUID(0L, 2L))
         val now = Instant.parse("2026-06-14T00:00:00Z")
 
-        repositories.tenants.insert(Tenant(tenantId, TenantName.of("Primary Bank"), Metadata.EMPTY, now))
-        repositories.tenants.insert(Tenant(otherTenantId, TenantName.of("Other Bank"), Metadata.EMPTY, now))
+        repositories.tenants.insert(
+            Tenant(
+                id = tenantId,
+                name = TenantName.of("Primary Bank"),
+                config = Metadata.EMPTY,
+                createdAt = now,
+            ),
+        )
+        repositories.tenants.insert(
+            Tenant(
+                id = otherTenantId,
+                name = TenantName.of("Other Bank"),
+                config = Metadata.EMPTY,
+                createdAt = now,
+            ),
+        )
 
         repositories.channels.insert(
             tenantId,

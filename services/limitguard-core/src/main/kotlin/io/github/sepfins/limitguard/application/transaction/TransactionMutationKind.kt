@@ -38,6 +38,21 @@ enum class TransactionMutationKind {
 
         override fun apply(transaction: PaymentTransaction, amount: Money): PaymentTransaction =
             transaction.reverse(amount)
+    },
+    EXPIRY {
+        override val operationName: String = "expiry"
+        override val transactionEventTypes: Set<TransactionEventType> =
+            setOf(TransactionEventType.EXPIRY)
+
+        override fun defaultAmount(transaction: PaymentTransaction): Money =
+            transaction.uncapturedAmount
+
+        override fun apply(transaction: PaymentTransaction, amount: Money): PaymentTransaction {
+            require(amount == transaction.uncapturedAmount) {
+                "expiry amount must equal uncaptured authorized amount"
+            }
+            return transaction.expire()
+        }
     };
 
     abstract val operationName: String

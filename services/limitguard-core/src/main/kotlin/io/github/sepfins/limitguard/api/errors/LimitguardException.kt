@@ -7,6 +7,7 @@ enum class LimitguardErrorCode {
     POLICY_DENIED,
     LIMIT_EXCEEDED,
     IDEMPOTENCY_CONFLICT,
+    AUTHORIZATION_EXPIRED,
     INFRASTRUCTURE_FAILURE,
 }
 
@@ -53,6 +54,11 @@ class IdempotencyConflictException(
     message: String,
     cause: Throwable? = null,
 ) : LimitguardException(LimitguardErrorCode.IDEMPOTENCY_CONFLICT, message, cause)
+
+class AuthorizationExpiredException(
+    message: String,
+    cause: Throwable? = null,
+) : LimitguardException(LimitguardErrorCode.AUTHORIZATION_EXPIRED, message, cause)
 
 class InfrastructureException(
     message: String,

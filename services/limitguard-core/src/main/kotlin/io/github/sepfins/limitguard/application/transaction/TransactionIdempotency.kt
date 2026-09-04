@@ -7,34 +7,28 @@ import io.github.sepfins.limitguard.api.LimitKind as ApiLimitKind
 import io.github.sepfins.limitguard.api.LimitPeriod as ApiLimitPeriod
 import io.github.sepfins.limitguard.api.results.AuthorizationResult
 import io.github.sepfins.limitguard.api.results.UsageMutationEvent
+import io.github.sepfins.limitguard.api.results.LimitViolation as LimitViolationResult
 import io.github.sepfins.limitguard.api.results.MatchedLimitRule as MatchedLimitRuleResult
 import io.github.sepfins.limitguard.api.results.UsageMutationResult
-import io.github.sepfins.limitguard.domain.common.TransactionEventId
-import io.github.sepfins.limitguard.domain.limit.LimitKind
-import io.github.sepfins.limitguard.domain.limit.MatchedLimitRule
-import io.github.sepfins.limitguard.domain.transaction.PaymentTransaction
 import io.github.sepfins.limitguard.domain.transaction.TransactionResultSnapshot
 import java.math.BigDecimal
 import java.util.UUID
 
 internal object TransactionIdempotency {
-    fun authorizationResultSnapshot(
-        transaction: PaymentTransaction,
-        transactionEventId: TransactionEventId,
-        matchedRules: List<MatchedLimitRule>,
-    ): TransactionResultSnapshot =
+    fun authorizationResultSnapshot(result: AuthorizationResult): TransactionResultSnapshot =
         TransactionResultSnapshot(
             mapOf(
                 "snapshotVersion" to AUTHORIZATION_SNAPSHOT_VERSION,
-                "tenantId" to transaction.tenantId.value.toString(),
-                "decision" to "ALLOWED",
-                "paymentTransactionId" to transaction.id.value.toString(),
-                "transactionEventId" to transactionEventId.value.toString(),
-                "authorizedAmount" to transaction.authorizedAmount.amount.toPlainString(),
-                "currency" to transaction.authorizedAmount.currency.value,
-                "matchedRules" to matchedRules.map { it.toSnapshot() },
-                "violations" to emptyList<Map<String, Any?>>(),
-                "metadata" to transaction.metadata.value,
+                "tenantId" to result.tenantId.toString(),
+                "authorizationDecisionId" to result.authorizationDecisionId.toString(),
+                "decision" to result.decision.name,
+                "paymentTransactionId" to result.paymentTransactionId?.toString(),
+                "transactionEventId" to result.transactionEventId?.toString(),
+                "authorizedAmount" to result.authorizedAmount.toPlainString(),
+                "currency" to result.currency,
+                "matchedRules" to result.matchedRules.map { it.toSnapshot() },
+                "violations" to result.violations.map { it.toSnapshot() },
+                "metadata" to result.metadata,
             ),
         )
 
@@ -46,18 +40,13 @@ internal object TransactionIdempotency {
         }
 
         val decision = values.requiredEnum<AuthorizationDecision>("decision")
-        check(decision == AuthorizationDecision.ALLOWED) {
-            "Authorization result snapshot version $snapshotVersion only supports allowed decisions"
-        }
-        check(values.requiredList("violations").isEmpty()) {
-            "Allowed authorization result snapshot must not contain violations"
-        }
 
-        return AuthorizationResult(
+        val result = AuthorizationResult(
             tenantId = values.requiredUuid("tenantId"),
+            authorizationDecisionId = values.requiredUuid("authorizationDecisionId"),
             decision = decision,
-            paymentTransactionId = values.requiredUuid("paymentTransactionId"),
-            transactionEventId = values.requiredUuid("transactionEventId"),
+            paymentTransactionId = values.optionalUuid("paymentTransactionId"),
+            transactionEventId = values.optionalUuid("transactionEventId"),
             authorizedAmount = values.requiredDecimal("authorizedAmount"),
             currency = values.requiredString("currency"),
             matchedRules = values.requiredList("matchedRules").map { rawRule ->
@@ -73,10 +62,48 @@ internal object TransactionIdempotency {
                     priority = rule.requiredNumber("priority").toInt(),
                 )
             },
-            violations = emptyList(),
+            violations = values.requiredList("violations").map { rawViolation ->
+                val violation = rawViolation as? Map<*, *>
+                    ?: error("Authorization result snapshot contains an invalid violation")
+                LimitViolationResult(
+                    code = violation.requiredString("code"),
+                    message = violation.requiredString("message"),
+                    limitRuleId = violation.optionalUuid("limitRuleId"),
+                    limitAmount = violation.optionalDecimal("limitAmount"),
+                    attemptedAmount = violation.requiredDecimal("attemptedAmount"),
+                    currency = violation.requiredString("currency"),
+                    remainingAmount = violation.optionalDecimal("remainingAmount"),
+                )
+            },
             metadata = values.requiredStringKeyedMap("metadata"),
         )
+        when (result.decision) {
+            AuthorizationDecision.ALLOWED -> check(
+                result.paymentTransactionId != null &&
+                    result.transactionEventId != null &&
+                    result.violations.isEmpty(),
+            ) {
+                "Allowed authorization snapshot has inconsistent links or violations"
+            }
+            AuthorizationDecision.DENIED -> check(
+                result.paymentTransactionId == null &&
+                    result.transactionEventId == null &&
+                    result.violations.isNotEmpty(),
+            ) {
+                "Denied authorization snapshot has inconsistent links or violations"
+            }
+            AuthorizationDecision.NOT_APPLICABLE -> check(
+                result.paymentTransactionId == null &&
+                    result.transactionEventId == null &&
+                    result.matchedRules.isEmpty() &&
+                    result.violations.isEmpty(),
+            ) {
+                "Not-applicable authorization snapshot contains evaluation or transaction data"
+            }
+        }
+        return result
     }
+
     fun replayMutation(snapshot: TransactionResultSnapshot): UsageMutationResult {
         val values = snapshot.value
         val snapshotVersion = values.requiredNumber("snapshotVersion").toInt()
@@ -105,6 +132,7 @@ internal object TransactionIdempotency {
             metadata = values.requiredStringKeyedMap("metadata"),
         )
     }
+
     fun usageMutationResultSnapshot(result: UsageMutationResult): TransactionResultSnapshot =
         TransactionResultSnapshot(
             mapOf(
@@ -128,18 +156,26 @@ internal object TransactionIdempotency {
             ),
         )
 
-    private fun MatchedLimitRule.toSnapshot(): Map<String, Any?> =
+    private fun MatchedLimitRuleResult.toSnapshot(): Map<String, Any?> =
         mapOf(
-            "id" to id.value.toString(),
-            "name" to name.value,
-            "limitKind" to when (limitKind) {
-                LimitKind.PerTransaction -> "PER_TRANSACTION"
-                is LimitKind.Periodic -> "PERIODIC"
-            },
-            "period" to (limitKind as? LimitKind.Periodic)?.period?.name,
-            "amount" to amount.amount.toPlainString(),
-            "currency" to amount.currency.value,
-            "priority" to priority.value,
+            "id" to id.toString(),
+            "name" to name,
+            "limitKind" to limitKind.name,
+            "period" to period?.name,
+            "amount" to amount.toPlainString(),
+            "currency" to currency,
+            "priority" to priority,
+        )
+
+    private fun LimitViolationResult.toSnapshot(): Map<String, Any?> =
+        mapOf(
+            "code" to code,
+            "message" to message,
+            "limitRuleId" to limitRuleId?.toString(),
+            "limitAmount" to limitAmount?.toPlainString(),
+            "attemptedAmount" to attemptedAmount.toPlainString(),
+            "currency" to currency,
+            "remainingAmount" to remainingAmount?.toPlainString(),
         )
 
     private fun Map<*, *>.requiredString(key: String): String =
@@ -153,6 +189,15 @@ internal object TransactionIdempotency {
     private fun Map<*, *>.requiredDecimal(key: String): BigDecimal =
         requiredString(key).toBigDecimalOrNull()
             ?: error("Transaction result snapshot has an invalid decimal '$key'")
+
+    private fun Map<*, *>.optionalDecimal(key: String): BigDecimal? {
+        val value = this[key] ?: return null
+        check(value is String) {
+            "Transaction result snapshot has a non-string '$key'"
+        }
+        return value.toBigDecimalOrNull()
+            ?: error("Transaction result snapshot has an invalid decimal '$key'")
+    }
 
     private fun Map<*, *>.requiredUuid(key: String): UUID =
         runCatching { UUID.fromString(requiredString(key)) }

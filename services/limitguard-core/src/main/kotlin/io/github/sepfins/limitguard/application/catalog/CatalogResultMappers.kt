@@ -32,6 +32,7 @@ import io.github.sepfins.limitguard.api.results.PartyLegalIdentifierResult
 import io.github.sepfins.limitguard.api.results.PartyProfileDelegationResult
 import io.github.sepfins.limitguard.api.results.PartyProfileResult
 import io.github.sepfins.limitguard.api.results.TenantResult
+import io.github.sepfins.limitguard.api.NoMatchingRuleBehavior
 import io.github.sepfins.limitguard.domain.channel.Channel
 import io.github.sepfins.limitguard.domain.channel.ChannelGroup
 import io.github.sepfins.limitguard.domain.channel.ChannelGroupMember
@@ -66,6 +67,7 @@ internal fun Tenant.toResult(): TenantResult =
         id = id.value,
         name = name.value,
         config = config.value,
+        noMatchingRuleBehavior = NoMatchingRuleBehavior.valueOf(noMatchingRuleBehavior.name),
         createdAt = requireNotNull(createdAt) {
             "Tenant.createdAt is required when mapping to TenantResult"
         },

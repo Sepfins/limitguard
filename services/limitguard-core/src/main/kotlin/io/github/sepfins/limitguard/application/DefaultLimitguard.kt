@@ -21,7 +21,10 @@ import io.github.sepfins.limitguard.application.change.RequestLimitRuleChangeWor
 import io.github.sepfins.limitguard.application.change.RejectLimitRuleChangeWorkflow
 import io.github.sepfins.limitguard.application.change.PolicyEngineRegistry
 import io.github.sepfins.limitguard.application.evaluation.AuthorizationEvaluator
+import io.github.sepfins.limitguard.application.evaluation.AuthorizationDecisionRecorder
+import io.github.sepfins.limitguard.application.evaluation.AuthorizationReferenceResolver
 import io.github.sepfins.limitguard.application.evaluation.DefaultLimitEvaluationService
+import io.github.sepfins.limitguard.application.evaluation.ExpireDueAuthorizationsWorkflow
 import io.github.sepfins.limitguard.application.evaluation.LimitRuleMatcher
 import io.github.sepfins.limitguard.application.evaluation.MandateResolver
 import io.github.sepfins.limitguard.application.evaluation.TransactionFactory
@@ -32,6 +35,7 @@ import io.github.sepfins.limitguard.application.usage.UsageWindowCalculator
 import io.github.sepfins.limitguard.infrastructure.policy.jsonlogic.JsonLogicPolicyEngine
 import io.github.sepfins.limitguard.port.ids.IdGenerator
 import io.github.sepfins.limitguard.port.persistence.BankWorkerRepository
+import io.github.sepfins.limitguard.port.persistence.AuthorizationDecisionRepository
 import io.github.sepfins.limitguard.port.persistence.ChannelGroupMemberRepository
 import io.github.sepfins.limitguard.port.persistence.ChannelGroupRepository
 import io.github.sepfins.limitguard.port.persistence.ChannelRepository
@@ -94,6 +98,7 @@ class DefaultLimitguard(
     limitChangeEventRepository: LimitRuleChangeEventRepository,
     limitRuleRepository: LimitRuleRepository,
     limitRuleRevisionRepository: LimitRuleRevisionRepository,
+    authorizationDecisionRepository: AuthorizationDecisionRepository,
     transactionRepository: TransactionRepository,
     transactionEventRepository: TransactionEventRepository,
     usageBucketRepository: UsageBucketRepository,
@@ -211,15 +216,34 @@ class DefaultLimitguard(
         ),
     )
 
-    override val limitEvaluationService: LimitEvaluationService = DefaultLimitEvaluationService(
+    private val transactionRecorder = TransactionRecorder(
         transactionRepository = transactionRepository,
         transactionEventRepository = transactionEventRepository,
-        partyProfileRepository = partyProfileRepository,
-        tenantRepository = tenantRepository,
-        channelRepository = channelRepository,
-        operationTypeRepository = operationTypeRepository,
-        fundingSourceRepository = fundingSourceRepository,
+        idGenerator = idGenerator,
+    )
+    private val usageMutationService = UsageMutationService(
+        idGenerator = idGenerator,
+        transactionEventRepository = transactionEventRepository,
+        usageBucketRepository = usageBucketRepository,
+        usageEventRepository = usageEventRepository,
+    )
+
+    override val limitEvaluationService: LimitEvaluationService = DefaultLimitEvaluationService(
+        authorizationDecisionRecorder = AuthorizationDecisionRecorder(
+            repository = authorizationDecisionRepository,
+            idGenerator = idGenerator,
+        ),
+        transactionRepository = transactionRepository,
+        transactionEventRepository = transactionEventRepository,
         fundingSourceOwnerRepository = fundingSourceOwnerRepository,
+        authorizationReferenceResolver = AuthorizationReferenceResolver(
+            tenantRepository = tenantRepository,
+            channelRepository = channelRepository,
+            operationTypeRepository = operationTypeRepository,
+            partyProfileRepository = partyProfileRepository,
+            fundingSourceRepository = fundingSourceRepository,
+            fundingSourceProductRepository = fundingSourceProductRepository,
+        ),
         transactionFactory = TransactionFactory(idGenerator),
         mandateResolver = MandateResolver(
             mandateRepository = mandateRepository,
@@ -237,16 +261,15 @@ class DefaultLimitguard(
                 usageWindowCalculator = UsageWindowCalculator(),
             ),
         ),
-        usageMutationService = UsageMutationService(
-            idGenerator = idGenerator,
-            transactionEventRepository = transactionEventRepository,
-            usageBucketRepository = usageBucketRepository,
-            usageEventRepository = usageEventRepository,
-        ),
-        transactionRecorder = TransactionRecorder(
+        usageMutationService = usageMutationService,
+        transactionRecorder = transactionRecorder,
+        expireDueAuthorizationsWorkflow = ExpireDueAuthorizationsWorkflow(
+            tenantRepository = tenantRepository,
             transactionRepository = transactionRepository,
-            transactionEventRepository = transactionEventRepository,
-            idGenerator = idGenerator,
+            usageMutationService = usageMutationService,
+            transactionRecorder = transactionRecorder,
+            clockProvider = clockProvider,
+            transactionRunner = transactionRunner,
         ),
         clockProvider = clockProvider,
         transactionRunner = transactionRunner,

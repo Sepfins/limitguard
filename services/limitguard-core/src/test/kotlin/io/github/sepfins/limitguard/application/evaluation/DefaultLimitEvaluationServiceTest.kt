@@ -4,9 +4,13 @@ import io.github.sepfins.limitguard.api.AuthorizationDecision
 import io.github.sepfins.limitguard.api.LimitUsageEventType as ApiLimitUsageEventType
 import io.github.sepfins.limitguard.api.commands.AuthorizeTransactionCommand
 import io.github.sepfins.limitguard.api.commands.CaptureTransactionCommand
+import io.github.sepfins.limitguard.api.commands.ExpireDueAuthorizationsCommand
 import io.github.sepfins.limitguard.api.commands.ReleaseAuthorizationCommand
 import io.github.sepfins.limitguard.api.commands.ReverseTransactionCommand
 import io.github.sepfins.limitguard.api.errors.IdempotencyConflictException
+import io.github.sepfins.limitguard.api.errors.AuthorizationExpiredException
+import io.github.sepfins.limitguard.api.errors.NotFoundException
+import io.github.sepfins.limitguard.api.errors.ValidationException
 import io.github.sepfins.limitguard.api.TransactionStatus as ApiTransactionStatus
 import io.github.sepfins.limitguard.application.transaction.TransactionRecorder
 import io.github.sepfins.limitguard.application.usage.UsageMutationService
@@ -15,6 +19,7 @@ import io.github.sepfins.limitguard.domain.channel.ChannelCode
 import io.github.sepfins.limitguard.domain.channel.ChannelGroupMember
 import io.github.sepfins.limitguard.domain.channel.ChannelName
 import io.github.sepfins.limitguard.domain.common.ChannelGroupId
+import io.github.sepfins.limitguard.domain.common.AuthorizationDecisionId
 import io.github.sepfins.limitguard.domain.common.ChannelId
 import io.github.sepfins.limitguard.domain.common.CurrencyCode
 import io.github.sepfins.limitguard.domain.common.EffectiveWindow
@@ -35,10 +40,15 @@ import io.github.sepfins.limitguard.domain.common.TenantId
 import io.github.sepfins.limitguard.domain.common.TransactionEventId
 import io.github.sepfins.limitguard.domain.common.Version
 import io.github.sepfins.limitguard.domain.funding.FundingSource
+import io.github.sepfins.limitguard.domain.funding.FundingSourceCategory
 import io.github.sepfins.limitguard.domain.funding.FundingSourceGroupMember
 import io.github.sepfins.limitguard.domain.funding.FundingSourceOwner
 import io.github.sepfins.limitguard.domain.funding.FundingSourceOwnerRole
+import io.github.sepfins.limitguard.domain.funding.FundingSourceProduct
+import io.github.sepfins.limitguard.domain.funding.FundingSourceProductCode
+import io.github.sepfins.limitguard.domain.funding.FundingSourceProductName
 import io.github.sepfins.limitguard.domain.funding.FundingSourceScope
+import io.github.sepfins.limitguard.domain.funding.ProductNodeType
 import io.github.sepfins.limitguard.domain.limit.LimitChannelScope
 import io.github.sepfins.limitguard.domain.limit.LimitKind
 import io.github.sepfins.limitguard.domain.limit.LimitOperationScope
@@ -57,6 +67,7 @@ import io.github.sepfins.limitguard.domain.operation.OperationTypeScope
 import io.github.sepfins.limitguard.domain.party.PartyProfile
 import io.github.sepfins.limitguard.domain.tenant.Tenant
 import io.github.sepfins.limitguard.domain.tenant.TenantName
+import io.github.sepfins.limitguard.domain.tenant.NoMatchingRuleBehavior
 import io.github.sepfins.limitguard.domain.transaction.TransactionEventType
 import io.github.sepfins.limitguard.domain.transaction.TransactionStatus as DomainTransactionStatus
 import io.github.sepfins.limitguard.application.usage.UsageReservationService
@@ -66,6 +77,7 @@ import io.github.sepfins.limitguard.support.FixedClockProvider
 import io.github.sepfins.limitguard.support.SequentialIdGenerator
 import io.github.sepfins.limitguard.support.persistence.InMemoryLimitguardRepositories
 import java.math.BigDecimal
+import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 import kotlin.test.Test
@@ -119,7 +131,7 @@ class DefaultLimitEvaluationServiceTest {
     }
 
     @Test
-    fun `over-limit transaction is denied without persistence`() {
+    fun `over-limit transaction persists its decision but no payment transaction`() {
         val fixture = fixture(firstOwnerId)
         val mandate = fixture.addMandate(
             id = 100,
@@ -141,6 +153,14 @@ class DefaultLimitEvaluationServiceTest {
         assertEquals("PER_TRANSACTION_LIMIT_EXCEEDED", result.violations.single().code)
         assertEquals(rule.id.value, result.violations.single().limitRuleId)
         assertEquals(emptyList(), fixture.repositories.transactions.findByFundingSourceId(tenantId, fundingSourceId))
+        val persistedDecision = assertNotNull(
+            fixture.repositories.authorizationDecisions.findById(
+                tenantId,
+                AuthorizationDecisionId.of(result.authorizationDecisionId),
+            ),
+        )
+        assertEquals(result.decision.name, persistedDecision.decision.name)
+        assertNull(persistedDecision.paymentTransactionId)
     }
 
     @Test
@@ -175,24 +195,125 @@ class DefaultLimitEvaluationServiceTest {
 
         assertEquals(first, replay)
         assertEquals(1, fixture.repositories.transactions.findByFundingSourceId(tenantId, fundingSourceId).size)
-        val authorizationEvent = assertNotNull(
-            fixture.repositories.transactionEvents
+        val authorizationDecision = assertNotNull(
+            fixture.repositories.authorizationDecisions
                 .findByIdempotencyKey(tenantId, IdempotencyKey.of("auth-1")),
         )
+        val authorizationEvent = assertNotNull(
+            fixture.repositories.transactionEvents.findById(
+                tenantId,
+                TransactionEventId.of(assertNotNull(first.transactionEventId)),
+            ),
+        )
         assertEquals(TransactionEventType.AUTHORIZATION, authorizationEvent.eventType)
+        assertNull(authorizationEvent.idempotencyKey)
         assertEquals(
             first.paymentTransactionId.toString(),
-            authorizationEvent.resultSnapshot?.value?.get("paymentTransactionId"),
+            authorizationDecision.resultSnapshot.value["paymentTransactionId"],
         )
         assertEquals(
             first.transactionEventId.toString(),
-            authorizationEvent.resultSnapshot?.value?.get("transactionEventId"),
+            authorizationDecision.resultSnapshot.value["transactionEventId"],
         )
         assertNull(authorizationEvent.metadata.value["matchedRules"])
         assertNotNull(authorizationEvent.metadata.value["fundingAuthorities"])
         assertFailsWith<IdempotencyConflictException> {
             fixture.service.authorizeTransaction(command(amount = "76.00", idempotencyKey = "auth-1"))
         }
+        assertFailsWith<IdempotencyConflictException> {
+            fixture.service.authorizeTransaction(
+                command(amount = "75.00", idempotencyKey = "auth-1")
+                    .copy(metadata = mapOf("merchantCategory" to "TRAVEL")),
+            )
+        }
+    }
+
+    @Test
+    fun `authorization and mutation requests share one idempotency key namespace`() {
+        val fixture = fixture(actorId, noMatchingRuleBehavior = NoMatchingRuleBehavior.ALLOW)
+        val idempotentAuthorization = fixture.service.authorizeTransaction(
+            command(amount = "25.00", idempotencyKey = "authorization-key"),
+        )
+
+        assertFailsWith<IdempotencyConflictException> {
+            fixture.service.captureTransaction(
+                captureCommand(
+                    paymentTransactionId = assertNotNull(idempotentAuthorization.paymentTransactionId),
+                    amount = "5.00",
+                    idempotencyKey = "authorization-key",
+                ),
+            )
+        }
+
+        val otherAuthorization = fixture.service.authorizeTransaction(command(amount = "25.00"))
+        fixture.service.captureTransaction(
+            captureCommand(
+                paymentTransactionId = assertNotNull(otherAuthorization.paymentTransactionId),
+                amount = "5.00",
+                idempotencyKey = "mutation-key",
+            ),
+        )
+
+        assertFailsWith<IdempotencyConflictException> {
+            fixture.service.authorizeTransaction(
+                command(amount = "25.00", idempotencyKey = "mutation-key"),
+            )
+        }
+    }
+
+    @Test
+    fun `denied authorization replays the original decision and rejects changed intent`() {
+        val fixture = fixture(firstOwnerId)
+        fixture.addMandate(
+            id = 100,
+            ownerId = firstOwnerId,
+            scope = FundingSourceScope.AllOwnerSources,
+        )
+        val rule = fixture.addRule(
+            id = 200,
+            ownerId = firstOwnerId,
+            mandateScope = MandateScope.AllOwnerMandates,
+            amount = "100.00",
+        )
+        val command = command(amount = "100.01", idempotencyKey = "denied-auth-1")
+
+        val first = fixture.service.authorizeTransaction(command)
+        fixture.repositories.limitRules.update(
+            tenantId,
+            rule.copy(amount = Money.positive("1000.00", CurrencyCode.of("EUR"))),
+        )
+        val replay = fixture.service.authorizeTransaction(command)
+
+        assertEquals(AuthorizationDecision.DENIED, first.decision)
+        assertEquals(first, replay)
+        assertNull(replay.paymentTransactionId)
+        assertEquals(
+            first.authorizationDecisionId,
+            fixture.repositories.authorizationDecisions
+                .findByIdempotencyKey(tenantId, IdempotencyKey.of("denied-auth-1"))
+                ?.id
+                ?.value,
+        )
+        assertFailsWith<IdempotencyConflictException> {
+            fixture.service.authorizeTransaction(command(amount = "100.02", idempotencyKey = "denied-auth-1"))
+        }
+    }
+
+    @Test
+    fun `authorization replay remains stable after its expiry time`() {
+        val fixture = fixture(actorId, noMatchingRuleBehavior = NoMatchingRuleBehavior.ALLOW)
+        val command = command(
+            amount = "25.00",
+            idempotencyKey = "expiring-auth-1",
+            expiresAt = now.plusSeconds(60),
+        )
+        val first = fixture.service.authorizeTransaction(command)
+        fixture.clock.advanceBy(Duration.ofSeconds(61))
+
+        val replay = fixture.service.authorizeTransaction(command)
+
+        assertEquals(first, replay)
+        assertEquals(AuthorizationDecision.ALLOWED, replay.decision)
     }
 
     @Test
@@ -359,6 +480,152 @@ class DefaultLimitEvaluationServiceTest {
         val bucket = fixture.periodicBucket(dailyRule, LimitPeriod.DAILY)
         assertEquals(Money.zero(CurrencyCode.of("EUR")), bucket.reservedAmount)
         assertEquals(Money.positive("20.00", CurrencyCode.of("EUR")), bucket.consumedAmount)
+    }
+
+    @Test
+    fun `authorization expiry must be in the future`() {
+        val fixture = fixture(actorId, noMatchingRuleBehavior = NoMatchingRuleBehavior.ALLOW)
+
+        assertFailsWith<ValidationException> {
+            fixture.service.authorizeTransaction(command(amount = "10.00", expiresAt = now))
+        }
+        assertFailsWith<ValidationException> {
+            fixture.service.authorizeTransaction(command(amount = "10.00", expiresAt = now.minusSeconds(1)))
+        }
+
+        assertEquals(emptyList(), fixture.repositories.transactions.findByFundingSourceId(tenantId, fundingSourceId))
+    }
+
+    @Test
+    fun `missing references remain errors and do not create decision records`() {
+        val fixture = fixture(actorId, noMatchingRuleBehavior = NoMatchingRuleBehavior.ALLOW)
+        val command = command(amount = "10.00", idempotencyKey = "missing-reference-1")
+            .copy(channelId = uuid(999))
+
+        assertFailsWith<NotFoundException> {
+            fixture.service.authorizeTransaction(command)
+        }
+
+        assertNull(
+            fixture.repositories.authorizationDecisions.findByIdempotencyKey(
+                tenantId,
+                IdempotencyKey.of("missing-reference-1"),
+            ),
+        )
+    }
+
+    @Test
+    fun `expired authorization rejects capture and release then frees reserved usage`() {
+        val fixture = fixture(firstOwnerId)
+        fixture.addMandate(
+            id = 100,
+            ownerId = firstOwnerId,
+            scope = FundingSourceScope.AllOwnerSources,
+        )
+        val rule = fixture.addRule(
+            id = 200,
+            ownerId = firstOwnerId,
+            mandateScope = MandateScope.AllOwnerMandates,
+            amount = "100.00",
+            limitKind = LimitKind.Periodic(LimitPeriod.DAILY),
+        )
+        val authorization = fixture.service.authorizeTransaction(
+            command(amount = "40.00", expiresAt = now.plusSeconds(60)),
+        )
+        val transactionId = assertNotNull(authorization.paymentTransactionId)
+
+        fixture.clock.advanceBy(Duration.ofSeconds(60))
+
+        assertFailsWith<AuthorizationExpiredException> {
+            fixture.service.captureTransaction(captureCommand(transactionId))
+        }
+        assertFailsWith<AuthorizationExpiredException> {
+            fixture.service.releaseAuthorization(releaseCommand(transactionId))
+        }
+
+        val batch = fixture.service.expireDueAuthorizations(
+            ExpireDueAuthorizationsCommand(tenantId = tenantId.value),
+        )
+        val expiration = batch.expirations.single()
+        val persisted = assertNotNull(
+            fixture.repositories.transactions.findById(tenantId, PaymentTransactionId.of(transactionId)),
+        )
+
+        assertEquals(now.plusSeconds(60), batch.processedAt)
+        assertEquals(ApiTransactionStatus.EXPIRED, expiration.status)
+        assertEquals(BigDecimal("40.0000"), expiration.amount)
+        assertEquals(ApiLimitUsageEventType.RELEASE, expiration.usageEvents.single().eventType)
+        assertEquals(BigDecimal("-40.0000"), expiration.usageEvents.single().amountDelta)
+        assertEquals(DomainTransactionStatus.EXPIRED, persisted.status)
+        assertEquals(Money.zero(CurrencyCode.of("EUR")), fixture.periodicBucket(rule, LimitPeriod.DAILY).reservedAmount)
+        assertEquals(
+            TransactionEventType.EXPIRY,
+            fixture.repositories.transactionEvents
+                .findByTransaction(tenantId, PaymentTransactionId.of(transactionId))
+                .last()
+                .eventType,
+        )
+        assertEquals(
+            emptyList(),
+            fixture.service.expireDueAuthorizations(
+                ExpireDueAuthorizationsCommand(tenantId = tenantId.value),
+            ).expirations,
+        )
+    }
+
+    @Test
+    fun `expiry closes only the uncaptured portion of a partially captured authorization`() {
+        val fixture = fixture(firstOwnerId)
+        fixture.addMandate(
+            id = 100,
+            ownerId = firstOwnerId,
+            scope = FundingSourceScope.AllOwnerSources,
+        )
+        val rule = fixture.addRule(
+            id = 200,
+            ownerId = firstOwnerId,
+            mandateScope = MandateScope.AllOwnerMandates,
+            amount = "100.00",
+            limitKind = LimitKind.Periodic(LimitPeriod.DAILY),
+        )
+        val authorization = fixture.service.authorizeTransaction(
+            command(amount = "100.00", expiresAt = now.plusSeconds(60)),
+        )
+        val transactionId = assertNotNull(authorization.paymentTransactionId)
+        fixture.service.captureTransaction(captureCommand(transactionId, amount = "25.00"))
+        fixture.clock.advanceBy(Duration.ofSeconds(60))
+
+        val expiration = fixture.service.expireDueAuthorizations(
+            ExpireDueAuthorizationsCommand(tenantId = tenantId.value),
+        ).expirations.single()
+        val persisted = assertNotNull(
+            fixture.repositories.transactions.findById(tenantId, PaymentTransactionId.of(transactionId)),
+        )
+        val bucket = fixture.periodicBucket(rule, LimitPeriod.DAILY)
+
+        assertEquals(ApiTransactionStatus.CAPTURED, expiration.status)
+        assertEquals(BigDecimal("75.0000"), expiration.amount)
+        assertEquals(DomainTransactionStatus.CAPTURED, persisted.status)
+        assertEquals(Money.positive("25.00", CurrencyCode.of("EUR")), persisted.authorizedAmount)
+        assertEquals(Money.positive("25.00", CurrencyCode.of("EUR")), persisted.capturedAmount)
+        assertEquals(Money.zero(CurrencyCode.of("EUR")), bucket.reservedAmount)
+        assertEquals(Money.positive("25.00", CurrencyCode.of("EUR")), bucket.consumedAmount)
+    }
+
+    @Test
+    fun `authorization without an expiry remains capturable`() {
+        val fixture = fixture(actorId, noMatchingRuleBehavior = NoMatchingRuleBehavior.ALLOW)
+        val authorization = fixture.service.authorizeTransaction(command(amount = "10.00"))
+        val transactionId = assertNotNull(authorization.paymentTransactionId)
+        fixture.clock.advanceBy(Duration.ofDays(365))
+
+        val expiryBatch = fixture.service.expireDueAuthorizations(
+            ExpireDueAuthorizationsCommand(tenantId = tenantId.value),
+        )
+        val capture = fixture.service.captureTransaction(captureCommand(transactionId))
+
+        assertEquals(emptyList(), expiryBatch.expirations)
+        assertEquals(ApiTransactionStatus.CAPTURED, capture.status)
     }
 
     @Test
@@ -603,6 +870,93 @@ class DefaultLimitEvaluationServiceTest {
     }
 
     @Test
+    fun `inactive channel denies and audits a new authorization`() {
+        val fixture = fixture(actorId)
+        val channel = assertNotNull(fixture.repositories.channels.findById(tenantId, channelId))
+        fixture.repositories.channels.update(tenantId, channel.copy(isActive = false))
+
+        val result = fixture.service.authorizeTransaction(command(amount = "10.00"))
+
+        assertEquals(AuthorizationDecision.DENIED, result.decision)
+        assertEquals("CHANNEL_INACTIVE", result.violations.single().code)
+        assertNull(result.paymentTransactionId)
+        assertNotNull(
+            fixture.repositories.authorizationDecisions.findById(
+                tenantId,
+                AuthorizationDecisionId.of(result.authorizationDecisionId),
+            ),
+        )
+    }
+
+    @Test
+    fun `inactive funding source denies a new authorization`() {
+        val fixture = fixture(actorId)
+        val source = assertNotNull(fixture.repositories.fundingSources.findById(tenantId, fundingSourceId))
+        fixture.repositories.fundingSources.update(tenantId, source.copy(isActive = false))
+
+        val result = fixture.service.authorizeTransaction(command(amount = "10.00"))
+
+        assertEquals(AuthorizationDecision.DENIED, result.decision)
+        assertEquals("FUNDING_SOURCE_INACTIVE", result.violations.single().code)
+        assertNull(result.paymentTransactionId)
+    }
+
+    @Test
+    fun `catalog deactivation does not invalidate an existing authorization`() {
+        val fixture = fixture(firstOwnerId)
+        fixture.addMandate(
+            id = 100,
+            ownerId = firstOwnerId,
+            scope = FundingSourceScope.AllOwnerSources,
+        )
+        fixture.addRule(
+            id = 200,
+            ownerId = firstOwnerId,
+            mandateScope = MandateScope.AllOwnerMandates,
+            amount = "100.00",
+        )
+        val authorization = fixture.service.authorizeTransaction(command(amount = "25.00"))
+        val source = assertNotNull(fixture.repositories.fundingSources.findById(tenantId, fundingSourceId))
+        fixture.repositories.fundingSources.update(tenantId, source.copy(isActive = false))
+
+        val capture = fixture.service.captureTransaction(
+            captureCommand(assertNotNull(authorization.paymentTransactionId)),
+        )
+
+        assertEquals(ApiTransactionStatus.CAPTURED, capture.status)
+    }
+
+    @Test
+    fun `inactive ancestor product disables its descendant product`() {
+        val fixture = fixture(actorId)
+        val parentId = FundingSourceProductId.of(uuid(21))
+        fixture.repositories.fundingSourceProducts.insert(
+            tenantId,
+            FundingSourceProduct(
+                id = parentId,
+                tenantId = tenantId,
+                parentId = null,
+                accountCategory = FundingSourceCategory.TRANSACTIONAL,
+                nodeType = ProductNodeType.FAMILY,
+                code = FundingSourceProductCode.of("ACCOUNTS"),
+                name = FundingSourceProductName.of("Accounts"),
+                isLeaf = false,
+                isActive = false,
+                createdAt = now,
+            ),
+        )
+        val leafId = FundingSourceProductId.of(uuid(20))
+        val leaf = assertNotNull(fixture.repositories.fundingSourceProducts.findById(tenantId, leafId))
+        fixture.repositories.fundingSourceProducts.update(tenantId, leaf.copy(parentId = parentId))
+
+        val result = fixture.service.authorizeTransaction(command(amount = "10.00"))
+
+        assertEquals(AuthorizationDecision.DENIED, result.decision)
+        assertEquals("FUNDING_SOURCE_PRODUCT_INACTIVE", result.violations.single().code)
+        assertNull(result.paymentTransactionId)
+    }
+
+    @Test
     fun `channel-group rule matches through channel membership`() {
         val fixture = fixture(firstOwnerId)
         fixture.addMandate(
@@ -635,14 +989,55 @@ class DefaultLimitEvaluationServiceTest {
     }
 
     @Test
-    fun `direct owner needs no self-mandate`() {
+    fun `tenant fails closed when a direct owner has no matching rule`() {
         val fixture = fixture(actorId)
+
+        val result = fixture.service.authorizeTransaction(command(amount = "10.00"))
+
+        assertEquals(AuthorizationDecision.DENIED, result.decision)
+        assertEquals(emptyList(), result.matchedRules)
+        assertEquals("NO_MATCHING_LIMIT_RULE", result.violations.single().code)
+        assertNull(result.paymentTransactionId)
+    }
+
+    @Test
+    fun `tenant may explicitly allow an authorization with no matching rule`() {
+        val fixture = fixture(
+            ownerId = actorId,
+            noMatchingRuleBehavior = NoMatchingRuleBehavior.ALLOW,
+        )
 
         val result = fixture.service.authorizeTransaction(command(amount = "10.00"))
 
         assertEquals(AuthorizationDecision.ALLOWED, result.decision)
         assertEquals(emptyList(), result.matchedRules)
         assertNotNull(result.paymentTransactionId)
+        assertNotNull(result.transactionEventId)
+    }
+
+    @Test
+    fun `tenant may delegate a no-rule decision to the consuming application`() {
+        val fixture = fixture(
+            ownerId = actorId,
+            noMatchingRuleBehavior = NoMatchingRuleBehavior.NOT_APPLICABLE,
+        )
+
+        val command = command(amount = "10.00", idempotencyKey = "not-applicable-1")
+        val result = fixture.service.authorizeTransaction(command)
+        val replay = fixture.service.authorizeTransaction(command)
+
+        assertEquals(AuthorizationDecision.NOT_APPLICABLE, result.decision)
+        assertEquals(result, replay)
+        assertEquals(emptyList(), result.matchedRules)
+        assertEquals(emptyList(), result.violations)
+        assertNull(result.paymentTransactionId)
+        assertNull(result.transactionEventId)
+        assertNotNull(
+            fixture.repositories.authorizationDecisions.findById(
+                tenantId,
+                AuthorizationDecisionId.of(result.authorizationDecisionId),
+            ),
+        )
     }
 
     @Test
@@ -899,13 +1294,18 @@ class DefaultLimitEvaluationServiceTest {
     private fun fixture(
         ownerId: PartyProfileId,
         additionalOwnerId: PartyProfileId? = null,
+        noMatchingRuleBehavior: NoMatchingRuleBehavior = NoMatchingRuleBehavior.DENY,
     ): AuthorizationFixture =
-        AuthorizationFixture(listOfNotNull(ownerId, additionalOwnerId))
+        AuthorizationFixture(
+            ownerIds = listOfNotNull(ownerId, additionalOwnerId),
+            noMatchingRuleBehavior = noMatchingRuleBehavior,
+        )
 
     private fun command(
         amount: String,
         idempotencyKey: String? = null,
         currency: String = "EUR",
+        expiresAt: Instant? = null,
     ): AuthorizeTransactionCommand =
         AuthorizeTransactionCommand(
             tenantId = tenantId.value,
@@ -916,6 +1316,7 @@ class DefaultLimitEvaluationServiceTest {
             amount = BigDecimal(amount),
             currency = currency,
             idempotencyKey = idempotencyKey,
+            expiresAt = expiresAt,
             metadata = mapOf("merchantCategory" to "GROCERY"),
         )
 
@@ -967,15 +1368,20 @@ class DefaultLimitEvaluationServiceTest {
             metadata = metadata,
         )
 
-    private inner class AuthorizationFixture(ownerIds: List<PartyProfileId>) {
+    private inner class AuthorizationFixture(
+        ownerIds: List<PartyProfileId>,
+        noMatchingRuleBehavior: NoMatchingRuleBehavior,
+    ) {
         val repositories = InMemoryLimitguardRepositories()
         val service: DefaultLimitEvaluationService
+        val clock = FixedClockProvider(now)
 
         init {
             repositories.tenants.insert(
                 Tenant(
                     id = tenantId,
                     name = TenantName.of("Test Bank"),
+                    noMatchingRuleBehavior = noMatchingRuleBehavior,
                     createdAt = now,
                 ),
             )
@@ -1002,6 +1408,21 @@ class DefaultLimitEvaluationServiceTest {
                     code = OperationTypeCode.of("TRANSFER"),
                     name = OperationTypeName.of("Transfer"),
                     isLeaf = true,
+                    createdAt = now,
+                ),
+            )
+            repositories.fundingSourceProducts.insert(
+                tenantId,
+                FundingSourceProduct(
+                    id = FundingSourceProductId.of(uuid(20)),
+                    tenantId = tenantId,
+                    parentId = null,
+                    accountCategory = FundingSourceCategory.TRANSACTIONAL,
+                    nodeType = ProductNodeType.PRODUCT,
+                    code = FundingSourceProductCode.of("CURRENT_ACCOUNT"),
+                    name = FundingSourceProductName.of("Current account"),
+                    isLeaf = true,
+                    isActive = true,
                     createdAt = now,
                 ),
             )
@@ -1033,15 +1454,34 @@ class DefaultLimitEvaluationServiceTest {
                 )
             }
             val idGenerator = SequentialIdGenerator(startAt = 1000L)
-            service = DefaultLimitEvaluationService(
+            val transactionRunner = DirectTransactionRunner()
+            val transactionRecorder = TransactionRecorder(
                 transactionRepository = repositories.transactions,
                 transactionEventRepository = repositories.transactionEvents,
-                partyProfileRepository = repositories.partyProfiles,
-                tenantRepository = repositories.tenants,
-                channelRepository = repositories.channels,
-                operationTypeRepository = repositories.operationTypes,
-                fundingSourceRepository = repositories.fundingSources,
+                idGenerator = idGenerator,
+            )
+            val usageMutationService = UsageMutationService(
+                idGenerator = idGenerator,
+                transactionEventRepository = repositories.transactionEvents,
+                usageBucketRepository = repositories.usageBuckets,
+                usageEventRepository = repositories.usageEvents,
+            )
+            service = DefaultLimitEvaluationService(
+                authorizationDecisionRecorder = AuthorizationDecisionRecorder(
+                    repository = repositories.authorizationDecisions,
+                    idGenerator = idGenerator,
+                ),
+                transactionRepository = repositories.transactions,
+                transactionEventRepository = repositories.transactionEvents,
                 fundingSourceOwnerRepository = repositories.fundingSourceOwners,
+                authorizationReferenceResolver = AuthorizationReferenceResolver(
+                    tenantRepository = repositories.tenants,
+                    channelRepository = repositories.channels,
+                    operationTypeRepository = repositories.operationTypes,
+                    partyProfileRepository = repositories.partyProfiles,
+                    fundingSourceRepository = repositories.fundingSources,
+                    fundingSourceProductRepository = repositories.fundingSourceProducts,
+                ),
                 transactionFactory = TransactionFactory(idGenerator),
                 mandateResolver = MandateResolver(
                     mandateRepository = repositories.mandates,
@@ -1059,19 +1499,18 @@ class DefaultLimitEvaluationServiceTest {
                         usageWindowCalculator = UsageWindowCalculator(),
                     ),
                 ),
-                usageMutationService = UsageMutationService(
-                    idGenerator = idGenerator,
-                    transactionEventRepository = repositories.transactionEvents,
-                    usageBucketRepository = repositories.usageBuckets,
-                    usageEventRepository = repositories.usageEvents
-                ),
-                transactionRecorder = TransactionRecorder(
+                usageMutationService = usageMutationService,
+                transactionRecorder = transactionRecorder,
+                expireDueAuthorizationsWorkflow = ExpireDueAuthorizationsWorkflow(
+                    tenantRepository = repositories.tenants,
                     transactionRepository = repositories.transactions,
-                    transactionEventRepository = repositories.transactionEvents,
-                    idGenerator = idGenerator,
+                    usageMutationService = usageMutationService,
+                    transactionRecorder = transactionRecorder,
+                    clockProvider = clock,
+                    transactionRunner = transactionRunner,
                 ),
-                clockProvider = FixedClockProvider(now),
-                transactionRunner = DirectTransactionRunner(),
+                clockProvider = clock,
+                transactionRunner = transactionRunner,
             )
         }
 

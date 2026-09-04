@@ -10,6 +10,7 @@ import io.github.sepfins.limitguard.api.LimitConfigurationFundingScope
 import io.github.sepfins.limitguard.api.LimitFundingScope
 import io.github.sepfins.limitguard.api.LimitKind
 import io.github.sepfins.limitguard.api.LimitPeriod
+import io.github.sepfins.limitguard.api.NoMatchingRuleBehavior
 import io.github.sepfins.limitguard.api.PartyType
 import io.github.sepfins.limitguard.api.PartyProfileDelegationType
 import io.github.sepfins.limitguard.api.ProductNodeType
@@ -21,6 +22,7 @@ import java.util.UUID
 data class RegisterTenantCommand(
     val name: String,
     val config: Map<String, Any?> = emptyMap(),
+    val noMatchingRuleBehavior: NoMatchingRuleBehavior = NoMatchingRuleBehavior.DENY,
 )
 
 data class RegisterIdentifierSchemeCommand(

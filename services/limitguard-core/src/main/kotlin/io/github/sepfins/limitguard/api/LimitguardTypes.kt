@@ -133,6 +133,13 @@ enum class LimitChangePolicyDecision {
 enum class AuthorizationDecision {
     ALLOWED,
     DENIED,
+    NOT_APPLICABLE,
+}
+
+enum class NoMatchingRuleBehavior {
+    ALLOW,
+    DENY,
+    NOT_APPLICABLE,
 }
 
 enum class TransactionStatus {

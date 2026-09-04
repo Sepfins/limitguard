@@ -5,7 +5,6 @@ import io.github.sepfins.limitguard.domain.common.IdempotencyKey
 import io.github.sepfins.limitguard.domain.common.Metadata
 import io.github.sepfins.limitguard.domain.common.Money
 import io.github.sepfins.limitguard.domain.common.TransactionEventId
-import io.github.sepfins.limitguard.domain.limit.MatchedLimitRule
 import io.github.sepfins.limitguard.domain.transaction.PaymentTransaction
 import io.github.sepfins.limitguard.domain.transaction.TransactionEvent
 import io.github.sepfins.limitguard.domain.transaction.TransactionEventReason
@@ -34,20 +33,11 @@ internal class TransactionRecorder(
 ) {
     fun recordAuthorization(
         transaction: PaymentTransaction,
-        matchedRules: List<MatchedLimitRule>,
         authorities: List<ResolvedFundingAuthority>,
-        idempotencyKey: IdempotencyKey?,
         recordedAt: Instant,
     ): RecordedAuthorization {
         val persistedTransaction = transactionRepository.insert(transaction.tenantId, transaction)
         val eventId = TransactionEventId.of(idGenerator.newId())
-        val resultSnapshot = idempotencyKey?.let {
-            TransactionIdempotency.authorizationResultSnapshot(
-                transaction = persistedTransaction,
-                transactionEventId = eventId,
-                matchedRules = matchedRules,
-            )
-        }
         val event = transactionEventRepository.insert(
             transaction.tenantId,
             TransactionEvent(
@@ -56,8 +46,6 @@ internal class TransactionRecorder(
                 paymentTransactionId = persistedTransaction.id,
                 eventType = TransactionEventType.AUTHORIZATION,
                 amount = persistedTransaction.authorizedAmount,
-                idempotencyKey = idempotencyKey,
-                resultSnapshot = resultSnapshot,
                 metadata = authorizationMetadata(authorities),
                 createdAt = recordedAt,
             ),
@@ -72,7 +60,7 @@ internal class TransactionRecorder(
         transaction: PaymentTransaction,
         mutationKind: TransactionMutationKind,
         mutationAmount: Money,
-        requestedAmount: Money?,
+        requestedAmount: Money? = null,
         reason: TransactionEventReason?,
         metadata: Metadata,
         recordedAt: Instant,
@@ -97,6 +85,9 @@ internal class TransactionRecorder(
 
             TransactionMutationKind.REVERSAL ->
                 TransactionEventType.REVERSAL
+
+            TransactionMutationKind.EXPIRY ->
+                TransactionEventType.EXPIRY
         }
 
         val event = transactionEventRepository.insert(

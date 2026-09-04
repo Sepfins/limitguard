@@ -39,6 +39,13 @@ data class PaymentTransaction(
     fun canTransitionTo(nextStatus: TransactionStatus): Boolean =
         nextStatus in allowedTransitions.getValue(status)
 
+    val uncapturedAmount: Money
+        get() = authorizedAmount - capturedAmount
+
+    fun isDueForExpiry(at: Instant): Boolean =
+        status in EXPIRABLE_STATUSES &&
+            expiresAt?.let { !at.isBefore(it) } == true
+
     fun transitionTo(nextStatus: TransactionStatus): PaymentTransaction {
         require(canTransitionTo(nextStatus)) {
             "Cannot transition transaction from $status to $nextStatus"
@@ -140,8 +147,25 @@ data class PaymentTransaction(
     fun reverse(): PaymentTransaction =
         reverse(capturedAmount)
 
-    fun expire(): PaymentTransaction =
-        transitionTo(TransactionStatus.EXPIRED)
+    fun expire(): PaymentTransaction {
+        require(expiresAt != null) {
+            "Transaction has no authorization expiry"
+        }
+        require(status in EXPIRABLE_STATUSES) {
+            "Only authorized or partially captured transactions can expire"
+        }
+        require(uncapturedAmount.isPositive) {
+            "Transaction has no uncaptured authorization to expire"
+        }
+
+        return if (capturedAmount.isZero) {
+            transitionTo(TransactionStatus.EXPIRED)
+        } else {
+            transitionTo(TransactionStatus.CAPTURED).copy(
+                authorizedAmount = capturedAmount,
+            )
+        }
+    }
 
     companion object {
         private val allowedTransitions: Map<TransactionStatus, Set<TransactionStatus>> =
@@ -171,6 +195,12 @@ data class PaymentTransaction(
                 TransactionStatus.VOIDED,
                 TransactionStatus.REVERSED,
                 TransactionStatus.EXPIRED,
+            )
+
+        private val EXPIRABLE_STATUSES: Set<TransactionStatus> =
+            setOf(
+                TransactionStatus.AUTHORIZED,
+                TransactionStatus.PARTIALLY_CAPTURED,
             )
     }
 }
