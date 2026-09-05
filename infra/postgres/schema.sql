@@ -2,13 +2,23 @@
 -- Tenancy and external identifiers
 -- ============================================================================
 
+CREATE TYPE no_matching_rule_behavior AS ENUM (
+    'ALLOW',
+    'DENY',
+    'NOT_APPLICABLE'
+);
+
 CREATE TABLE tenant (
     id UUID PRIMARY KEY DEFAULT uuidv7(),
     name TEXT NOT NULL,
     config JSONB NOT NULL DEFAULT '{}'::jsonb,
+    no_matching_rule_behavior no_matching_rule_behavior NOT NULL DEFAULT 'DENY',
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (name)
 );
+
+COMMENT ON COLUMN tenant.no_matching_rule_behavior IS
+    'Behavior when LimitGuard resolves valid funding authority but no active rule matches. DENY fails closed; NOT_APPLICABLE delegates the final decision to the consuming application; ALLOW explicitly permits an unbounded LimitGuard authorization.';
 
 CREATE TABLE identifier_scheme (
     id UUID PRIMARY KEY DEFAULT uuidv7(),
@@ -417,6 +427,9 @@ CREATE TABLE payment_transaction (
     ),
     CONSTRAINT chk_payment_transaction_currency CHECK (
         currency ~ '^[A-Z]{3}$'
+    ),
+    CONSTRAINT chk_payment_transaction_expiry CHECK (
+        expires_at IS NULL OR expires_at > created_at
     )
 );
 
@@ -428,6 +441,10 @@ CREATE INDEX idx_payment_transaction_funding_source
 
 CREATE INDEX idx_payment_transaction_channel
     ON payment_transaction (tenant_id, channel_id, created_at);
+
+CREATE INDEX idx_payment_transaction_due_expiry
+    ON payment_transaction (tenant_id, expires_at, id)
+    WHERE expires_at IS NOT NULL AND status IN ('AUTHORIZED', 'PARTIALLY_CAPTURED');
 
 CREATE TYPE transaction_event_type AS ENUM (
     'AUTHORIZATION',
@@ -452,6 +469,7 @@ CREATE TABLE transaction_event (
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (tenant_id, id),
+    UNIQUE (tenant_id, id, payment_transaction_id),
     FOREIGN KEY (tenant_id, payment_transaction_id)
         REFERENCES payment_transaction(tenant_id, id)
         ON DELETE CASCADE,
@@ -481,7 +499,7 @@ CREATE TABLE transaction_event (
 );
 
 COMMENT ON COLUMN transaction_event.idempotency_key IS
-    'Tenant-scoped key of the command that produced this event, including authorization, capture, release, and reversal. Reuse for different command data is an idempotency conflict.';
+    'Tenant-scoped key of the post-authorization mutation command that produced this event, including capture, release, and reversal. Authorization keys are owned by authorization_decision.';
 
 COMMENT ON COLUMN transaction_event.requested_amount IS
     'Client-supplied mutation amount after normalization; null means the operation used its default amount.';
@@ -495,6 +513,85 @@ CREATE UNIQUE INDEX uq_transaction_event_idempotency
 
 CREATE INDEX idx_transaction_event_transaction
     ON transaction_event (tenant_id, payment_transaction_id, created_at);
+
+CREATE TYPE authorization_decision_outcome AS ENUM (
+    'ALLOWED',
+    'DENIED',
+    'NOT_APPLICABLE'
+);
+
+CREATE TABLE authorization_decision (
+    id UUID PRIMARY KEY DEFAULT uuidv7(),
+    tenant_id UUID NOT NULL REFERENCES tenant(id),
+    acting_party_profile_id UUID NOT NULL,
+    funding_source_id UUID NOT NULL,
+    operation_type_id UUID NOT NULL REFERENCES operation_type(id),
+    channel_id UUID NOT NULL,
+    requested_amount NUMERIC(20, 4) NOT NULL,
+    currency CHAR(3) NOT NULL,
+    decision authorization_decision_outcome NOT NULL,
+    payment_transaction_id UUID,
+    transaction_event_id UUID,
+    idempotency_key VARCHAR(255),
+    result_snapshot JSONB NOT NULL,
+    expires_at TIMESTAMPTZ,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (tenant_id, id),
+    UNIQUE (tenant_id, payment_transaction_id),
+    FOREIGN KEY (tenant_id, acting_party_profile_id)
+        REFERENCES party_profile(tenant_id, id),
+    FOREIGN KEY (tenant_id, funding_source_id)
+        REFERENCES funding_source(tenant_id, id),
+    FOREIGN KEY (tenant_id, channel_id)
+        REFERENCES channel(tenant_id, id),
+    FOREIGN KEY (tenant_id, payment_transaction_id)
+        REFERENCES payment_transaction(tenant_id, id),
+    FOREIGN KEY (tenant_id, transaction_event_id, payment_transaction_id)
+        REFERENCES transaction_event(tenant_id, id, payment_transaction_id),
+    CONSTRAINT chk_authorization_decision_amount CHECK (requested_amount > 0),
+    CONSTRAINT chk_authorization_decision_currency CHECK (currency ~ '^[A-Z]{3}$'),
+    CONSTRAINT chk_authorization_decision_expiry CHECK (
+        expires_at IS NULL OR expires_at > created_at
+    ),
+    CONSTRAINT chk_authorization_decision_links CHECK (
+        (
+            decision = 'ALLOWED' AND
+            payment_transaction_id IS NOT NULL AND
+            transaction_event_id IS NOT NULL
+        ) OR (
+            decision <> 'ALLOWED' AND
+            payment_transaction_id IS NULL AND
+            transaction_event_id IS NULL
+        )
+    ),
+    CONSTRAINT chk_authorization_decision_idempotency_key CHECK (
+        idempotency_key IS NULL OR (
+            length(idempotency_key) > 0 AND
+            idempotency_key = btrim(idempotency_key)
+        )
+    ),
+    CONSTRAINT chk_authorization_decision_json CHECK (
+        jsonb_typeof(result_snapshot) = 'object' AND
+        jsonb_typeof(metadata) = 'object'
+    )
+);
+
+COMMENT ON TABLE authorization_decision IS
+    'Immutable audit and idempotency record for every authorization evaluation that reached a business decision. Missing references and malformed commands remain public errors and are not recorded here.';
+
+COMMENT ON COLUMN authorization_decision.result_snapshot IS
+    'Versioned snapshot used to replay allowed, denied, and not-applicable results exactly as originally returned.';
+
+CREATE UNIQUE INDEX uq_authorization_decision_idempotency
+    ON authorization_decision (tenant_id, idempotency_key)
+    WHERE idempotency_key IS NOT NULL;
+
+CREATE INDEX idx_authorization_decision_actor
+    ON authorization_decision (tenant_id, acting_party_profile_id, created_at);
+
+CREATE INDEX idx_authorization_decision_funding_source
+    ON authorization_decision (tenant_id, funding_source_id, created_at);
 
 -- ============================================================================
 -- Limits
