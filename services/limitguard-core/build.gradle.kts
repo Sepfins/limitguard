@@ -73,7 +73,11 @@ dependencies {
     implementation("com.apicatalog:titanium-jcs:3.0.0-M3")
     implementation("io.github.jamsesso:json-logic-java:1.1.0")
     implementation("com.google.code.gson:gson:2.14.0")
+    compileOnly("org.postgresql:postgresql:42.7.8")
     testImplementation(kotlin("test-junit5"))
+    testImplementation("org.postgresql:postgresql:42.7.8")
+    testImplementation("org.testcontainers:testcontainers-junit-jupiter:2.0.5")
+    testImplementation("org.testcontainers:testcontainers-postgresql:2.0.5")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher:6.0.3")
     jooqGenerator("org.postgresql:postgresql:42.7.8")
 }
@@ -110,6 +114,8 @@ jooq {
                         isDaos = false
                         isFluentSetters = true
                         isJavaTimeTypes = true
+                        isImplicitJoinPathsToMany = false
+                        isImplicitJoinPathsManyToMany = false
                     }
 
                     target.apply {
@@ -128,6 +134,11 @@ sourceSets {
             srcDir("build/generated-src/jooq/main")
         }
     }
+    test {
+        resources {
+            srcDir("../../infra/postgres")
+        }
+    }
 }
 
 kotlin {
@@ -136,6 +147,29 @@ kotlin {
     }
 }
 
-tasks.withType<Test> {
-    useJUnitPlatform()
+// Generation stays opt-in, but an invocation that requests both tasks must be ordered.
+tasks.named("compileKotlin") {
+    mustRunAfter(tasks.named("generateJooq"))
+}
+
+tasks.named("compileJava") {
+    mustRunAfter(tasks.named("generateJooq"))
+}
+
+tasks.named<Test>("test") {
+    useJUnitPlatform {
+        excludeTags("database")
+    }
+}
+
+tasks.register<Test>("databaseTest") {
+    description = "Runs PostgreSQL-backed jOOQ integration tests."
+    group = LifecycleBasePlugin.VERIFICATION_GROUP
+    testClassesDirs = sourceSets["test"].output.classesDirs
+    classpath = sourceSets["test"].runtimeClasspath
+    shouldRunAfter(tasks.test)
+
+    useJUnitPlatform {
+        includeTags("database")
+    }
 }
