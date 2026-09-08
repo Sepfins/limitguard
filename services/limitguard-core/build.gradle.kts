@@ -9,6 +9,7 @@ version = "0.0.1-SNAPSHOT"
 description = "limitguard-core"
 
 val jooqVersion = "3.21.5"
+val flywayVersion = "13.2.0"
 
 fun optionalEnv(
     envName: String,
@@ -73,7 +74,9 @@ dependencies {
     implementation("com.apicatalog:titanium-jcs:3.0.0-M3")
     implementation("io.github.jamsesso:json-logic-java:1.1.0")
     implementation("com.google.code.gson:gson:2.14.0")
+    implementation("org.flywaydb:flyway-core:$flywayVersion")
     compileOnly("org.postgresql:postgresql:42.7.8")
+    runtimeOnly("org.flywaydb:flyway-database-postgresql:$flywayVersion")
     testImplementation(kotlin("test-junit5"))
     testImplementation("org.postgresql:postgresql:42.7.8")
     testImplementation("org.testcontainers:testcontainers-junit-jupiter:2.0.5")
@@ -134,11 +137,6 @@ sourceSets {
             srcDir("build/generated-src/jooq/main")
         }
     }
-    test {
-        resources {
-            srcDir("../../infra/postgres")
-        }
-    }
 }
 
 kotlin {
@@ -163,7 +161,7 @@ tasks.named<Test>("test") {
 }
 
 tasks.register<Test>("databaseTest") {
-    description = "Runs PostgreSQL-backed jOOQ integration tests."
+    description = "Runs PostgreSQL-backed Flyway and jOOQ integration tests."
     group = LifecycleBasePlugin.VERIFICATION_GROUP
     testClassesDirs = sourceSets["test"].output.classesDirs
     classpath = sourceSets["test"].runtimeClasspath

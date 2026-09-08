@@ -8,11 +8,11 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-limitguard}
       POSTGRES_USER: ${POSTGRES_USER:-limitguard}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-limitguard}
+      PGDATA: /var/lib/postgresql/data
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./infra/postgres/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
     healthcheck:
       test:
         [
@@ -23,6 +23,20 @@ services:
       timeout: 5s
       retries: 10
       start_period: 10s
+
+  flyway:
+    image: flyway/flyway:13.2.0
+    command: ["-locations=filesystem:/flyway/sql", "migrate"]
+    restart: "no"
+    environment:
+      FLYWAY_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-limitguard}
+      FLYWAY_USER: ${POSTGRES_USER:-limitguard}
+      FLYWAY_PASSWORD: ${POSTGRES_PASSWORD:-limitguard}
+    volumes:
+      - ./services/limitguard-core/src/main/resources/db/limitguard/migration:/flyway/sql:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
 
 volumes:
   postgres_data:
