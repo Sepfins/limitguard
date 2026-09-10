@@ -102,6 +102,26 @@ enum class LimitRuleChangeStatus {
     FAILED,
 }
 
+enum class LimitRuleChangeEventType {
+    REQUESTED,
+    POLICY_EVALUATED,
+    APPROVED,
+    SCHEDULED,
+    APPLIED,
+    REJECTED,
+    CANCELLED,
+    SUPERSEDED,
+    FAILED,
+}
+
+enum class LimitRuleRevisionEventType {
+    CREATED,
+    UPDATED,
+    DEACTIVATED,
+    REACTIVATED,
+    DELETED,
+}
+
 enum class LimitChangePolicyPhase {
     REQUEST_VALIDATION,
     AUTHORIZATION,
@@ -151,10 +171,28 @@ enum class TransactionStatus {
     EXPIRED,
 }
 
+enum class TransactionEventType {
+    AUTHORIZATION,
+    CAPTURE,
+    PARTIAL_CAPTURE,
+    VOID,
+    REVERSAL,
+    EXPIRY,
+    ADJUSTMENT,
+}
+
 enum class LimitUsageEventType {
     RESERVE,
     CONSUME,
     RELEASE,
     REVERSAL,
     ADJUSTMENT,
+}
+
+enum class OperationCapacityStatus {
+    AVAILABLE,
+    EXHAUSTED,
+    UNLIMITED,
+    UNAVAILABLE,
+    NOT_APPLICABLE,
 }

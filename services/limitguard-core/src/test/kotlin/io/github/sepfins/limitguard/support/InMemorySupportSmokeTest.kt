@@ -71,6 +71,7 @@ class InMemorySupportSmokeTest {
         assertNotNull(limitguard.tenantCatalogService)
         assertNotNull(limitguard.limitChangeService)
         assertNotNull(limitguard.limitEvaluationService)
+        assertNotNull(limitguard.limitInquiryService)
     }
 
     @Test

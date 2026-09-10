@@ -106,6 +106,18 @@ class JooqLimitConfigurationRepository(
                 .fetchOne { it.toDomain() }
         }
 
+    override fun findByIdForUpdate(
+        tenantId: TenantId,
+        id: LimitConfigurationId,
+    ): LimitConfiguration? = jooqOperation("lock limit configuration by id") {
+        context.requireTransaction("locking a limit configuration row")
+        selectConfigurations()
+            .where(LimitConfigurationTable.tenantId.eq(tenantId.value))
+            .and(LimitConfigurationTable.id.eq(id.value))
+            .forUpdate()
+            .fetchOne { it.toDomain() }
+    }
+
     override fun findByCode(
         tenantId: TenantId,
         code: LimitConfigurationCode,

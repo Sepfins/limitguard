@@ -14,10 +14,20 @@ internal class LimitRuleMatcher(
         transaction: PaymentTransaction,
         authorities: List<ResolvedFundingAuthority>,
         at: Instant,
+    ): List<LimitRule> = findMatches(
+        context = transaction.toLimitEvaluationContext(),
+        authorities = authorities,
+        at = at,
+    )
+
+    fun findMatches(
+        context: LimitEvaluationContext,
+        authorities: List<ResolvedFundingAuthority>,
+        at: Instant,
     ): List<LimitRule> {
         val containingChannelGroupIds = channelGroupMemberRepository.findGroupIdsContaining(
-            tenantId = transaction.tenantId,
-            channelId = transaction.channelId,
+            tenantId = context.tenantId,
+            channelId = context.channelId,
         )
 
         return authorities
@@ -25,7 +35,7 @@ internal class LimitRuleMatcher(
             .flatMap { authority ->
                 limitRuleRepository
                     .findActiveForOwner(
-                        tenantId = transaction.tenantId,
+                        tenantId = context.tenantId,
                         owner = authority.ownerPartyProfileId,
                         at = at,
                     )
@@ -40,11 +50,11 @@ internal class LimitRuleMatcher(
             .distinctBy { it.id }
             .filter {
                 it.channelScope.includes(
-                    channelId = transaction.channelId,
+                    channelId = context.channelId,
                     containingGroupIds = containingChannelGroupIds,
                 )
             }
-            .filter { it.operationScope.includes(transaction.operationTypeId) }
+            .filter { it.operationScope.includes(context.operationTypeId) }
             .sortedWith(
                 compareBy<LimitRule> { it.priority.value }
                     .thenBy { it.id.value },

@@ -96,6 +96,18 @@ class JooqFundingSourceProductRepository(
                 .fetchOne { it.toProduct() }
         }
 
+    override fun findByIdForUpdate(
+        tenantId: TenantId,
+        id: FundingSourceProductId,
+    ): FundingSourceProduct? = jooqOperation("lock funding source product by id") {
+        context.requireTransaction("locking a funding source product row")
+        selectProducts()
+            .where(FundingSourceProductTable.tenantId.eq(tenantId.value))
+            .and(FundingSourceProductTable.id.eq(id.value))
+            .forUpdate()
+            .fetchOne { it.toProduct() }
+    }
+
     override fun insert(tenantId: TenantId, product: FundingSourceProduct): FundingSourceProduct =
         jooqOperation("insert funding source product") {
             require(product.tenantId == tenantId) { "funding source product tenant does not match repository tenant" }
@@ -174,6 +186,16 @@ class JooqFundingSourceRepository(
             selectSources()
                 .where(FundingSourceTable.tenantId.eq(tenantId.value))
                 .and(FundingSourceTable.id.eq(id.value))
+                .fetchOne { it.toSource() }
+        }
+
+    override fun findByIdForUpdate(tenantId: TenantId, id: FundingSourceId): FundingSource? =
+        jooqOperation("lock funding source by id") {
+            context.requireTransaction("locking a funding source row")
+            selectSources()
+                .where(FundingSourceTable.tenantId.eq(tenantId.value))
+                .and(FundingSourceTable.id.eq(id.value))
+                .forUpdate()
                 .fetchOne { it.toSource() }
         }
 

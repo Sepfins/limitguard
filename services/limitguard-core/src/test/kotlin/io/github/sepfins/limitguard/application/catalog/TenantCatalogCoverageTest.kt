@@ -28,6 +28,7 @@ import io.github.sepfins.limitguard.api.commands.RegisterPartyProfileCommand
 import io.github.sepfins.limitguard.api.commands.RegisterTenantCommand
 import io.github.sepfins.limitguard.api.errors.NotFoundException
 import io.github.sepfins.limitguard.api.errors.ValidationException
+import io.github.sepfins.limitguard.api.queries.ResolveEntityIdentifierQuery
 import io.github.sepfins.limitguard.domain.change.LimitChangePolicyCode
 import io.github.sepfins.limitguard.domain.common.ChannelId
 import io.github.sepfins.limitguard.domain.common.FundingSourceGroupId
@@ -45,6 +46,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class TenantCatalogCoverageTest {
@@ -115,6 +117,7 @@ class TenantCatalogCoverageTest {
     fun `bank-defined NDG and IBAN identifiers attach to their catalog entities`() {
         val fixture = fixture()
         val tenant = fixture.service.registerTenant(RegisterTenantCommand(name = "Access Key Bank"))
+        val otherTenant = fixture.service.registerTenant(RegisterTenantCommand(name = "Other Bank"))
         fixture.service.registerIdentifierScheme(
             RegisterIdentifierSchemeCommand(
                 tenantId = tenant.id,
@@ -185,6 +188,45 @@ class TenantCatalogCoverageTest {
                 EntityType.FUNDING_SOURCE,
                 fundingSource.id,
             ).single().identifier.value,
+        )
+
+        val queryService = DefaultTenantCatalogQueryService(
+            tenantRepository = fixture.repositories.tenants,
+            identifierSchemeRepository = fixture.repositories.identifierSchemes,
+            entityIdentifierRepository = fixture.repositories.entityIdentifiers,
+            transactionRunner = DirectTransactionRunner(),
+        )
+        assertEquals(
+            profile.id,
+            queryService.resolveEntityIdentifier(
+                ResolveEntityIdentifierQuery(
+                    tenantId = tenant.id,
+                    entityType = EntityIdentifierTypes.PARTY_PROFILE,
+                    schemeName = "NDG",
+                    identifier = "12345678",
+                )
+            )?.entityId,
+        )
+        assertEquals(
+            fundingSource.id,
+            queryService.resolveEntityIdentifier(
+                ResolveEntityIdentifierQuery(
+                    tenantId = tenant.id,
+                    entityType = EntityIdentifierTypes.FUNDING_SOURCE,
+                    schemeName = "IBAN",
+                    identifier = "IT60X0542811101000000123456",
+                )
+            )?.entityId,
+        )
+        assertNull(
+            queryService.resolveEntityIdentifier(
+                ResolveEntityIdentifierQuery(
+                    tenantId = otherTenant.id,
+                    entityType = EntityIdentifierTypes.FUNDING_SOURCE,
+                    schemeName = "IBAN",
+                    identifier = "IT60X0542811101000000123456",
+                )
+            )
         )
         assertFailsWith<NotFoundException> {
             fixture.service.assignEntityIdentifier(

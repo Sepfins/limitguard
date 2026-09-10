@@ -18,6 +18,14 @@ import io.github.sepfins.limitguard.api.commands.RegisterIdentifierSchemeCommand
 import io.github.sepfins.limitguard.api.commands.RegisterOperationTypeCommand
 import io.github.sepfins.limitguard.api.commands.RegisterPartyProfileCommand
 import io.github.sepfins.limitguard.api.commands.RegisterTenantCommand
+import io.github.sepfins.limitguard.api.commands.SetChannelActiveCommand
+import io.github.sepfins.limitguard.api.commands.SetFundingSourceActiveCommand
+import io.github.sepfins.limitguard.api.commands.SetFundingSourceProductActiveCommand
+import io.github.sepfins.limitguard.api.commands.SetLimitConfigurationActiveCommand
+import io.github.sepfins.limitguard.api.commands.UpdateChannelCommand
+import io.github.sepfins.limitguard.api.commands.UpdateFundingSourceCommand
+import io.github.sepfins.limitguard.api.commands.UpdateFundingSourceProductCommand
+import io.github.sepfins.limitguard.api.commands.UpdateLimitConfigurationCommand
 import io.github.sepfins.limitguard.api.results.BankWorkerResult
 import io.github.sepfins.limitguard.api.results.ChannelGroupMemberResult
 import io.github.sepfins.limitguard.api.results.ChannelGroupResult
@@ -46,6 +54,10 @@ interface TenantCatalogService {
 
     fun registerChannel(command: RegisterChannelCommand): ChannelResult
 
+    fun updateChannel(command: UpdateChannelCommand): ChannelResult
+
+    fun setChannelActive(command: SetChannelActiveCommand): ChannelResult
+
     fun createChannelGroup(command: CreateChannelGroupCommand): ChannelGroupResult
 
     fun addChannelGroupMember(command: AddChannelGroupMemberCommand): ChannelGroupMemberResult
@@ -60,7 +72,17 @@ interface TenantCatalogService {
 
     fun registerFundingSourceProduct(command: RegisterFundingSourceProductCommand): FundingSourceProductResult
 
+    fun updateFundingSourceProduct(command: UpdateFundingSourceProductCommand): FundingSourceProductResult
+
+    fun setFundingSourceProductActive(
+        command: SetFundingSourceProductActiveCommand,
+    ): FundingSourceProductResult
+
     fun registerFundingSource(command: RegisterFundingSourceCommand): FundingSourceResult
+
+    fun updateFundingSource(command: UpdateFundingSourceCommand): FundingSourceResult
+
+    fun setFundingSourceActive(command: SetFundingSourceActiveCommand): FundingSourceResult
 
     fun assignFundingSourceOwner(command: AssignFundingSourceOwnerCommand): FundingSourceOwnerResult
 
@@ -71,6 +93,12 @@ interface TenantCatalogService {
     fun createMandate(command: CreateMandateCommand): MandateResult
 
     fun createLimitConfiguration(command: CreateLimitConfigurationCommand): LimitConfigurationResult
+
+    fun updateLimitConfiguration(command: UpdateLimitConfigurationCommand): LimitConfigurationResult
+
+    fun setLimitConfigurationActive(
+        command: SetLimitConfigurationActiveCommand,
+    ): LimitConfigurationResult
 
     fun createLimitChangePolicy(command: CreateLimitChangePolicyCommand): LimitChangePolicyResult
 }

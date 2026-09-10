@@ -24,6 +24,14 @@ import io.github.sepfins.limitguard.api.commands.RegisterIdentifierSchemeCommand
 import io.github.sepfins.limitguard.api.commands.RegisterOperationTypeCommand
 import io.github.sepfins.limitguard.api.commands.RegisterPartyProfileCommand
 import io.github.sepfins.limitguard.api.commands.RegisterTenantCommand
+import io.github.sepfins.limitguard.api.commands.SetChannelActiveCommand
+import io.github.sepfins.limitguard.api.commands.SetFundingSourceActiveCommand
+import io.github.sepfins.limitguard.api.commands.SetFundingSourceProductActiveCommand
+import io.github.sepfins.limitguard.api.commands.SetLimitConfigurationActiveCommand
+import io.github.sepfins.limitguard.api.commands.UpdateChannelCommand
+import io.github.sepfins.limitguard.api.commands.UpdateFundingSourceCommand
+import io.github.sepfins.limitguard.api.commands.UpdateFundingSourceProductCommand
+import io.github.sepfins.limitguard.api.commands.UpdateLimitConfigurationCommand
 import io.github.sepfins.limitguard.api.errors.ConflictException
 import io.github.sepfins.limitguard.api.errors.NotFoundException
 import io.github.sepfins.limitguard.api.errors.ValidationException
@@ -262,6 +270,39 @@ class DefaultTenantCatalogService(
         return channelRepository.insert(tenantId, channel).toResult()
     }
 
+    override fun updateChannel(command: UpdateChannelCommand): ChannelResult = mapValidation {
+        val tenantId = TenantId.of(command.tenantId)
+        requireTenantExists(tenantId)
+
+        transactionRunner.inTransaction {
+            val channel = requireChannelForUpdate(tenantId, ChannelId.of(command.channelId))
+            channelRepository.update(
+                tenantId,
+                channel.copy(
+                    name = ChannelName.of(command.name),
+                    metadata = Metadata(command.metadata),
+                ),
+            ).toResult()
+        }
+    }
+
+    override fun setChannelActive(command: SetChannelActiveCommand): ChannelResult = mapValidation {
+        val tenantId = TenantId.of(command.tenantId)
+        requireTenantExists(tenantId)
+
+        transactionRunner.inTransaction {
+            val channel = requireChannelForUpdate(tenantId, ChannelId.of(command.channelId))
+            if (channel.isActive == command.isActive) {
+                channel.toResult()
+            } else {
+                channelRepository.update(
+                    tenantId,
+                    channel.copy(isActive = command.isActive),
+                ).toResult()
+            }
+        }
+    }
+
     override fun createChannelGroup(command: CreateChannelGroupCommand): ChannelGroupResult = mapValidation {
         val tenantId = TenantId.of(command.tenantId)
         requireTenantExists(tenantId)
@@ -443,6 +484,49 @@ class DefaultTenantCatalogService(
         return fundingSourceProductRepository.insert(tenantId, fundingSourceProduct).toResult()
     }
 
+    override fun updateFundingSourceProduct(
+        command: UpdateFundingSourceProductCommand,
+    ): FundingSourceProductResult = mapValidation {
+        val tenantId = TenantId.of(command.tenantId)
+        requireTenantExists(tenantId)
+
+        transactionRunner.inTransaction {
+            val product = requireFundingSourceProductForUpdate(
+                tenantId,
+                FundingSourceProductId.of(command.fundingSourceProductId),
+            )
+            fundingSourceProductRepository.update(
+                tenantId,
+                product.copy(
+                    name = FundingSourceProductName.of(command.name),
+                    metadata = Metadata(command.metadata),
+                ),
+            ).toResult()
+        }
+    }
+
+    override fun setFundingSourceProductActive(
+        command: SetFundingSourceProductActiveCommand,
+    ): FundingSourceProductResult = mapValidation {
+        val tenantId = TenantId.of(command.tenantId)
+        requireTenantExists(tenantId)
+
+        transactionRunner.inTransaction {
+            val product = requireFundingSourceProductForUpdate(
+                tenantId,
+                FundingSourceProductId.of(command.fundingSourceProductId),
+            )
+            if (product.isActive == command.isActive) {
+                product.toResult()
+            } else {
+                fundingSourceProductRepository.update(
+                    tenantId,
+                    product.copy(isActive = command.isActive),
+                ).toResult()
+            }
+        }
+    }
+
     override fun registerFundingSource(command: RegisterFundingSourceCommand): FundingSourceResult = mapValidation {
         val tenantId = TenantId.of(command.tenantId)
         requireTenantExists(tenantId)
@@ -462,6 +546,47 @@ class DefaultTenantCatalogService(
         )
 
         return fundingSourceRepository.insert(tenantId, fundingSource).toResult()
+    }
+
+    override fun updateFundingSource(command: UpdateFundingSourceCommand): FundingSourceResult = mapValidation {
+        val tenantId = TenantId.of(command.tenantId)
+        requireTenantExists(tenantId)
+
+        transactionRunner.inTransaction {
+            val fundingSource = requireFundingSourceForUpdate(
+                tenantId,
+                FundingSourceId.of(command.fundingSourceId),
+            )
+            fundingSourceRepository.update(
+                tenantId,
+                fundingSource.copy(
+                    externalReference = command.externalReference?.let(ExternalReference::of),
+                    metadata = Metadata(command.metadata),
+                ),
+            ).toResult()
+        }
+    }
+
+    override fun setFundingSourceActive(
+        command: SetFundingSourceActiveCommand,
+    ): FundingSourceResult = mapValidation {
+        val tenantId = TenantId.of(command.tenantId)
+        requireTenantExists(tenantId)
+
+        transactionRunner.inTransaction {
+            val fundingSource = requireFundingSourceForUpdate(
+                tenantId,
+                FundingSourceId.of(command.fundingSourceId),
+            )
+            if (fundingSource.isActive == command.isActive) {
+                fundingSource.toResult()
+            } else {
+                fundingSourceRepository.update(
+                    tenantId,
+                    fundingSource.copy(isActive = command.isActive),
+                ).toResult()
+            }
+        }
     }
 
     override fun assignFundingSourceOwner(command: AssignFundingSourceOwnerCommand): FundingSourceOwnerResult = mapValidation {
@@ -707,6 +832,59 @@ class DefaultTenantCatalogService(
         }
 
         return limitConfigurationRepository.insert(tenantId, limitConfiguration).toResult()
+    }
+
+    override fun updateLimitConfiguration(
+        command: UpdateLimitConfigurationCommand,
+    ): LimitConfigurationResult = mapValidation {
+        val tenantId = TenantId.of(command.tenantId)
+        requireTenantExists(tenantId)
+
+        transactionRunner.inTransaction {
+            val configuration = requireLimitConfigurationForUpdate(
+                tenantId,
+                LimitConfigurationId.of(command.limitConfigurationId),
+            )
+            val updated = configuration.copy(
+                name = LimitConfigurationName.of(command.name),
+                description = command.description,
+                defaultAmount = command.defaultAmount?.let {
+                    Money.of(it, configuration.maxAssignableAmount.currency)
+                },
+                metadata = Metadata(command.metadata),
+                updatedAt = clockProvider.now(),
+            )
+            configuration.parentConfigurationId?.let { parentId ->
+                updated.validateAgainstParent(requireLimitConfigurationExists(tenantId, parentId))
+            }
+
+            limitConfigurationRepository.update(tenantId, updated).toResult()
+        }
+    }
+
+    override fun setLimitConfigurationActive(
+        command: SetLimitConfigurationActiveCommand,
+    ): LimitConfigurationResult = mapValidation {
+        val tenantId = TenantId.of(command.tenantId)
+        requireTenantExists(tenantId)
+
+        transactionRunner.inTransaction {
+            val configuration = requireLimitConfigurationForUpdate(
+                tenantId,
+                LimitConfigurationId.of(command.limitConfigurationId),
+            )
+            if (configuration.isActive == command.isActive) {
+                configuration.toResult()
+            } else {
+                limitConfigurationRepository.update(
+                    tenantId,
+                    configuration.copy(
+                        isActive = command.isActive,
+                        updatedAt = clockProvider.now(),
+                    ),
+                ).toResult()
+            }
+        }
     }
 
     override fun createLimitChangePolicy(
@@ -973,6 +1151,10 @@ class DefaultTenantCatalogService(
         channelRepository.findById(tenantId, channelId)
             ?: throw NotFoundException("channel not found: ${channelId.value}")
 
+    private fun requireChannelForUpdate(tenantId: TenantId, channelId: ChannelId): Channel =
+        channelRepository.findByIdForUpdate(tenantId, channelId)
+            ?: throw NotFoundException("channel not found: ${channelId.value}")
+
     private fun requireChannelGroupExists(tenantId: TenantId, groupId: ChannelGroupId): ChannelGroup =
         channelGroupRepository.findById(tenantId, groupId)
             ?: throw NotFoundException("channel group not found: ${groupId.value}")
@@ -999,8 +1181,22 @@ class DefaultTenantCatalogService(
         fundingSourceProductRepository.findById(tenantId, productId)
             ?: throw NotFoundException("funding source product not found: ${productId.value}")
 
+    private fun requireFundingSourceProductForUpdate(
+        tenantId: TenantId,
+        productId: FundingSourceProductId,
+    ): FundingSourceProduct =
+        fundingSourceProductRepository.findByIdForUpdate(tenantId, productId)
+            ?: throw NotFoundException("funding source product not found: ${productId.value}")
+
     private fun requireFundingSourceExists(tenantId: TenantId, fundingSourceId: FundingSourceId): FundingSource =
         fundingSourceRepository.findById(tenantId, fundingSourceId)
+            ?: throw NotFoundException("funding source not found: ${fundingSourceId.value}")
+
+    private fun requireFundingSourceForUpdate(
+        tenantId: TenantId,
+        fundingSourceId: FundingSourceId,
+    ): FundingSource =
+        fundingSourceRepository.findByIdForUpdate(tenantId, fundingSourceId)
             ?: throw NotFoundException("funding source not found: ${fundingSourceId.value}")
 
     private fun requireFundingSourceGroupExists(
@@ -1015,6 +1211,13 @@ class DefaultTenantCatalogService(
         configurationId: LimitConfigurationId,
     ): LimitConfiguration =
         limitConfigurationRepository.findById(tenantId, configurationId)
+            ?: throw NotFoundException("limit configuration not found: ${configurationId.value}")
+
+    private fun requireLimitConfigurationForUpdate(
+        tenantId: TenantId,
+        configurationId: LimitConfigurationId,
+    ): LimitConfiguration =
+        limitConfigurationRepository.findByIdForUpdate(tenantId, configurationId)
             ?: throw NotFoundException("limit configuration not found: ${configurationId.value}")
 
     private fun requireFundingSourceOwnedBy(

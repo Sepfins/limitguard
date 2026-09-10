@@ -6,7 +6,6 @@ import io.github.sepfins.limitguard.domain.common.Money
 import io.github.sepfins.limitguard.domain.common.TransactionEventId
 import io.github.sepfins.limitguard.domain.limit.LimitKind
 import io.github.sepfins.limitguard.domain.limit.LimitRule
-import io.github.sepfins.limitguard.domain.limit.LimitUsageConsumptionMode
 import io.github.sepfins.limitguard.domain.limit.LimitViolation
 import io.github.sepfins.limitguard.domain.limit.MatchedLimitRule
 import io.github.sepfins.limitguard.domain.transaction.PaymentTransaction
@@ -85,7 +84,7 @@ internal class AuthorizationEvaluator(
             }
         }
 
-        val evaluatedRules = selectRulesForEvaluation(matchedRules)
+        val evaluatedRules = ApplicableLimitRuleSelector.select(matchedRules)
         val currencyViolations = evaluatedRules
             .filter { it.amount.currency != transaction.authorizedAmount.currency }
             .map { it.currencyMismatchViolation(transaction.authorizedAmount) }
@@ -128,35 +127,6 @@ internal class AuthorizationEvaluator(
             "Allowed authorization evaluation has no reservation plan"
         }
         return usageReservationService.reserve(reservationPlan, transactionEventId, now)
-    }
-
-    private fun selectRulesForEvaluation(matchedRules: List<LimitRule>): List<LimitRule> {
-        val selectedPeriodicRuleIds = matchedRules
-            .filter { it.limitKind is LimitKind.Periodic }
-            .groupBy { it.ownerPartyProfileId }
-            .values
-            .flatMap(::selectPeriodicCascade)
-            .mapTo(hashSetOf()) { it.id }
-
-        return matchedRules.filter { rule ->
-            rule.limitKind == LimitKind.PerTransaction || rule.id in selectedPeriodicRuleIds
-        }
-    }
-
-    private fun selectPeriodicCascade(rules: List<LimitRule>): List<LimitRule> {
-        val priorityTiers = rules
-            .groupBy { it.priority }
-            .toSortedMap(compareBy { it.value })
-        val selected = mutableListOf<LimitRule>()
-
-        for (tier in priorityTiers.values) {
-            selected += tier
-            if (tier.any { it.usageConsumptionMode == LimitUsageConsumptionMode.ISOLATED }) {
-                break
-            }
-        }
-
-        return selected
     }
 
     private fun denied(

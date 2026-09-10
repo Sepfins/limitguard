@@ -45,6 +45,16 @@ class JooqChannelRepository(
                 .fetchOne { it.toChannel() }
         }
 
+    override fun findByIdForUpdate(tenantId: TenantId, channelId: ChannelId): Channel? =
+        jooqOperation("lock channel by id") {
+            context.requireTransaction("locking a channel row")
+            selectChannels()
+                .where(ChannelTable.tenantId.eq(tenantId.value))
+                .and(ChannelTable.id.eq(channelId.value))
+                .forUpdate()
+                .fetchOne { it.toChannel() }
+        }
+
     override fun findByCode(tenantId: TenantId, code: ChannelCode): Channel? =
         jooqOperation("find channel by code") {
             selectChannels()

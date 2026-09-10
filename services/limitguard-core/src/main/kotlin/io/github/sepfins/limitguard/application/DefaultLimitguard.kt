@@ -2,8 +2,11 @@ package io.github.sepfins.limitguard.application
 
 import io.github.sepfins.limitguard.api.LimitChangeService
 import io.github.sepfins.limitguard.api.LimitEvaluationService
+import io.github.sepfins.limitguard.api.LimitInquiryService
 import io.github.sepfins.limitguard.api.Limitguard
+import io.github.sepfins.limitguard.api.TenantCatalogQueryService
 import io.github.sepfins.limitguard.api.TenantCatalogService
+import io.github.sepfins.limitguard.application.catalog.DefaultTenantCatalogQueryService
 import io.github.sepfins.limitguard.application.catalog.DefaultTenantCatalogService
 import io.github.sepfins.limitguard.application.change.ApproveLimitRuleChangeWorkflow
 import io.github.sepfins.limitguard.application.change.ApplyDueLimitChangesWorkflow
@@ -28,6 +31,7 @@ import io.github.sepfins.limitguard.application.evaluation.ExpireDueAuthorizatio
 import io.github.sepfins.limitguard.application.evaluation.LimitRuleMatcher
 import io.github.sepfins.limitguard.application.evaluation.MandateResolver
 import io.github.sepfins.limitguard.application.evaluation.TransactionFactory
+import io.github.sepfins.limitguard.application.inquiry.DefaultLimitInquiryService
 import io.github.sepfins.limitguard.application.transaction.TransactionRecorder
 import io.github.sepfins.limitguard.application.usage.UsageMutationService
 import io.github.sepfins.limitguard.application.usage.UsageReservationService
@@ -156,6 +160,13 @@ class DefaultLimitguard(
         transactionRunner = transactionRunner,
     )
 
+    override val tenantCatalogQueryService: TenantCatalogQueryService = DefaultTenantCatalogQueryService(
+        tenantRepository = tenantRepository,
+        identifierSchemeRepository = identifierSchemeRepository,
+        entityIdentifierRepository = entityIdentifierRepository,
+        transactionRunner = transactionRunner,
+    )
+
     override val limitChangeService: LimitChangeService = DefaultLimitChangeService(
         requestWorkflow = RequestLimitRuleChangeWorkflow(
             commandValidator = ChangeCommandValidator(),
@@ -271,6 +282,30 @@ class DefaultLimitguard(
             clockProvider = clockProvider,
             transactionRunner = transactionRunner,
         ),
+        clockProvider = clockProvider,
+        transactionRunner = transactionRunner,
+    )
+
+    override val limitInquiryService: LimitInquiryService = DefaultLimitInquiryService(
+        tenantRepository = tenantRepository,
+        channelRepository = channelRepository,
+        channelGroupMemberRepository = channelGroupMemberRepository,
+        operationTypeRepository = operationTypeRepository,
+        fundingSourceProductRepository = fundingSourceProductRepository,
+        fundingSourceRepository = fundingSourceRepository,
+        fundingSourceOwnerRepository = fundingSourceOwnerRepository,
+        fundingSourceGroupMemberRepository = fundingSourceGroupMemberRepository,
+        mandateRepository = mandateRepository,
+        limitConfigurationRepository = limitConfigurationRepository,
+        partyProfileRepository = partyProfileRepository,
+        limitChangeRequestRepository = limitChangeRequestRepository,
+        limitChangeEventRepository = limitChangeEventRepository,
+        limitRuleRevisionRepository = limitRuleRevisionRepository,
+        limitRuleRepository = limitRuleRepository,
+        transactionRepository = transactionRepository,
+        transactionEventRepository = transactionEventRepository,
+        authorizationDecisionRepository = authorizationDecisionRepository,
+        usageBucketRepository = usageBucketRepository,
         clockProvider = clockProvider,
         transactionRunner = transactionRunner,
     )

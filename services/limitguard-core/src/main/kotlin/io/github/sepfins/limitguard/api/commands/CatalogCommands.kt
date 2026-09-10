@@ -50,6 +50,19 @@ data class RegisterChannelCommand(
     val metadata: Map<String, Any?> = emptyMap(),
 )
 
+data class UpdateChannelCommand(
+    val tenantId: UUID,
+    val channelId: UUID,
+    val name: String,
+    val metadata: Map<String, Any?>,
+)
+
+data class SetChannelActiveCommand(
+    val tenantId: UUID,
+    val channelId: UUID,
+    val isActive: Boolean,
+)
+
 data class CreateChannelGroupCommand(
     val tenantId: UUID,
     val code: String,
@@ -131,12 +144,38 @@ data class RegisterFundingSourceProductCommand(
     val metadata: Map<String, Any?> = emptyMap(),
 )
 
+data class UpdateFundingSourceProductCommand(
+    val tenantId: UUID,
+    val fundingSourceProductId: UUID,
+    val name: String,
+    val metadata: Map<String, Any?>,
+)
+
+data class SetFundingSourceProductActiveCommand(
+    val tenantId: UUID,
+    val fundingSourceProductId: UUID,
+    val isActive: Boolean,
+)
+
 data class RegisterFundingSourceCommand(
     val tenantId: UUID,
     val productId: UUID,
     val externalReference: String? = null,
     val isActive: Boolean = true,
     val metadata: Map<String, Any?> = emptyMap(),
+)
+
+data class UpdateFundingSourceCommand(
+    val tenantId: UUID,
+    val fundingSourceId: UUID,
+    val externalReference: String?,
+    val metadata: Map<String, Any?>,
+)
+
+data class SetFundingSourceActiveCommand(
+    val tenantId: UUID,
+    val fundingSourceId: UUID,
+    val isActive: Boolean,
 )
 
 data class AssignFundingSourceOwnerCommand(
@@ -198,6 +237,22 @@ data class CreateLimitConfigurationCommand(
     val startsAt: Instant? = null,
     val endsAt: Instant? = null,
     val metadata: Map<String, Any?> = emptyMap(),
+)
+
+/** Updates descriptive/defaulting fields; scope, currency, and caps remain stable. */
+data class UpdateLimitConfigurationCommand(
+    val tenantId: UUID,
+    val limitConfigurationId: UUID,
+    val name: String,
+    val description: String?,
+    val defaultAmount: BigDecimal?,
+    val metadata: Map<String, Any?>,
+)
+
+data class SetLimitConfigurationActiveCommand(
+    val tenantId: UUID,
+    val limitConfigurationId: UUID,
+    val isActive: Boolean,
 )
 
 data class CreateLimitChangePolicyCommand(

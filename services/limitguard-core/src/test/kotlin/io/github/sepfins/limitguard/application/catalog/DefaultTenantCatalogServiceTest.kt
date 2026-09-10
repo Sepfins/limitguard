@@ -20,6 +20,14 @@ import io.github.sepfins.limitguard.api.commands.RegisterFundingSourceProductCom
 import io.github.sepfins.limitguard.api.commands.RegisterOperationTypeCommand
 import io.github.sepfins.limitguard.api.commands.RegisterPartyProfileCommand
 import io.github.sepfins.limitguard.api.commands.RegisterTenantCommand
+import io.github.sepfins.limitguard.api.commands.SetChannelActiveCommand
+import io.github.sepfins.limitguard.api.commands.SetFundingSourceActiveCommand
+import io.github.sepfins.limitguard.api.commands.SetFundingSourceProductActiveCommand
+import io.github.sepfins.limitguard.api.commands.SetLimitConfigurationActiveCommand
+import io.github.sepfins.limitguard.api.commands.UpdateChannelCommand
+import io.github.sepfins.limitguard.api.commands.UpdateFundingSourceCommand
+import io.github.sepfins.limitguard.api.commands.UpdateFundingSourceProductCommand
+import io.github.sepfins.limitguard.api.commands.UpdateLimitConfigurationCommand
 import io.github.sepfins.limitguard.api.errors.ConflictException
 import io.github.sepfins.limitguard.api.errors.NotFoundException
 import io.github.sepfins.limitguard.api.errors.ValidationException
@@ -609,6 +617,94 @@ class DefaultTenantCatalogServiceTest {
         val persistedMandate = repositories.mandates.findById(TenantId.of(tenant.id), MandateId.of(mandate.id))
         assertEquals(mandate.id, persistedMandate?.id?.value)
         assertEquals(BigDecimal("1000.0000"), configuration.maxAssignableAmount)
+    }
+
+    @Test
+    fun `catalog administration updates details and controls activation explicitly`() {
+        val repositories = InMemoryLimitguardRepositories()
+        seedTenant(repositories, tenantOne)
+        val service = catalogService(repositories)
+        val channel = service.registerChannel(
+            RegisterChannelCommand(tenantOne, "ATM", "ATM"),
+        )
+        val product = createLeafProduct(service, tenantOne)
+        val fundingSource = service.registerFundingSource(
+            RegisterFundingSourceCommand(
+                tenantId = tenantOne,
+                productId = product.id,
+                externalReference = "ACC-001",
+            ),
+        )
+        val configuration = service.createLimitConfiguration(
+            CreateLimitConfigurationCommand(
+                tenantId = tenantOne,
+                code = "ATM_DAILY",
+                name = "ATM daily limit",
+                limitKind = LimitKind.PERIODIC,
+                period = LimitPeriod.DAILY,
+                currency = "EUR",
+                maxAssignableAmount = BigDecimal("1000.00"),
+                defaultAmount = BigDecimal("250.00"),
+            ),
+        )
+
+        val updatedChannel = service.updateChannel(
+            UpdateChannelCommand(
+                tenantId = tenantOne,
+                channelId = channel.id,
+                name = "Cash machine",
+                metadata = mapOf("owner" to "channels-team"),
+            ),
+        )
+        val inactiveChannel = service.setChannelActive(
+            SetChannelActiveCommand(tenantOne, channel.id, false),
+        )
+        val updatedProduct = service.updateFundingSourceProduct(
+            UpdateFundingSourceProductCommand(
+                tenantId = tenantOne,
+                fundingSourceProductId = product.id,
+                name = "Everyday current account",
+                metadata = mapOf("segment" to "retail"),
+            ),
+        )
+        val inactiveProduct = service.setFundingSourceProductActive(
+            SetFundingSourceProductActiveCommand(tenantOne, product.id, false),
+        )
+        val updatedSource = service.updateFundingSource(
+            UpdateFundingSourceCommand(
+                tenantId = tenantOne,
+                fundingSourceId = fundingSource.id,
+                externalReference = "ACC-PRIMARY",
+                metadata = mapOf("verified" to true),
+            ),
+        )
+        val inactiveSource = service.setFundingSourceActive(
+            SetFundingSourceActiveCommand(tenantOne, fundingSource.id, false),
+        )
+        val updatedConfiguration = service.updateLimitConfiguration(
+            UpdateLimitConfigurationCommand(
+                tenantId = tenantOne,
+                limitConfigurationId = configuration.id,
+                name = "ATM daily default",
+                description = "Tenant-controlled default",
+                defaultAmount = BigDecimal("300.00"),
+                metadata = mapOf("owner" to "limits-team"),
+            ),
+        )
+        val inactiveConfiguration = service.setLimitConfigurationActive(
+            SetLimitConfigurationActiveCommand(tenantOne, configuration.id, false),
+        )
+
+        assertEquals("Cash machine", updatedChannel.name)
+        assertFalse(inactiveChannel.isActive)
+        assertEquals("Everyday current account", updatedProduct.name)
+        assertFalse(inactiveProduct.isActive)
+        assertEquals("ACC-PRIMARY", updatedSource.externalReference)
+        assertFalse(inactiveSource.isActive)
+        assertEquals(BigDecimal("300.0000"), updatedConfiguration.defaultAmount)
+        assertEquals(BigDecimal("1000.0000"), updatedConfiguration.maxAssignableAmount)
+        assertFalse(inactiveConfiguration.isActive)
+        assertEquals(fixedNow, inactiveConfiguration.updatedAt)
     }
 
     private fun seedTenant(

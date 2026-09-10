@@ -24,25 +24,28 @@ internal class AuthorizationReferenceResolver(
     private val fundingSourceRepository: FundingSourceRepository,
     private val fundingSourceProductRepository: FundingSourceProductRepository,
 ) {
-    fun resolve(transaction: PaymentTransaction): ResolvedAuthorizationReferences {
-        val tenant = tenantRepository.findById(transaction.tenantId)
-            ?: throw NotFoundException("Tenant not found: ${transaction.tenantId.value}")
-        val channel = channelRepository.findById(transaction.tenantId, transaction.channelId)
+    fun resolve(transaction: PaymentTransaction): ResolvedAuthorizationReferences =
+        resolve(transaction.toLimitEvaluationContext())
+
+    fun resolve(context: LimitEvaluationContext): ResolvedAuthorizationReferences {
+        val tenant = tenantRepository.findById(context.tenantId)
+            ?: throw NotFoundException("Tenant not found: ${context.tenantId.value}")
+        val channel = channelRepository.findById(context.tenantId, context.channelId)
             ?: throw NotFoundException(
-                "Channel not found: ${transaction.tenantId.value} / ${transaction.channelId.value}",
+                "Channel not found: ${context.tenantId.value} / ${context.channelId.value}",
             )
-        operationTypeRepository.findById(transaction.tenantId, transaction.operationTypeId)
+        operationTypeRepository.findById(context.tenantId, context.operationTypeId)
             ?: throw NotFoundException(
-                "Operation type not found: ${transaction.tenantId.value} / ${transaction.operationTypeId.value}",
+                "Operation type not found: ${context.tenantId.value} / ${context.operationTypeId.value}",
             )
-        partyProfileRepository.findById(transaction.tenantId, transaction.actingPartyProfileId)
+        partyProfileRepository.findById(context.tenantId, context.actingPartyProfileId)
             ?: throw NotFoundException(
-                "Party profile not found: ${transaction.tenantId.value} / " +
-                    transaction.actingPartyProfileId.value,
+                "Party profile not found: ${context.tenantId.value} / " +
+                    context.actingPartyProfileId.value,
             )
-        val fundingSource = fundingSourceRepository.findById(transaction.tenantId, transaction.fundingSourceId)
+        val fundingSource = fundingSourceRepository.findById(context.tenantId, context.fundingSourceId)
             ?: throw NotFoundException(
-                "Funding source not found: ${transaction.tenantId.value} / ${transaction.fundingSourceId.value}",
+                "Funding source not found: ${context.tenantId.value} / ${context.fundingSourceId.value}",
             )
 
         return ResolvedAuthorizationReferences(
@@ -50,7 +53,7 @@ internal class AuthorizationReferenceResolver(
             channel = channel,
             fundingSource = fundingSource,
             fundingSourceProductPath = requireProductPath(
-                tenantId = transaction.tenantId,
+                tenantId = context.tenantId,
                 leafProductId = fundingSource.productId,
             ),
         )

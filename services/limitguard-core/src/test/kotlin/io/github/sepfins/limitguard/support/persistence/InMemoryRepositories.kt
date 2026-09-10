@@ -303,6 +303,9 @@ class InMemoryChannelRepository : ChannelRepository {
     override fun findById(tenantId: TenantId, channelId: ChannelId): Channel? =
         channels[TenantScopedKey(tenantId, channelId)]
 
+    override fun findByIdForUpdate(tenantId: TenantId, channelId: ChannelId): Channel? =
+        synchronized(lock) { findById(tenantId, channelId) }
+
     override fun findByCode(tenantId: TenantId, code: ChannelCode): Channel? =
         channels.tenantValues(tenantId).firstOrNull { it.code == code }
 
@@ -453,6 +456,11 @@ class InMemoryFundingSourceProductRepository : FundingSourceProductRepository {
     override fun findById(tenantId: TenantId, id: FundingSourceProductId): FundingSourceProduct? =
         products[TenantScopedKey(tenantId, id)]
 
+    override fun findByIdForUpdate(
+        tenantId: TenantId,
+        id: FundingSourceProductId,
+    ): FundingSourceProduct? = synchronized(lock) { findById(tenantId, id) }
+
     override fun insert(tenantId: TenantId, product: FundingSourceProduct): FundingSourceProduct = synchronized(lock) {
         requireSameTenant(tenantId, product.tenantId)
         requireAbsent(findById(tenantId, product.id) != null, "funding source product id already exists: ${product.id.value}")
@@ -481,6 +489,9 @@ class InMemoryFundingSourceRepository : FundingSourceRepository {
 
     override fun findById(tenantId: TenantId, id: FundingSourceId): FundingSource? =
         fundingSources[TenantScopedKey(tenantId, id)]
+
+    override fun findByIdForUpdate(tenantId: TenantId, id: FundingSourceId): FundingSource? =
+        synchronized(lock) { findById(tenantId, id) }
 
     override fun findByExternalReference(tenantId: TenantId, externalReference: ExternalReference): FundingSource? =
         fundingSources.tenantValues(tenantId).firstOrNull { it.externalReference == externalReference }
@@ -1004,6 +1015,11 @@ class InMemoryLimitConfigurationRepository : LimitConfigurationRepository {
 
     override fun findById(tenantId: TenantId, id: LimitConfigurationId): LimitConfiguration? =
         configurations[TenantScopedKey(tenantId, id)]
+
+    override fun findByIdForUpdate(
+        tenantId: TenantId,
+        id: LimitConfigurationId,
+    ): LimitConfiguration? = synchronized(lock) { findById(tenantId, id) }
 
     override fun findByCode(tenantId: TenantId, code: LimitConfigurationCode): LimitConfiguration? =
         configurations.tenantValues(tenantId).firstOrNull { it.code == code }
