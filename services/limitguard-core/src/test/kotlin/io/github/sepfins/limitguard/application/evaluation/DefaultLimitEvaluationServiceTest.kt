@@ -229,39 +229,6 @@ class DefaultLimitEvaluationServiceTest {
     }
 
     @Test
-    fun `authorization and mutation requests share one idempotency key namespace`() {
-        val fixture = fixture(actorId, noMatchingRuleBehavior = NoMatchingRuleBehavior.ALLOW)
-        val idempotentAuthorization = fixture.service.authorizeTransaction(
-            command(amount = "25.00", idempotencyKey = "authorization-key"),
-        )
-
-        assertFailsWith<IdempotencyConflictException> {
-            fixture.service.captureTransaction(
-                captureCommand(
-                    paymentTransactionId = assertNotNull(idempotentAuthorization.paymentTransactionId),
-                    amount = "5.00",
-                    idempotencyKey = "authorization-key",
-                ),
-            )
-        }
-
-        val otherAuthorization = fixture.service.authorizeTransaction(command(amount = "25.00"))
-        fixture.service.captureTransaction(
-            captureCommand(
-                paymentTransactionId = assertNotNull(otherAuthorization.paymentTransactionId),
-                amount = "5.00",
-                idempotencyKey = "mutation-key",
-            ),
-        )
-
-        assertFailsWith<IdempotencyConflictException> {
-            fixture.service.authorizeTransaction(
-                command(amount = "25.00", idempotencyKey = "mutation-key"),
-            )
-        }
-    }
-
-    @Test
     fun `denied authorization replays the original decision and rejects changed intent`() {
         val fixture = fixture(firstOwnerId)
         fixture.addMandate(

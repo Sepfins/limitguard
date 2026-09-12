@@ -14,10 +14,6 @@ interface TransactionEventRepository {
     fun findAuthorizationEvent(tenantId: TenantId, transactionId: PaymentTransactionId): TransactionEvent?
     fun insert(tenantId: TenantId, event: TransactionEvent): TransactionEvent
 
-    /**
-     * Adds the all-or-nothing idempotency tuple after the use-case has composed
-     * its final result. This must run in the same transaction as [insert].
-     */
     fun completeIdempotency(
         tenantId: TenantId,
         eventId: TransactionEventId,

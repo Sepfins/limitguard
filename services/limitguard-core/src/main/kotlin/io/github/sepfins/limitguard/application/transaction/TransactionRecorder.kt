@@ -110,10 +110,6 @@ internal class TransactionRecorder(
         )
     }
 
-    /**
-     * Completes an event after the orchestrator has assembled the public result
-     * and serialized it to an infrastructure-neutral snapshot.
-     */
     fun completeIdempotentRecording(
         event: TransactionEvent,
         idempotencyKey: IdempotencyKey,

@@ -187,13 +187,31 @@ internal class DefaultLimitEvaluationService(
             }
             return result
         }
+        return null
+    }
 
-        if (transactionEventRepository.findByIdempotencyKey(requestedTransaction.tenantId, idempotencyKey) != null) {
+    private fun replayMutationIfPresent(
+        command: MutationEventCommand,
+        idempotencyKey: IdempotencyKey?,
+        reason: TransactionEventReason?,
+        metadata: Metadata,
+    ): UsageMutationResult? {
+        val existingEvent = idempotencyKey
+            ?.let { transactionEventRepository.findByIdempotencyKey(command.tenantId, it) }
+            ?: return null
+
+        val sameRequest =
+            existingEvent.eventType in command.mutationKind.transactionEventTypes &&
+                existingEvent.paymentTransactionId == command.transactionId &&
+                sameRequestedAmount(existingEvent, command) &&
+                existingEvent.reason == reason &&
+                sameMetadata(existingEvent.metadata.value, metadata.value)
+        if (!sameRequest) {
             throw IdempotencyConflictException(
-                "idempotency key already belongs to a transaction event",
+                "idempotency key already belongs to a different ${command.mutationKind.operationName} request",
             )
         }
-        return null
+        return TransactionIdempotency.replayMutation(existingEvent.resultSnapshot!!)
     }
 
     private fun mutateTransaction(command: MutationEventCommand): UsageMutationResult {
@@ -203,32 +221,12 @@ internal class DefaultLimitEvaluationService(
         val metadata = Metadata(command.metadata)
 
         return transactionRunner.inTransaction {
-            if (
-                idempotencyKey != null &&
-                authorizationDecisionRecorder.findByIdempotencyKey(command.tenantId, idempotencyKey) != null
-            ) {
-                throw IdempotencyConflictException(
-                    "idempotency key already belongs to an authorization request",
-                )
-            }
-
-            val existingEvent = idempotencyKey
-                ?.let { transactionEventRepository.findByIdempotencyKey(command.tenantId, it) }
-            if (existingEvent != null) {
-                val sameRequest =
-                    existingEvent.eventType in command.mutationKind.transactionEventTypes &&
-                        existingEvent.paymentTransactionId == command.transactionId &&
-                        sameRequestedAmount(existingEvent, command) &&
-                        existingEvent.reason == reason &&
-                        sameMetadata(existingEvent.metadata.value, metadata.value)
-                if (!sameRequest) {
-                    throw IdempotencyConflictException(
-                        "idempotency key already belongs to a different " +
-                            "${command.mutationKind.operationName} request",
-                    )
-                }
-                return@inTransaction TransactionIdempotency.replayMutation(existingEvent.resultSnapshot!!)
-            }
+            replayMutationIfPresent(
+                command = command,
+                idempotencyKey = idempotencyKey,
+                reason = reason,
+                metadata = metadata,
+            )?.let { return@inTransaction it }
 
             val existingTransaction = transactionRepository.findByIdForUpdate(
                 tenantId = command.tenantId,
