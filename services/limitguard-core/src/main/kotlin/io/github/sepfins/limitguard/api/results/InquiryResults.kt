@@ -3,7 +3,11 @@ package io.github.sepfins.limitguard.api.results
 import io.github.sepfins.limitguard.api.AuthorizationDecision
 import io.github.sepfins.limitguard.api.LimitChangeActorType
 import io.github.sepfins.limitguard.api.LimitKind
+import io.github.sepfins.limitguard.api.LimitChannelScope
+import io.github.sepfins.limitguard.api.LimitMandateScope
+import io.github.sepfins.limitguard.api.LimitOperationScope
 import io.github.sepfins.limitguard.api.LimitPeriod
+import io.github.sepfins.limitguard.api.LimitUsageConsumptionMode
 import io.github.sepfins.limitguard.api.LimitRuleChangeEventType
 import io.github.sepfins.limitguard.api.LimitRuleChangeStatus
 import io.github.sepfins.limitguard.api.LimitRuleRevisionEventType
@@ -21,6 +25,35 @@ data class LimitChangeDetailsResult(
     val beforeRule: Map<String, Any?>?,
     val events: List<LimitChangeEventResult>,
     val revisions: List<LimitRuleRevisionResult>,
+)
+
+data class LimitRuleResult(
+    val id: UUID,
+    val tenantId: UUID,
+    val ownerPartyProfileId: UUID,
+    val name: String,
+    val description: String?,
+    val limitKind: LimitKind,
+    val period: LimitPeriod?,
+    val amount: BigDecimal,
+    val currency: String,
+    val mandateScope: LimitMandateScope,
+    val mandateId: UUID?,
+    val configurationId: UUID?,
+    val channelScope: LimitChannelScope,
+    val channelId: UUID?,
+    val channelGroupId: UUID?,
+    val operationScope: LimitOperationScope,
+    val operationTypeId: UUID?,
+    val usageConsumptionMode: LimitUsageConsumptionMode,
+    val priority: Int,
+    val isActive: Boolean,
+    val version: Int,
+    val startsAt: Instant,
+    val endsAt: Instant?,
+    val metadata: Map<String, Any?>,
+    val createdAt: Instant?,
+    val updatedAt: Instant?,
 )
 
 data class LimitChangeEventResult(

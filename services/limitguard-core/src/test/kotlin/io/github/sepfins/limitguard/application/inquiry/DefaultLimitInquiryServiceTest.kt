@@ -13,6 +13,7 @@ import io.github.sepfins.limitguard.api.queries.FindOperationTypesByCodeQuery
 import io.github.sepfins.limitguard.api.queries.FindTenantByNameQuery
 import io.github.sepfins.limitguard.api.queries.GetCurrentUsageQuery
 import io.github.sepfins.limitguard.api.queries.GetLimitChangeQuery
+import io.github.sepfins.limitguard.api.queries.GetLimitRuleQuery
 import io.github.sepfins.limitguard.api.queries.GetOperationCapacityQuery
 import io.github.sepfins.limitguard.api.queries.GetTransactionHistoryQuery
 import io.github.sepfins.limitguard.domain.change.ChangeActor
@@ -42,6 +43,7 @@ import io.github.sepfins.limitguard.domain.common.LimitConfigurationId
 import io.github.sepfins.limitguard.domain.common.LimitRuleChangeEventId
 import io.github.sepfins.limitguard.domain.common.LimitRuleId
 import io.github.sepfins.limitguard.domain.common.LimitRuleRevisionId
+import io.github.sepfins.limitguard.domain.common.MandateId
 import io.github.sepfins.limitguard.domain.common.Metadata
 import io.github.sepfins.limitguard.domain.common.Money
 import io.github.sepfins.limitguard.domain.common.OperationTypeId
@@ -97,8 +99,10 @@ import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import io.github.sepfins.limitguard.api.errors.NotFoundException
 
 class DefaultLimitInquiryServiceTest {
     private val now = Instant.parse("2026-08-09T10:15:00Z")
@@ -162,6 +166,56 @@ class DefaultLimitInquiryServiceTest {
         )
         assertEquals(LimitRuleRevisionEventType.CREATED, result.revisions.single().eventType)
         assertEquals("500.0000", result.approvedRule?.get("amount"))
+    }
+
+    @Test
+    fun `returns a typed tenant scoped limit rule for optimistic changes`() {
+        val repositories = repositoriesWithTenant()
+        val rule = periodicRule(LimitRuleId.of(id(23)), PartyProfileId.of(id(24))).copy(
+            description = "Household ATM limit",
+            mandateScope = MandateScope.MandateSpecific(MandateId.of(id(25))),
+            configurationId = LimitConfigurationId.of(id(26)),
+            channelScope = LimitChannelScope.ChannelSpecific(ChannelId.of(id(27))),
+            operationScope = LimitOperationScope.OperationTypeSpecific(OperationTypeId.of(id(28))),
+            version = Version.of(3),
+            metadata = Metadata(mapOf("journey" to "SELF_SERVICE")),
+        )
+        repositories.limitRules.insert(tenantId, rule)
+        val service = inquiryService(repositories)
+
+        val result = service.getLimitRule(GetLimitRuleQuery(tenantId.value, rule.id.value))
+
+        assertEquals(rule.id.value, result.id)
+        assertEquals(io.github.sepfins.limitguard.api.LimitKind.PERIODIC, result.limitKind)
+        assertEquals(io.github.sepfins.limitguard.api.LimitPeriod.DAILY, result.period)
+        assertEquals(io.github.sepfins.limitguard.api.LimitMandateScope.MANDATE, result.mandateScope)
+        assertEquals(id(25), result.mandateId)
+        assertEquals(io.github.sepfins.limitguard.api.LimitChannelScope.CHANNEL, result.channelScope)
+        assertEquals(id(27), result.channelId)
+        assertEquals(io.github.sepfins.limitguard.api.LimitOperationScope.OPERATION_TYPE, result.operationScope)
+        assertEquals(id(28), result.operationTypeId)
+        assertEquals(3, result.version)
+        assertEquals("SELF_SERVICE", result.metadata["journey"])
+
+        val updatedAt = now.plusSeconds(30)
+        val updatedRule = rule.copy(
+            amount = eur("650"),
+            version = Version.of(4),
+            updatedAt = updatedAt,
+        )
+        assertNotNull(repositories.limitRules.updateIfVersion(tenantId, updatedRule, rule.version))
+
+        val updatedResult = service.getLimitRule(GetLimitRuleQuery(tenantId.value, rule.id.value))
+        assertEquals(0, updatedResult.amount.compareTo(java.math.BigDecimal("650.00")))
+        assertEquals(4, updatedResult.version)
+        assertEquals(updatedAt, updatedResult.updatedAt)
+
+        assertFailsWith<NotFoundException> {
+            service.getLimitRule(GetLimitRuleQuery(tenantId.value, id(29)))
+        }
+        assertFailsWith<NotFoundException> {
+            service.getLimitRule(GetLimitRuleQuery(id(999), rule.id.value))
+        }
     }
 
     @Test

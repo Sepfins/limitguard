@@ -134,7 +134,7 @@ internal object LimitRuleSnapshotter {
                 "operationTypeId" to targetScope.operationScope.snapshotOperationTypeId(),
                 "kind" to targetScope.kind.snapshotKind(),
                 "period" to targetScope.kind.snapshotPeriod(),
-            )
+            ).filterValues { it != null }
         )
 
     private fun LimitKind.snapshotKind(): String =

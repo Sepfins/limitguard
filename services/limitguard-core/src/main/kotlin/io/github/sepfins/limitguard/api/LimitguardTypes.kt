@@ -72,6 +72,11 @@ enum class LimitMandateScope {
     MANDATE,
 }
 
+enum class LimitOperationScope {
+    ALL_OPERATIONS,
+    OPERATION_TYPE,
+}
+
 enum class LimitUsageConsumptionMode {
     CASCADING,
     ISOLATED,

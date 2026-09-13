@@ -2,13 +2,18 @@ package io.github.sepfins.limitguard.application.inquiry
 
 import io.github.sepfins.limitguard.api.AuthorizationDecision
 import io.github.sepfins.limitguard.api.LimitChangeActorType
+import io.github.sepfins.limitguard.api.LimitChannelScope as ApiLimitChannelScope
 import io.github.sepfins.limitguard.api.LimitInquiryService
+import io.github.sepfins.limitguard.api.LimitKind as ApiLimitKind
+import io.github.sepfins.limitguard.api.LimitMandateScope as ApiLimitMandateScope
+import io.github.sepfins.limitguard.api.LimitOperationScope as ApiLimitOperationScope
 import io.github.sepfins.limitguard.api.LimitPeriod as ApiLimitPeriod
 import io.github.sepfins.limitguard.api.LimitRuleChangeEventType as ApiLimitRuleChangeEventType
 import io.github.sepfins.limitguard.api.LimitRuleChangeStatus as ApiLimitRuleChangeStatus
 import io.github.sepfins.limitguard.api.LimitRuleRevisionEventType as ApiLimitRuleRevisionEventType
 import io.github.sepfins.limitguard.api.TransactionEventType as ApiTransactionEventType
 import io.github.sepfins.limitguard.api.TransactionStatus as ApiTransactionStatus
+import io.github.sepfins.limitguard.api.LimitUsageConsumptionMode as ApiLimitUsageConsumptionMode
 import io.github.sepfins.limitguard.api.errors.NotFoundException
 import io.github.sepfins.limitguard.api.errors.ValidationException
 import io.github.sepfins.limitguard.api.queries.FindChannelByCodeQuery
@@ -19,6 +24,7 @@ import io.github.sepfins.limitguard.api.queries.FindOperationTypesByCodeQuery
 import io.github.sepfins.limitguard.api.queries.FindTenantByNameQuery
 import io.github.sepfins.limitguard.api.queries.GetCurrentUsageQuery
 import io.github.sepfins.limitguard.api.queries.GetLimitChangeQuery
+import io.github.sepfins.limitguard.api.queries.GetLimitRuleQuery
 import io.github.sepfins.limitguard.api.queries.GetOperationCapacityQuery
 import io.github.sepfins.limitguard.api.queries.GetTransactionHistoryQuery
 import io.github.sepfins.limitguard.api.results.AuthorizationDecisionSummaryResult
@@ -30,6 +36,7 @@ import io.github.sepfins.limitguard.api.results.LimitChangeActorResult
 import io.github.sepfins.limitguard.api.results.LimitChangeDetailsResult
 import io.github.sepfins.limitguard.api.results.LimitChangeEventResult
 import io.github.sepfins.limitguard.api.results.LimitConfigurationResult
+import io.github.sepfins.limitguard.api.results.LimitRuleResult
 import io.github.sepfins.limitguard.api.results.LimitRuleRevisionResult
 import io.github.sepfins.limitguard.api.results.OperationCapacityResult
 import io.github.sepfins.limitguard.api.results.OperationTypeResult
@@ -61,7 +68,11 @@ import io.github.sepfins.limitguard.domain.common.PaymentTransactionId
 import io.github.sepfins.limitguard.domain.common.TenantId
 import io.github.sepfins.limitguard.domain.funding.FundingSourceProductCode
 import io.github.sepfins.limitguard.domain.limit.LimitConfigurationCode
+import io.github.sepfins.limitguard.domain.limit.LimitChannelScope
 import io.github.sepfins.limitguard.domain.limit.LimitKind
+import io.github.sepfins.limitguard.domain.limit.LimitOperationScope
+import io.github.sepfins.limitguard.domain.limit.LimitRule
+import io.github.sepfins.limitguard.domain.mandate.MandateScope
 import io.github.sepfins.limitguard.domain.operation.OperationTypeCode
 import io.github.sepfins.limitguard.domain.tenant.TenantName
 import io.github.sepfins.limitguard.domain.transaction.AuthorizationDecisionRecord
@@ -153,6 +164,16 @@ class DefaultLimitInquiryService(
                 revisions = limitRuleRevisionRepository.findByChangeRequest(tenantId, requestId)
                     .map { it.toResult() },
             )
+        }
+    }
+
+    override fun getLimitRule(query: GetLimitRuleQuery): LimitRuleResult = mapValidation {
+        val tenantId = requireTenant(query.tenantId)
+        val ruleId = LimitRuleId.of(query.limitRuleId)
+
+        transactionRunner.inTransaction {
+            limitRuleRepository.findById(tenantId, ruleId)?.toResult()
+                ?: throw NotFoundException("limit rule not found: ${ruleId.value}")
         }
     }
 
@@ -361,6 +382,56 @@ class DefaultLimitInquiryService(
                 "AuthorizationDecisionRecord.createdAt is required when mapping inquiry results"
             },
         )
+
+    private fun LimitRule.toResult(): LimitRuleResult {
+        val periodic = limitKind as? LimitKind.Periodic
+        val channelId = (channelScope as? LimitChannelScope.ChannelSpecific)?.channelId?.value
+        val channelGroupId = (channelScope as? LimitChannelScope.ChannelGroupSpecific)?.channelGroupId?.value
+        val mandateId = (mandateScope as? MandateScope.MandateSpecific)?.mandateId?.value
+        val operationTypeId = (operationScope as? LimitOperationScope.OperationTypeSpecific)
+            ?.operationTypeId
+            ?.value
+
+        return LimitRuleResult(
+            id = id.value,
+            tenantId = tenantId.value,
+            ownerPartyProfileId = ownerPartyProfileId.value,
+            name = name.value,
+            description = description,
+            limitKind = if (periodic == null) ApiLimitKind.PER_TRANSACTION else ApiLimitKind.PERIODIC,
+            period = periodic?.period?.let { ApiLimitPeriod.valueOf(it.name) },
+            amount = amount.amount,
+            currency = amount.currency.value,
+            mandateScope = when (mandateScope) {
+                MandateScope.AllOwnerMandates -> ApiLimitMandateScope.ALL_OWNER_MANDATES
+                is MandateScope.MandateSpecific -> ApiLimitMandateScope.MANDATE
+            },
+            mandateId = mandateId,
+            configurationId = configurationId?.value,
+            channelScope = when (channelScope) {
+                LimitChannelScope.AllChannels -> ApiLimitChannelScope.ALL_CHANNELS
+                is LimitChannelScope.ChannelSpecific -> ApiLimitChannelScope.CHANNEL
+                is LimitChannelScope.ChannelGroupSpecific -> ApiLimitChannelScope.CHANNEL_GROUP
+            },
+            channelId = channelId,
+            channelGroupId = channelGroupId,
+            operationScope = if (operationTypeId == null) {
+                ApiLimitOperationScope.ALL_OPERATIONS
+            } else {
+                ApiLimitOperationScope.OPERATION_TYPE
+            },
+            operationTypeId = operationTypeId,
+            usageConsumptionMode = ApiLimitUsageConsumptionMode.valueOf(usageConsumptionMode.name),
+            priority = priority.value,
+            isActive = isActive,
+            version = version.value,
+            startsAt = effectiveWindow.startsAt,
+            endsAt = effectiveWindow.endsAt,
+            metadata = metadata.value,
+            createdAt = createdAt,
+            updatedAt = updatedAt,
+        )
+    }
 
     private fun TransactionEvent.toResult(): TransactionHistoryEventResult =
         TransactionHistoryEventResult(

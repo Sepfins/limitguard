@@ -8,6 +8,7 @@ import io.github.sepfins.limitguard.api.queries.FindOperationTypesByCodeQuery
 import io.github.sepfins.limitguard.api.queries.FindTenantByNameQuery
 import io.github.sepfins.limitguard.api.queries.GetCurrentUsageQuery
 import io.github.sepfins.limitguard.api.queries.GetLimitChangeQuery
+import io.github.sepfins.limitguard.api.queries.GetLimitRuleQuery
 import io.github.sepfins.limitguard.api.queries.GetOperationCapacityQuery
 import io.github.sepfins.limitguard.api.queries.GetTransactionHistoryQuery
 import io.github.sepfins.limitguard.api.results.ChannelResult
@@ -15,6 +16,7 @@ import io.github.sepfins.limitguard.api.results.CurrentUsageResult
 import io.github.sepfins.limitguard.api.results.FundingSourceProductResult
 import io.github.sepfins.limitguard.api.results.FundingSourceResult
 import io.github.sepfins.limitguard.api.results.LimitChangeDetailsResult
+import io.github.sepfins.limitguard.api.results.LimitRuleResult
 import io.github.sepfins.limitguard.api.results.LimitConfigurationResult
 import io.github.sepfins.limitguard.api.results.OperationCapacityResult
 import io.github.sepfins.limitguard.api.results.OperationTypeResult
@@ -23,6 +25,8 @@ import io.github.sepfins.limitguard.api.results.TransactionHistoryResult
 
 interface LimitInquiryService {
     fun getLimitChange(query: GetLimitChangeQuery): LimitChangeDetailsResult
+
+    fun getLimitRule(query: GetLimitRuleQuery): LimitRuleResult
 
     fun getTransactionHistory(query: GetTransactionHistoryQuery): TransactionHistoryResult
 

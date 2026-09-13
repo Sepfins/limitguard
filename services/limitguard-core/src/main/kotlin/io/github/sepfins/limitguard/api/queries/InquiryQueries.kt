@@ -8,6 +8,11 @@ data class GetLimitChangeQuery(
     val changeRequestId: UUID,
 )
 
+data class GetLimitRuleQuery(
+    val tenantId: UUID,
+    val limitRuleId: UUID,
+)
+
 data class GetTransactionHistoryQuery(
     val tenantId: UUID,
     val paymentTransactionId: UUID,
