@@ -19,6 +19,14 @@ interface FundingSourceProductRepository {
      * at a missing parent and at a repeated node, so the caller detects both.
      */
     fun findPath(tenantId: TenantId, leafId: FundingSourceProductId): List<FundingSourceProduct>
+    fun findPage(
+        tenantId: TenantId,
+        search: String?,
+        active: Boolean?,
+        offset: Int,
+        limit: Int,
+    ): List<FundingSourceProduct>
+    fun count(tenantId: TenantId, search: String?, active: Boolean?): Long
 
     fun findByIdForUpdate(tenantId: TenantId, id: FundingSourceProductId): FundingSourceProduct?
     fun insert(tenantId: TenantId, product: FundingSourceProduct): FundingSourceProduct

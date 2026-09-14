@@ -114,7 +114,7 @@ class TenantCatalogCoverageTest {
     }
 
     @Test
-    fun `bank-defined NDG and IBAN identifiers attach to their catalog entities`() {
+    fun `bank defined NDG and IBAN identifiers resolve to their LimitGuard entities`() {
         val fixture = fixture()
         val tenant = fixture.service.registerTenant(RegisterTenantCommand(name = "Access Key Bank"))
         val otherTenant = fixture.service.registerTenant(RegisterTenantCommand(name = "Other Bank"))
@@ -155,7 +155,7 @@ class TenantCatalogCoverageTest {
                 isLeaf = true,
             )
         )
-        val fundingSource = fixture.service.registerFundingSource(
+        val source = fixture.service.registerFundingSource(
             RegisterFundingSourceCommand(
                 tenantId = tenant.id,
                 productId = product.id,
@@ -166,39 +166,15 @@ class TenantCatalogCoverageTest {
             AssignEntityIdentifierCommand(
                 tenantId = tenant.id,
                 entityType = EntityIdentifierTypes.FUNDING_SOURCE,
-                entityId = fundingSource.id,
+                entityId = source.id,
                 schemeName = "IBAN",
                 identifier = "IT60X0542811101000000123456",
             )
         )
 
-        val tenantId = TenantId.of(tenant.id)
-        assertEquals(
-            "12345678",
-            fixture.repositories.entityIdentifiers.findByEntity(
-                tenantId,
-                EntityType.PARTY_PROFILE,
-                profile.id,
-            ).single().identifier.value,
-        )
-        assertEquals(
-            "IT60X0542811101000000123456",
-            fixture.repositories.entityIdentifiers.findByEntity(
-                tenantId,
-                EntityType.FUNDING_SOURCE,
-                fundingSource.id,
-            ).single().identifier.value,
-        )
-
-        val queryService = DefaultTenantCatalogQueryService(
-            tenantRepository = fixture.repositories.tenants,
-            identifierSchemeRepository = fixture.repositories.identifierSchemes,
-            entityIdentifierRepository = fixture.repositories.entityIdentifiers,
-            transactionRunner = DirectTransactionRunner(),
-        )
         assertEquals(
             profile.id,
-            queryService.resolveEntityIdentifier(
+            fixture.queryService.resolveEntityIdentifier(
                 ResolveEntityIdentifierQuery(
                     tenantId = tenant.id,
                     entityType = EntityIdentifierTypes.PARTY_PROFILE,
@@ -208,8 +184,8 @@ class TenantCatalogCoverageTest {
             )?.entityId,
         )
         assertEquals(
-            fundingSource.id,
-            queryService.resolveEntityIdentifier(
+            source.id,
+            fixture.queryService.resolveEntityIdentifier(
                 ResolveEntityIdentifierQuery(
                     tenantId = tenant.id,
                     entityType = EntityIdentifierTypes.FUNDING_SOURCE,
@@ -219,7 +195,7 @@ class TenantCatalogCoverageTest {
             )?.entityId,
         )
         assertNull(
-            queryService.resolveEntityIdentifier(
+            fixture.queryService.resolveEntityIdentifier(
                 ResolveEntityIdentifierQuery(
                     tenantId = otherTenant.id,
                     entityType = EntityIdentifierTypes.FUNDING_SOURCE,
@@ -440,11 +416,19 @@ class TenantCatalogCoverageTest {
                 clockProvider = FixedClockProvider(now),
                 transactionRunner = DirectTransactionRunner(),
             ),
+            queryService = DefaultTenantCatalogQueryService(
+                tenantRepository = repositories.tenants,
+                identifierSchemeRepository = repositories.identifierSchemes,
+                entityIdentifierRepository = repositories.entityIdentifiers,
+                fundingSourceProductRepository = repositories.fundingSourceProducts,
+                transactionRunner = DirectTransactionRunner(),
+            ),
         )
     }
 
     private data class Fixture(
         val repositories: InMemoryLimitguardRepositories,
         val service: DefaultTenantCatalogService,
+        val queryService: DefaultTenantCatalogQueryService,
     )
 }

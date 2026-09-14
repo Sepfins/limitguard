@@ -8,6 +8,8 @@ interface TenantRepository {
     fun exists(tenantId: TenantId): Boolean
     fun findById(tenantId: TenantId): Tenant?
     fun findByName(name: TenantName): Tenant?
+    fun findPage(search: String?, offset: Int, limit: Int): List<Tenant>
+    fun count(search: String?): Long
     fun insert(tenant: Tenant): Tenant
     fun update(tenant: Tenant): Tenant
 }

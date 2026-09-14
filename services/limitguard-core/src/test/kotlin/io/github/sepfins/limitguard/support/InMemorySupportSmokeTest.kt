@@ -69,6 +69,7 @@ class InMemorySupportSmokeTest {
         assertEquals(UUID(0L, 42L), ids.newId())
         assertEquals("ok", transactions.inTransaction { "ok" })
         assertNotNull(limitguard.tenantCatalogService)
+        assertNotNull(limitguard.tenantCatalogQueryService)
         assertNotNull(limitguard.limitChangeService)
         assertNotNull(limitguard.limitEvaluationService)
         assertNotNull(limitguard.limitInquiryService)

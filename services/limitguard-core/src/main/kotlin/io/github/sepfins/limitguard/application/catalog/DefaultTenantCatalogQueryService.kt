@@ -3,13 +3,22 @@ package io.github.sepfins.limitguard.application.catalog
 import io.github.sepfins.limitguard.api.TenantCatalogQueryService
 import io.github.sepfins.limitguard.api.errors.NotFoundException
 import io.github.sepfins.limitguard.api.errors.ValidationException
+import io.github.sepfins.limitguard.api.queries.ListFundingSourceProductsQuery
+import io.github.sepfins.limitguard.api.queries.ListTenantsQuery
+import io.github.sepfins.limitguard.api.queries.GetTenantQuery
+import io.github.sepfins.limitguard.api.queries.MAX_CATALOG_PAGE_SIZE
+import io.github.sepfins.limitguard.api.queries.MAX_CATALOG_SEARCH_LENGTH
 import io.github.sepfins.limitguard.api.queries.ResolveEntityIdentifierQuery
 import io.github.sepfins.limitguard.api.results.EntityIdentifierResult
+import io.github.sepfins.limitguard.api.results.FundingSourceProductResult
+import io.github.sepfins.limitguard.api.results.PageResult
+import io.github.sepfins.limitguard.api.results.TenantResult
 import io.github.sepfins.limitguard.domain.common.TenantId
 import io.github.sepfins.limitguard.domain.identifier.EntityType
 import io.github.sepfins.limitguard.domain.identifier.IdentifierValue
 import io.github.sepfins.limitguard.domain.identifier.SchemeName
 import io.github.sepfins.limitguard.port.persistence.EntityIdentifierRepository
+import io.github.sepfins.limitguard.port.persistence.FundingSourceProductRepository
 import io.github.sepfins.limitguard.port.persistence.IdentifierSchemeRepository
 import io.github.sepfins.limitguard.port.persistence.TenantRepository
 import io.github.sepfins.limitguard.port.transactions.TransactionRunner
@@ -18,8 +27,17 @@ class DefaultTenantCatalogQueryService(
     private val tenantRepository: TenantRepository,
     private val identifierSchemeRepository: IdentifierSchemeRepository,
     private val entityIdentifierRepository: EntityIdentifierRepository,
+    private val fundingSourceProductRepository: FundingSourceProductRepository,
     private val transactionRunner: TransactionRunner,
 ) : TenantCatalogQueryService {
+    override fun getTenant(query: GetTenantQuery): TenantResult = mapValidation {
+        val tenantId = TenantId.of(query.tenantId)
+        transactionRunner.inTransaction {
+            tenantRepository.findById(tenantId)?.toResult()
+                ?: throw NotFoundException("tenant not found: ${tenantId.value}")
+        }
+    }
+
     override fun resolveEntityIdentifier(
         query: ResolveEntityIdentifierQuery,
     ): EntityIdentifierResult? = mapValidation {
@@ -39,10 +57,85 @@ class DefaultTenantCatalogQueryService(
         }
     }
 
+    override fun listTenants(query: ListTenantsQuery): PageResult<TenantResult> = mapValidation {
+        val page = pageCoordinates(query.page, query.size)
+        val search = normalizeSearch(query.search)
+
+        transactionRunner.inTransaction {
+            val total = tenantRepository.count(search)
+            PageResult(
+                items = tenantRepository.findPage(search, page.offset, page.size).map { it.toResult() },
+                page = page.number,
+                size = page.size,
+                totalElements = total,
+                totalPages = totalPages(total, page.size),
+            )
+        }
+    }
+
+    override fun listFundingSourceProducts(
+        query: ListFundingSourceProductsQuery,
+    ): PageResult<FundingSourceProductResult> = mapValidation {
+        val tenantId = TenantId.of(query.tenantId)
+        val page = pageCoordinates(query.page, query.size)
+        val search = normalizeSearch(query.search)
+
+        transactionRunner.inTransaction {
+            if (!tenantRepository.exists(tenantId)) {
+                throw NotFoundException("tenant not found: ${tenantId.value}")
+            }
+
+            val total = fundingSourceProductRepository.count(tenantId, search, query.active)
+            PageResult(
+                items = fundingSourceProductRepository.findPage(
+                    tenantId = tenantId,
+                    search = search,
+                    active = query.active,
+                    offset = page.offset,
+                    limit = page.size,
+                ).map { it.toResult() },
+                page = page.number,
+                size = page.size,
+                totalElements = total,
+                totalPages = totalPages(total, page.size),
+            )
+        }
+    }
+
+    private fun pageCoordinates(page: Int, size: Int): PageCoordinates {
+        require(page >= 0) { "page must be zero or greater" }
+        require(size in 1..MAX_CATALOG_PAGE_SIZE) {
+            "size must be between 1 and $MAX_CATALOG_PAGE_SIZE"
+        }
+        require(page <= Int.MAX_VALUE / size) { "page and size exceed the supported offset range" }
+        return PageCoordinates(page, size, page * size)
+    }
+
+    private fun normalizeSearch(search: String?): String? {
+        val normalized = search?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        require(normalized.length <= MAX_CATALOG_SEARCH_LENGTH) {
+            "search must not exceed $MAX_CATALOG_SEARCH_LENGTH characters"
+        }
+        return normalized
+    }
+
+    private fun totalPages(totalElements: Long, size: Int): Int {
+        if (totalElements == 0L) return 0
+        val pages = ((totalElements - 1L) / size) + 1L
+        require(pages <= Int.MAX_VALUE) { "result set exceeds the supported page range" }
+        return pages.toInt()
+    }
+
     private inline fun <T> mapValidation(block: () -> T): T =
         try {
             block()
         } catch (exception: IllegalArgumentException) {
             throw ValidationException(exception.message ?: "invalid catalog query", cause = exception)
         }
+
+    private data class PageCoordinates(
+        val number: Int,
+        val size: Int,
+        val offset: Int,
+    )
 }

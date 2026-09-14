@@ -103,6 +103,14 @@ internal fun Field<String>.inPostgresEnums(values: Collection<String>, typeName:
         .reduce(Condition::or)
 }
 
+internal fun Field<String>.containsIgnoreCaseLiteral(search: String): Condition {
+    val escaped = search
+        .replace("\\", "\\\\")
+        .replace("%", "\\%")
+        .replace("_", "\\_")
+    return likeIgnoreCase("%$escaped%", '\\')
+}
+
 internal fun <T> jooqOperation(
     operation: String,
     idempotencyConstraint: String? = null,

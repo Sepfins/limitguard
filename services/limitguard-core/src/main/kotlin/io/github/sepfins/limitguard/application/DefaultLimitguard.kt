@@ -4,10 +4,10 @@ import io.github.sepfins.limitguard.api.LimitChangeService
 import io.github.sepfins.limitguard.api.LimitEvaluationService
 import io.github.sepfins.limitguard.api.LimitInquiryService
 import io.github.sepfins.limitguard.api.Limitguard
-import io.github.sepfins.limitguard.api.TenantCatalogQueryService
 import io.github.sepfins.limitguard.api.TenantCatalogService
-import io.github.sepfins.limitguard.application.catalog.DefaultTenantCatalogQueryService
+import io.github.sepfins.limitguard.api.TenantCatalogQueryService
 import io.github.sepfins.limitguard.application.catalog.DefaultTenantCatalogService
+import io.github.sepfins.limitguard.application.catalog.DefaultTenantCatalogQueryService
 import io.github.sepfins.limitguard.application.change.ApproveLimitRuleChangeWorkflow
 import io.github.sepfins.limitguard.application.change.ApplyDueLimitChangesWorkflow
 import io.github.sepfins.limitguard.application.change.CancelLimitRuleChangeWorkflow
@@ -164,6 +164,7 @@ class DefaultLimitguard(
         tenantRepository = tenantRepository,
         identifierSchemeRepository = identifierSchemeRepository,
         entityIdentifierRepository = entityIdentifierRepository,
+        fundingSourceProductRepository = fundingSourceProductRepository,
         transactionRunner = transactionRunner,
     )
 

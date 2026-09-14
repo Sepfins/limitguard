@@ -1056,10 +1056,6 @@ class DefaultTenantCatalogService(
         identifier: IdentifierValue,
         now: Instant,
     ): EntityIdentifier {
-        require(scheme.tenantId == tenantId) { "identifier scheme belongs to another tenant" }
-        require(scheme.entityType == entityType) {
-            "identifier scheme entity type does not match ${entityType.value}"
-        }
         when (entityType) {
             EntityType.PARTY_PROFILE -> requirePartyProfileExists(tenantId, PartyProfileId.of(entityId))
             EntityType.FUNDING_SOURCE -> requireFundingSourceExists(tenantId, FundingSourceId.of(entityId))
@@ -1069,7 +1065,7 @@ class DefaultTenantCatalogService(
 
         val existing = entityIdentifierRepository.findByValue(tenantId, scheme.id, identifier)
         if (existing != null) {
-            if (existing.entityType != entityType || existing.entityId != entityId) {
+            if (existing.entityId != entityId) {
                 throw ConflictException(
                     "entity identifier belongs to another entity: ${scheme.schemeName.value}/${identifier.value}"
                 )

@@ -5,6 +5,7 @@ import io.github.sepfins.limitguard.domain.tenant.NoMatchingRuleBehavior
 import io.github.sepfins.limitguard.domain.tenant.Tenant
 import io.github.sepfins.limitguard.domain.tenant.TenantName
 import io.github.sepfins.limitguard.infrastructure.jooq.JooqPersistenceContext
+import io.github.sepfins.limitguard.infrastructure.jooq.containsIgnoreCaseLiteral
 import io.github.sepfins.limitguard.infrastructure.jooq.jooqField
 import io.github.sepfins.limitguard.infrastructure.jooq.jooqOperation
 import io.github.sepfins.limitguard.infrastructure.jooq.jooqTable
@@ -14,6 +15,7 @@ import io.github.sepfins.limitguard.infrastructure.jooq.toMetadata
 import io.github.sepfins.limitguard.port.persistence.TenantRepository
 import org.jooq.Field
 import org.jooq.JSONB
+import org.jooq.Condition
 import org.jooq.Record
 import org.jooq.SelectFieldOrAsterisk
 import java.time.Instant
@@ -36,6 +38,26 @@ class JooqTenantRepository(
 
     override fun findByName(name: TenantName): Tenant? = jooqOperation("find tenant by name") {
         selectTenants().where(TenantTable.name.eq(name.value)).fetchOne { it.toDomain() }
+    }
+
+    override fun findPage(search: String?, offset: Int, limit: Int): List<Tenant> =
+        jooqOperation("list tenants") {
+            selectTenants()
+                .where(searchCondition(search))
+                .orderBy(TenantTable.name, TenantTable.id)
+                .offset(offset)
+                .limit(limit)
+                .fetch { it.toDomain() }
+        }
+
+    override fun count(search: String?): Long = jooqOperation("count tenants") {
+        requireNotNull(
+            context.dsl()
+                .select(org.jooq.impl.DSL.count())
+                .from(TenantTable.table)
+                .where(searchCondition(search))
+                .fetchOne(0, Long::class.java),
+        )
     }
 
     override fun insert(tenant: Tenant): Tenant = jooqOperation("insert tenant") {
@@ -69,6 +91,9 @@ class JooqTenantRepository(
     }
 
     private fun selectTenants() = context.dsl().select(TenantTable.fields).from(TenantTable.table)
+
+    private fun searchCondition(search: String?): Condition =
+        search?.let(TenantTable.name::containsIgnoreCaseLiteral) ?: org.jooq.impl.DSL.noCondition()
 
     private fun Record.toDomain(): Tenant = Tenant(
         id = TenantId.of(requireNotNull(get(TenantTable.id))),

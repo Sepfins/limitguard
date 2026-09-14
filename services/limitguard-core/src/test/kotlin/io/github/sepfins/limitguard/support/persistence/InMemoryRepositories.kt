@@ -129,6 +129,7 @@ import io.github.sepfins.limitguard.port.persistence.UsageBucketRepository
 import io.github.sepfins.limitguard.port.persistence.UsageEventRepository
 import java.util.concurrent.ConcurrentHashMap
 import java.time.Instant
+import java.util.Locale
 
 class InMemoryLimitguardRepositories(
     val tenants: InMemoryTenantRepository = InMemoryTenantRepository(),
@@ -178,6 +179,17 @@ class InMemoryTenantRepository : TenantRepository {
     override fun findByName(name: TenantName): Tenant? =
         tenants.values.firstOrNull { it.name == name }
 
+    override fun findPage(search: String?, offset: Int, limit: Int): List<Tenant> =
+        matching(search)
+            .sortedWith(
+                compareBy<Tenant> { it.name.value }
+                    .thenBy { it.id.value },
+            )
+            .drop(offset)
+            .take(limit)
+
+    override fun count(search: String?): Long = matching(search).size.toLong()
+
     override fun insert(tenant: Tenant): Tenant = synchronized(lock) {
         requireAbsent(tenants.containsKey(tenant.id), "tenant id already exists: ${tenant.id.value}")
         requireAbsent(findByName(tenant.name) != null, "tenant name already exists: ${tenant.name.value}")
@@ -193,6 +205,13 @@ class InMemoryTenantRepository : TenantRepository {
         )
         tenants[tenant.id] = tenant
         tenant
+    }
+
+    private fun matching(search: String?): List<Tenant> {
+        val normalized = search?.lowercase(Locale.ROOT)
+        return tenants.values.filter { tenant ->
+            normalized == null || tenant.name.value.lowercase(Locale.ROOT).contains(normalized)
+        }
     }
 }
 
@@ -456,6 +475,24 @@ class InMemoryFundingSourceProductRepository : FundingSourceProductRepository {
     override fun findById(tenantId: TenantId, id: FundingSourceProductId): FundingSourceProduct? =
         products[TenantScopedKey(tenantId, id)]
 
+    override fun findPage(
+        tenantId: TenantId,
+        search: String?,
+        active: Boolean?,
+        offset: Int,
+        limit: Int,
+    ): List<FundingSourceProduct> =
+        matching(tenantId, search, active)
+            .sortedWith(
+                compareBy<FundingSourceProduct> { it.code.value }
+                    .thenBy { it.id.value },
+            )
+            .drop(offset)
+            .take(limit)
+
+    override fun count(tenantId: TenantId, search: String?, active: Boolean?): Long =
+        matching(tenantId, search, active).size.toLong()
+
     override fun findByIdForUpdate(
         tenantId: TenantId,
         id: FundingSourceProductId,
@@ -480,6 +517,20 @@ class InMemoryFundingSourceProductRepository : FundingSourceProductRepository {
         requireParentExists(tenantId, product.parentId, ::findById, "funding source product parent not found")
         products[TenantScopedKey(tenantId, product.id)] = product
         product
+    }
+
+    private fun matching(
+        tenantId: TenantId,
+        search: String?,
+        active: Boolean?,
+    ): List<FundingSourceProduct> {
+        val normalized = search?.lowercase(Locale.ROOT)
+        return products.tenantValues(tenantId).filter { product ->
+            val matchesSearch = normalized == null ||
+                product.code.value.lowercase(Locale.ROOT).contains(normalized) ||
+                product.name.value.lowercase(Locale.ROOT).contains(normalized)
+            matchesSearch && (active == null || product.isActive == active)
+        }
     }
 }
 

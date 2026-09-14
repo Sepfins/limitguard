@@ -20,6 +20,7 @@ import io.github.sepfins.limitguard.domain.funding.FundingSourceProductCode
 import io.github.sepfins.limitguard.domain.funding.FundingSourceProductName
 import io.github.sepfins.limitguard.domain.funding.ProductNodeType
 import io.github.sepfins.limitguard.infrastructure.jooq.JooqPersistenceContext
+import io.github.sepfins.limitguard.infrastructure.jooq.containsIgnoreCaseLiteral
 import io.github.sepfins.limitguard.infrastructure.jooq.eqPostgresEnum
 import io.github.sepfins.limitguard.infrastructure.jooq.jooqField
 import io.github.sepfins.limitguard.infrastructure.jooq.jooqOperation
@@ -36,6 +37,8 @@ import org.jooq.Field
 import org.jooq.JSONB
 import org.jooq.Record
 import org.jooq.SelectFieldOrAsterisk
+import org.jooq.Condition
+import org.jooq.impl.DSL
 import java.time.Instant
 import java.util.UUID
 
@@ -94,6 +97,32 @@ class JooqFundingSourceProductRepository(
                 .where(FundingSourceProductTable.tenantId.eq(tenantId.value))
                 .and(FundingSourceProductTable.id.eq(id.value))
                 .fetchOne { it.toProduct() }
+        }
+
+    override fun findPage(
+        tenantId: TenantId,
+        search: String?,
+        active: Boolean?,
+        offset: Int,
+        limit: Int,
+    ): List<FundingSourceProduct> = jooqOperation("list funding source products") {
+        selectProducts()
+            .where(productFilter(tenantId, search, active))
+            .orderBy(FundingSourceProductTable.code, FundingSourceProductTable.id)
+            .offset(offset)
+            .limit(limit)
+            .fetch { it.toProduct() }
+    }
+
+    override fun count(tenantId: TenantId, search: String?, active: Boolean?): Long =
+        jooqOperation("count funding source products") {
+            requireNotNull(
+                context.dsl()
+                    .select(DSL.count())
+                    .from(FundingSourceProductTable.table)
+                    .where(productFilter(tenantId, search, active))
+                    .fetchOne(0, Long::class.java),
+            )
         }
 
     override fun findByIdForUpdate(
@@ -160,6 +189,20 @@ class JooqFundingSourceProductRepository(
     private fun selectProducts() = context.dsl()
         .select(FundingSourceProductTable.fields)
         .from(FundingSourceProductTable.table)
+
+    private fun productFilter(tenantId: TenantId, search: String?, active: Boolean?): Condition {
+        var condition: Condition = FundingSourceProductTable.tenantId.eq(tenantId.value)
+        if (search != null) {
+            condition = condition.and(
+                FundingSourceProductTable.code.containsIgnoreCaseLiteral(search)
+                    .or(FundingSourceProductTable.name.containsIgnoreCaseLiteral(search)),
+            )
+        }
+        if (active != null) {
+            condition = condition.and(FundingSourceProductTable.isActive.eq(active))
+        }
+        return condition
+    }
 
     private fun Record.toProduct(): FundingSourceProduct = FundingSourceProduct(
         id = FundingSourceProductId.of(requireNotNull(get(FundingSourceProductTable.id))),
