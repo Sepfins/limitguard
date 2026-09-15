@@ -1,0 +1,37 @@
+spring:
+  application:
+    name: limitguard-demo-service
+  datasource:
+    url: ${LIMITGUARD_DEMO_DB_URL:jdbc:postgresql://localhost:5432/limitguard?currentSchema=limitguard_demo}
+    username: ${POSTGRES_USER:limitguard}
+    password: ${POSTGRES_PASSWORD:limitguard}
+    hikari:
+      schema: limitguard_demo
+  flyway:
+    locations: classpath:db/limitguard/migration
+    default-schema: limitguard_demo
+    schemas: limitguard_demo
+    create-schemas: true
+  web:
+    resources:
+      cache:
+        cachecontrol:
+          no-cache: true
+
+server:
+  port: ${LIMITGUARD_DEMO_PORT:8081}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+limitguard:
+  demo:
+    scenario-key: default-household
+    event-heartbeat: 20s
