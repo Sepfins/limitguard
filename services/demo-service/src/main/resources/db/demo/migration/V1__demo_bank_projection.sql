@@ -58,11 +58,22 @@ CREATE TABLE demo_limit_setting (
     minimum_amount NUMERIC(19, 4) NOT NULL,
     maximum_amount NUMERIC(19, 4) NOT NULL,
     step_amount NUMERIC(19, 4) NOT NULL,
+    agreed_maximum_amount NUMERIC(19, 4),
+    pending_change_request_id UUID UNIQUE,
+    pending_change_amount NUMERIC(19, 4),
+    pending_change_effective_at TIMESTAMPTZ,
     display_order INT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL,
     CONSTRAINT chk_demo_limit_operation CHECK (operation IN ('CARD_PURCHASE', 'ATM_WITHDRAWAL', 'BANK_TRANSFER')),
     CONSTRAINT chk_demo_limit_amounts CHECK (
         minimum_amount > 0 AND maximum_amount >= minimum_amount AND step_amount > 0
+    ),
+    CONSTRAINT chk_demo_limit_agreed_maximum CHECK (
+        agreed_maximum_amount IS NULL OR agreed_maximum_amount BETWEEN minimum_amount AND maximum_amount
+    ),
+    CONSTRAINT chk_demo_limit_pending_change CHECK (
+        (pending_change_request_id IS NULL) = (pending_change_amount IS NULL)
+        AND (pending_change_effective_at IS NULL OR pending_change_request_id IS NOT NULL)
     )
 );
 

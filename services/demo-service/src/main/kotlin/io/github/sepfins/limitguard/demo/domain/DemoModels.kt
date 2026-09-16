@@ -117,6 +117,15 @@ data class DemoLimitSetting(
     val minimumAmount: BigDecimal,
     val maximumAmount: BigDecimal,
     val stepAmount: BigDecimal,
+    /** Above this amount the account holder approves the change; null when no approval is agreed. */
+    val agreedMaximumAmount: BigDecimal?,
+    /**
+     * A change that has not applied yet and the amount it asks for. It starts at its effective
+     * time after a cooling-off period, or waits for the account holder when that is null.
+     */
+    val pendingChangeRequestId: UUID?,
+    val pendingChangeAmount: BigDecimal?,
+    val pendingChangeEffectiveAt: Instant?,
     val displayOrder: Int,
     val createdAt: Instant,
 )
@@ -128,6 +137,11 @@ data class DemoViolation(
     val limitAmount: BigDecimal?,
     val attemptedAmount: BigDecimal,
     val remainingAmount: BigDecimal?,
+)
+
+data class DemoPaymentTotals(
+    val captured: BigDecimal,
+    val uncaptured: BigDecimal,
 )
 
 data class DemoPayment(

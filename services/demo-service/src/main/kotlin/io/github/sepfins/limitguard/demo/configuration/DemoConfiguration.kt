@@ -16,6 +16,9 @@ import javax.sql.DataSource
 data class DemoProperties(
     val scenarioKey: String = "default-household",
     val eventHeartbeat: Duration = Duration.ofSeconds(20),
+    /** How long a raised card limit waits before it starts; KBC uses four hours. */
+    val coolingOff: Duration = Duration.ofMinutes(2),
+    val duePassInterval: Duration = Duration.ofSeconds(15),
 )
 
 @Configuration(proxyBeanMethods = false)
