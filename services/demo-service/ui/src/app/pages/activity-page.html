@@ -1,0 +1,132 @@
+<header class="page-heading">
+  <div>
+    <h1>Activity</h1>
+    <p>Card payments, cash withdrawals and transfers, updated as they happen.</p>
+  </div>
+</header>
+
+<div class="activity-toolbar">
+  <div class="filter-control" role="group" aria-label="Filter activity by operation">
+    @for (filter of filters; track filter.operation) {
+      <button
+        type="button"
+        [class.active]="selectedFilter() === filter.operation"
+        [attr.aria-pressed]="selectedFilter() === filter.operation"
+        (click)="selectFilter(filter.operation)"
+      >
+        {{ filter.label }}
+      </button>
+    }
+  </div>
+  <span class="activity-count">{{ filteredPayments().length }} {{ filteredPayments().length === 1 ? 'payment' : 'payments' }}</span>
+</div>
+
+@if (store.loading()) {
+  <div class="panel activity-loading" aria-label="Loading activity">
+    @for (row of [1, 2, 3, 4]; track row) {
+      <div class="skeleton"></div>
+    }
+  </div>
+} @else if (store.error() && store.payments().length === 0) {
+  <div class="panel error-state">
+    <lucide-icon name="alert-circle" [size]="26" />
+    <strong>Activity unavailable</strong>
+    <span>{{ store.error() }}</span>
+    <button class="button secondary" type="button" (click)="store.load()">Try again</button>
+  </div>
+} @else {
+  <div class="panel activity-list">
+    <app-payment-list [payments]="filteredPayments()" />
+  </div>
+}
+
+@if (store.detailLoading() || store.paymentDetail()) {
+  <button class="drawer-backdrop" type="button" aria-label="Close activity details" (click)="closeDetail()"></button>
+  <aside class="detail-drawer" role="dialog" aria-modal="true" aria-labelledby="payment-detail-title">
+    <header class="drawer-header">
+      <div>
+        <h2 id="payment-detail-title">Payment</h2>
+      </div>
+      <button class="icon-button" type="button" aria-label="Close activity details" title="Close" (click)="closeDetail()">
+        <lucide-icon name="x" [size]="20" />
+      </button>
+    </header>
+
+    @if (store.detailLoading()) {
+      <div class="drawer-loading" aria-label="Loading payment details">
+        <div class="skeleton"></div>
+        <div class="skeleton"></div>
+        <div class="skeleton"></div>
+      </div>
+    } @else if (store.paymentDetail(); as detail) {
+      <div class="drawer-content">
+        <section class="payment-hero">
+          <h3>{{ detail.payment.description }}</h3>
+          <span class="payment-operation">{{ operationLabel(detail.payment.operation) }} · {{ formatDateTime(detail.payment.createdAt) }}</span>
+          <strong>{{ formatMoney(detail.payment.amount) }}</strong>
+          <span class="status-pill" [class]="'status-pill ' + statusClass(detail.payment.displayStatus)">
+            {{ statusLabel(detail.payment.displayStatus) }}
+          </span>
+        </section>
+
+        <dl class="amount-breakdown">
+          <div>
+            <dt>Authorized</dt>
+            <dd>{{ formatMoney(detail.authorizedAmount) }}</dd>
+          </div>
+          <div>
+            <dt>Completed</dt>
+            <dd>{{ formatMoney(detail.capturedAmount) }}</dd>
+          </div>
+          <div>
+            <dt>Held</dt>
+            <dd>{{ formatMoney(detail.uncapturedAmount) }}</dd>
+          </div>
+        </dl>
+
+        @if (detail.violations.length > 0) {
+          <section class="violations" aria-labelledby="violations-heading">
+            <h3 id="violations-heading">Why it was declined</h3>
+            @for (violation of detail.violations; track violation.code) {
+              <div class="violation-item">
+                <lucide-icon name="alert-circle" [size]="18" />
+                <span>
+                  <strong>{{ violation.message }}</strong>
+                  <small>
+                    Attempted {{ formatMoney(violation.attemptedAmount) }}
+                    @if (violation.remainingAmount) {
+                      &middot; {{ formatMoney(violation.remainingAmount) }} remaining
+                    }
+                  </small>
+                </span>
+              </div>
+            }
+          </section>
+        }
+
+        <section class="timeline" aria-labelledby="timeline-heading">
+          <h3 id="timeline-heading">Timeline</h3>
+          <ol>
+            @for (event of detail.timeline; track event.type + event.occurredAt) {
+              <li>
+                <span class="timeline-mark"><lucide-icon name="check" [size]="13" /></span>
+                <span class="timeline-copy">
+                  <strong>{{ event.label }}</strong>
+                  <small>{{ formatDateTime(event.occurredAt) }}</small>
+                </span>
+                @if (event.amount) {
+                  <b>{{ formatMoney(event.amount) }}</b>
+                }
+              </li>
+            }
+          </ol>
+        </section>
+
+        <footer class="reference">
+          <span>Reference</span>
+          <code>{{ detail.payment.externalPaymentId }}</code>
+        </footer>
+      </div>
+    }
+  </aside>
+}

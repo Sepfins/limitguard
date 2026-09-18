@@ -1,0 +1,95 @@
+<header class="page-heading">
+  <div>
+    <h1>Cards</h1>
+    <p>Your debit card and what it can still spend.</p>
+  </div>
+</header>
+
+@if (store.loading()) {
+  <div class="cards-layout" aria-label="Loading card details">
+    <div class="payment-card skeleton"></div>
+    <div class="panel card-information skeleton"></div>
+  </div>
+} @else if (store.error() && !card()) {
+  <div class="panel error-state">
+    <lucide-icon name="alert-circle" [size]="26" />
+    <strong>Card unavailable</strong>
+    <span>{{ store.error() }}</span>
+    <button class="button secondary" type="button" (click)="store.load()">Try again</button>
+  </div>
+} @else if (card(); as card) {
+  <div class="cards-layout">
+    <section class="card-showcase" aria-label="Everyday Debit card">
+      <div class="payment-card">
+        <span class="card-top">
+          <span class="card-logo">{{ bankName }}</span>
+          <span class="contactless" aria-label="Debit card"><lucide-icon name="credit-card" [size]="20" /></span>
+        </span>
+        <strong>{{ card.displayName }}</strong>
+        <span class="number">&bull;&bull;&bull;&bull; &bull;&bull;&bull;&bull; &bull;&bull;&bull;&bull; {{ card.lastFour }}</span>
+        <span class="card-footer">
+          <span>
+            <small>CARDHOLDER</small>
+            {{ store.overview()?.customer?.displayName?.toUpperCase() }}
+          </span>
+          <span>
+            <small>VALID THRU</small>
+            {{ card.expiresMonth.toString().padStart(2, '0') }}/{{ card.expiresYear.toString().slice(-2) }}
+          </span>
+          <b>{{ card.network }}</b>
+        </span>
+      </div>
+      <span class="fictional-note">Fictional card &middot; display details only</span>
+    </section>
+
+    <section class="panel card-information" aria-labelledby="card-details-heading">
+      <header>
+        <h2 id="card-details-heading">{{ card.displayName }}</h2>
+        <span class="status-pill">{{ card.status === 'ACTIVE' ? 'Active' : 'Frozen' }}</span>
+      </header>
+      <dl>
+        <div>
+          <dt>Card number</dt>
+          <dd>Ending {{ card.lastFour }}</dd>
+        </div>
+        <div>
+          <dt>Linked account</dt>
+          <dd>{{ linkedAccount()?.displayName ?? 'Household Current' }}</dd>
+        </div>
+        <div>
+          <dt>Access</dt>
+          <dd>{{ linkedAccount()?.accessLabel ?? 'Authorized user' }}</dd>
+        </div>
+        <div>
+          <dt>Currency</dt>
+          <dd>EUR</dd>
+        </div>
+      </dl>
+    </section>
+  </div>
+
+  <section class="card-limits" aria-labelledby="card-limits-heading">
+    <div class="section-heading">
+      <h2 id="card-limits-heading">Card controls</h2>
+      <a routerLink="/limits">Manage limits</a>
+    </div>
+    <div class="limit-grid">
+      @for (limit of cardLimits(); track limit.id) {
+        <a class="limit-item panel" routerLink="/limits">
+          <span class="limit-icon">
+            <lucide-icon [name]="limit.operation === 'ATM_WITHDRAWAL' ? 'banknote' : 'credit-card'" [size]="19" />
+          </span>
+          <span class="limit-copy">
+            <strong>{{ limit.displayName }}</strong>
+            <small>{{ limit.period === 'DAILY' ? 'Resets daily' : 'Per payment' }}</small>
+          </span>
+          <span class="limit-amount">
+            <small>Available</small>
+            <strong class="amount">{{ formatMoney(limit.availableAmount) }}</strong>
+          </span>
+          <lucide-icon class="chevron" name="chevron-right" [size]="17" />
+        </a>
+      }
+    </div>
+  </section>
+}

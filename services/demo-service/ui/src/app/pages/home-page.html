@@ -1,0 +1,84 @@
+@if (store.loading()) {
+  <div class="home-loading" aria-label="Loading overview">
+    <div class="balance-skeleton skeleton"></div>
+    <div class="rows-skeleton panel skeleton"></div>
+  </div>
+} @else if (store.error() && !store.overview()) {
+  <div class="panel error-state">
+    <lucide-icon name="alert-circle" [size]="26" />
+    <strong>Overview unavailable</strong>
+    <span>{{ store.error() }}</span>
+    <button class="button secondary" type="button" (click)="store.load()">Try again</button>
+  </div>
+} @else if (store.overview(); as overview) {
+  @if (store.error()) {
+    <div class="refresh-warning" role="status">
+      <lucide-icon name="alert-circle" [size]="16" />
+      <span>Showing the last available data. {{ store.error() }}</span>
+    </div>
+  }
+
+  <section class="balance" aria-labelledby="balance-caption">
+    <h1 class="sr-only">Home</h1>
+    <p class="balance-amount amount">
+      {{ balance().whole }}<small>{{ balance().rest }}</small>
+    </p>
+    <p class="balance-caption" id="balance-caption">
+      Total across {{ overview.accounts.length }} accounts ·
+      <span class="amount">{{ formatMoney(overview.totalAvailableBalance, store.balancesVisible()) }}</span> available
+    </p>
+    <div class="balance-actions">
+      <a class="button soft" routerLink="/limits">
+        <lucide-icon name="sliders-horizontal" [size]="17" />
+        Manage limits
+      </a>
+      <button
+        class="icon-button"
+        type="button"
+        [attr.aria-label]="store.balancesVisible() ? 'Hide balances' : 'Show balances'"
+        [title]="store.balancesVisible() ? 'Hide balances' : 'Show balances'"
+        (click)="store.toggleBalances()"
+      >
+        <lucide-icon [name]="store.balancesVisible() ? 'eye-off' : 'eye'" [size]="18" />
+      </button>
+    </div>
+  </section>
+
+  @if (todayLimit(); as limit) {
+    <a class="today-limit" routerLink="/limits">
+      <app-limit-bar [limit]="limit" />
+      <span>
+        {{ limit.displayName }}: <b class="amount">{{ formatMoney(limit.availableAmount) }}</b>
+        of <span class="amount">{{ formatMoney(limit.currentAmount) }}</span> left today
+      </span>
+      <lucide-icon name="chevron-right" [size]="16" />
+    </a>
+  }
+
+  <div class="tabs" role="tablist" aria-label="Home sections">
+    <button type="button" role="tab" id="tab-activity" aria-controls="panel-home"
+      [attr.aria-selected]="tab() === 'activity'" (click)="tab.set('activity')">Activity</button>
+    <button type="button" role="tab" id="tab-accounts" aria-controls="panel-home"
+      [attr.aria-selected]="tab() === 'accounts'" (click)="tab.set('accounts')">Accounts</button>
+  </div>
+
+  <section id="panel-home" role="tabpanel" [attr.aria-labelledby]="'tab-' + tab()">
+    @if (tab() === 'activity') {
+      <app-payment-list [payments]="overview.recentPayments" [compact]="true" />
+      <a class="see-all" routerLink="/activity">All activity</a>
+    } @else {
+      <div class="rows">
+        @for (account of overview.accounts; track account.id) {
+          <a class="row" routerLink="/accounts">
+            <span class="row-icon"><lucide-icon name="landmark" [size]="18" /></span>
+            <span class="row-copy">
+              <strong>{{ account.displayName }}</strong>
+              <small>{{ account.maskedIban }} · {{ account.accessLabel }}</small>
+            </span>
+            <strong class="amount">{{ formatMoney(account.bookedBalance, store.balancesVisible()) }}</strong>
+          </a>
+        }
+      </div>
+    }
+  </section>
+}

@@ -1,0 +1,18 @@
+# Compiled output and caches
+/dist
+/tmp
+/out-tsc
+/.angular/cache
+/coverage
+/playwright-report
+/test-results
+
+# Node
+/node_modules
+npm-debug.log
+
+# Editors and system files
+.idea/
+.vscode/
+.DS_Store
+

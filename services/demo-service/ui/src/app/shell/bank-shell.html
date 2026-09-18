@@ -1,0 +1,57 @@
+<div class="bank-shell">
+  <aside class="sidebar">
+    <a class="wordmark" routerLink="/home">{{ bankName }}</a>
+
+    <div class="profile">
+      <span class="avatar">{{ customer()?.initials ?? '' }}</span>
+      <strong>{{ customer()?.displayName ?? ' ' }}</strong>
+      <small>{{ customer()?.relationship ?? ' ' }}</small>
+    </div>
+
+    <nav class="side-nav" aria-label="Primary navigation">
+      @for (item of navigation; track item.path) {
+        <a [routerLink]="item.path" routerLinkActive="active" ariaCurrentWhenActive="page">
+          <lucide-icon [name]="item.icon" [size]="19" />
+          {{ item.label }}
+        </a>
+      }
+    </nav>
+
+    <div class="sidebar-footer">
+      <span class="demo-note">Local demo · fictional data</span>
+      <span>Limits by LimitGuard</span>
+    </div>
+  </aside>
+
+  <header class="mobile-bar">
+    <a class="wordmark" routerLink="/home">{{ bankName }}</a>
+    <span class="avatar small">{{ customer()?.initials ?? '' }}</span>
+  </header>
+
+  <main class="page-content">
+    <div class="sync" role="status" [class.offline]="!store.connected()">
+      <span class="sync-dot"></span>
+      <span class="sync-label">{{ store.connected() ? 'Up to date' : 'Reconnecting' }}</span>
+      <button
+        class="icon-button"
+        type="button"
+        title="Refresh"
+        aria-label="Refresh"
+        [disabled]="store.refreshing()"
+        (click)="store.refresh()"
+      >
+        <lucide-icon name="refresh-cw" [size]="16" [class.spinning]="store.refreshing()" />
+      </button>
+    </div>
+    <router-outlet />
+  </main>
+
+  <nav class="tab-bar" aria-label="Primary navigation">
+    @for (item of navigation; track item.path) {
+      <a [routerLink]="item.path" routerLinkActive="active" ariaCurrentWhenActive="page">
+        <lucide-icon [name]="item.icon" [size]="21" />
+        <span>{{ item.label }}</span>
+      </a>
+    }
+  </nav>
+</div>

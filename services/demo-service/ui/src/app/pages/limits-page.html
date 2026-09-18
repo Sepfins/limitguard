@@ -1,0 +1,189 @@
+<header class="page-heading">
+  <div>
+    <h1>Limits</h1>
+    <p>How much your card and account can spend, and what is held right now.</p>
+  </div>
+</header>
+
+@if (store.loading()) {
+  <div class="limits" aria-label="Loading limits">
+    @for (item of [1, 2, 3]; track item) {
+      <div class="limit panel skeleton"></div>
+    }
+  </div>
+} @else if (store.error() && store.limits().length === 0) {
+  <div class="panel error-state">
+    <lucide-icon name="alert-circle" [size]="26" />
+    <strong>Limits unavailable</strong>
+    <span>{{ store.error() }}</span>
+    <button class="button secondary" type="button" (click)="store.load()">Try again</button>
+  </div>
+} @else {
+  <div class="limits">
+    @for (limit of store.limits(); track limit.id) {
+      <article class="limit panel" [attr.aria-labelledby]="'limit-' + limit.id">
+        <header>
+          <span class="limit-icon">
+            <lucide-icon
+              [name]="limit.operation === 'CARD_PURCHASE' ? 'credit-card' : limit.operation === 'ATM_WITHDRAWAL' ? 'banknote' : 'send'"
+              [size]="19"
+            />
+          </span>
+          <span class="limit-heading">
+            <h2 [id]="'limit-' + limit.id">{{ limit.displayName }}</h2>
+            <small>{{ resetWords(limit) }}</small>
+          </span>
+          <button class="button soft compact" type="button" [attr.aria-label]="'Change ' + limit.displayName"
+            [disabled]="limit.pendingChange !== null" (click)="openEditor(limit)">Change</button>
+        </header>
+
+        @if (limit.pendingChange; as pending) {
+          <div class="pending-change" role="status">
+            <lucide-icon name="clock" [size]="18" />
+            @if (pending.effectiveAt) {
+              <span>
+                <strong><span class="amount">{{ formatMoney(pending.requestedAmount) }}</span> starts at {{ formatTime(pending.effectiveAt) }}</strong>
+                <small>Your current limit applies until the cooling-off period ends.</small>
+              </span>
+            } @else {
+              <span>
+                <strong><span class="amount">{{ formatMoney(pending.requestedAmount) }}</span> waits for the account holder</strong>
+                <small>Your current limit stays until they approve it.</small>
+              </span>
+            }
+            <button class="button secondary compact" type="button" [disabled]="withdrawing() === limit.id"
+              (click)="withdraw(limit)">Withdraw</button>
+          </div>
+          @if (withdrawError() && withdrawing() === null) {
+            <span class="field-error" role="alert">{{ withdrawError() }}</span>
+          }
+        }
+
+        @if (limit.limitKind === 'PER_TRANSACTION') {
+          <p class="available">
+            <span class="amount">{{ formatMoney(limit.currentAmount) }}</span>
+            <small>at most per payment</small>
+          </p>
+        } @else {
+          <p class="available">
+            <span class="amount">{{ formatMoney(limit.availableAmount) }}</span>
+            <small>left of <span class="amount">{{ formatMoney(limit.currentAmount) }}</span></small>
+          </p>
+          <app-limit-bar [limit]="limit" />
+          <dl class="legend">
+            <div>
+              <dt><i class="swatch spent"></i>Spent</dt>
+              <dd class="amount">{{ formatMoney(limit.consumedAmount) }}</dd>
+            </div>
+            <div>
+              <dt><i class="swatch held"></i>Held</dt>
+              <dd class="amount">{{ formatMoney(limit.reservedAmount) }}</dd>
+            </div>
+          </dl>
+        }
+      </article>
+    } @empty {
+      <div class="panel empty-state">
+        <lucide-icon name="sliders-horizontal" [size]="26" />
+        <strong>No adjustable limits</strong>
+        <span>No self-service limits are set up for this profile.</span>
+      </div>
+    }
+  </div>
+  <p class="note">Held money belongs to payments that are authorized but not completed yet. It counts against the limit until the payment completes or is released.</p>
+  <p class="credit">Limits by LimitGuard</p>
+}
+
+@if (selectedLimit(); as limit) {
+  <button class="modal-backdrop" type="button" aria-label="Close limit editor" (click)="closeEditor()"></button>
+  <section class="limit-modal" role="dialog" aria-modal="true" aria-labelledby="limit-editor-title">
+    <header class="modal-header">
+      <div>
+        <h2 id="limit-editor-title">Change {{ limit.displayName.toLowerCase() }}</h2>
+        <p class="modal-sub">Now <span class="amount">{{ formatMoney(limit.currentAmount) }}</span></p>
+      </div>
+      <button class="icon-button" type="button" aria-label="Close limit editor" title="Close" [disabled]="editState() === 'pending'" (click)="closeEditor()">
+        <lucide-icon name="x" [size]="20" />
+      </button>
+    </header>
+
+    <div class="modal-content">
+      <div class="selected-amount">
+        <span>New limit</span>
+        <strong>{{ editorValue(limit) }}</strong>
+      </div>
+
+      <input
+        class="limit-slider"
+        type="range"
+        aria-label="New limit amount"
+        [min]="limit.minimumAmount.amount"
+        [max]="limit.maximumAmount.amount"
+        [step]="limit.stepAmount.amount"
+        [value]="amountControl.value"
+        (input)="onSliderInput($event)"
+      />
+      <div class="range-labels">
+        <span>{{ formatMoney(limit.minimumAmount) }}</span>
+        <span>{{ formatMoney(limit.maximumAmount) }}</span>
+      </div>
+
+      <label class="amount-field">
+        <span>Amount</span>
+        <span class="input-wrap">
+          <b>&euro;</b>
+          <input
+            type="number"
+            inputmode="decimal"
+            [min]="limit.minimumAmount.amount"
+            [max]="limit.maximumAmount.amount"
+            [step]="limit.stepAmount.amount"
+            [formControl]="amountControl"
+            [attr.aria-invalid]="amountControl.invalid && amountControl.touched"
+          />
+        </span>
+      </label>
+      @if (controlError(limit); as error) {
+        <span class="field-error" role="alert">{{ error }}</span>
+      }
+      @if (limit.agreedMaximum && needsApproval(limit) && editState() === 'idle') {
+        <div class="approval-note">
+          <lucide-icon name="clock" [size]="18" />
+          <span>Above <span class="amount">{{ formatMoney(limit.agreedMaximum) }}</span> the account holder has to approve the change.</span>
+        </div>
+      }
+
+      <div class="exposure-note">
+        <span>
+          <strong><span class="amount">{{ formatMoney(limit.currentExposure) }}</span> already spent or held</strong>
+          <small>A daily or monthly limit can't go below what is already spent or held.</small>
+        </span>
+      </div>
+
+      @if (editState() !== 'idle' && editState() !== 'pending') {
+        <div class="edit-result" [class]="'edit-result ' + editState()" role="status">
+          <lucide-icon [name]="editState() === 'applied' ? 'check' : editState() === 'held' ? 'clock' : 'alert-circle'" [size]="18" />
+          <span>{{ editMessage() }}</span>
+        </div>
+      }
+    </div>
+
+    <footer class="modal-actions">
+      @if (editState() === 'applied' || editState() === 'held') {
+        <button class="button" type="button" (click)="closeEditor()">Done</button>
+      } @else {
+        <button class="button secondary" type="button" [disabled]="editState() === 'pending'" (click)="closeEditor()">Cancel</button>
+        <button class="button" type="button" [disabled]="editState() === 'pending' || amountControl.invalid" (click)="save()">
+          @if (editState() === 'pending') {
+            <lucide-icon class="spinning" name="refresh-cw" [size]="16" />
+            Applying
+          } @else if (needsApproval(limit)) {
+            Ask for approval
+          } @else {
+            Save limit
+          }
+        </button>
+      }
+    </footer>
+  </section>
+}

@@ -1,0 +1,31 @@
+@if (payments.length === 0) {
+  <div class="empty-state panel">
+    <lucide-icon name="activity" [size]="25" />
+    <strong>No activity yet</strong>
+    <span>Payments from Payment Lab appear here as they happen.</span>
+  </div>
+} @else {
+  <div class="payment-list" [class.compact]="compact">
+    @for (payment of payments; track payment.externalPaymentId) {
+      <a
+        class="payment-row"
+        routerLink="/activity"
+        [queryParams]="{ payment: payment.externalPaymentId }"
+      >
+        <span class="category-icon" [attr.data-category]="payment.category">
+          <lucide-icon [name]="categoryIcon(payment.category)" [size]="18" />
+        </span>
+        <span class="payment-copy">
+          <strong>{{ payment.description }}</strong>
+          <small>{{ operationLabel(payment.operation) }} · {{ formatDateTime(payment.createdAt) }}</small>
+        </span>
+        <span class="payment-state">
+          <strong class="amount" [class.struck]="isStruck(payment.displayStatus)">−{{ formatMoney(payment.amount) }}</strong>
+          <span class="status-pill" [class]="'status-pill ' + payment.displayStatus.toLowerCase().replaceAll('_', '-')">
+            {{ statusLabel(payment.displayStatus) }}
+          </span>
+        </span>
+      </a>
+    }
+  </div>
+}

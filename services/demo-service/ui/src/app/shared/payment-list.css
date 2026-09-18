@@ -1,0 +1,85 @@
+:host {
+  display: block;
+}
+
+.payment-list {
+  display: grid;
+  gap: 10px;
+}
+
+.payment-row {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 20px;
+  color: var(--text);
+  text-decoration: none;
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.payment-row:hover {
+  box-shadow: 0 2px 8px rgb(20 20 30 / 9%);
+}
+
+.category-icon {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 50%;
+}
+
+.payment-copy {
+  display: grid;
+  min-width: 0;
+}
+
+.payment-copy strong {
+  overflow: hidden;
+  font-size: 16px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.payment-copy small {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.payment-state {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+}
+
+.payment-state strong {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+/* Declined, released and reversed payments never left the account. */
+.payment-state .struck {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.compact .payment-row {
+  padding: 14px 18px;
+}
+
+@media (max-width: 600px) {
+  .payment-row {
+    gap: 12px;
+    padding: 14px 16px;
+  }
+
+  .payment-copy strong {
+    white-space: normal;
+  }
+}

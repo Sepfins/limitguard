@@ -1,0 +1,395 @@
+:host {
+  display: block;
+}
+
+.limits {
+  display: grid;
+  gap: 12px;
+}
+
+.limit {
+  display: grid;
+  gap: 14px;
+  padding: 20px 22px;
+}
+
+.limit.skeleton {
+  height: 170px;
+}
+
+.limit header {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+}
+
+.limit-icon {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 50%;
+}
+
+.limit-heading {
+  display: grid;
+  min-width: 0;
+}
+
+.limit-heading h2 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.limit-heading small {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.button.compact {
+  min-height: 34px;
+  padding: 0 16px;
+  font-size: 14px;
+}
+
+.available {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin: 2px 0 0;
+}
+
+.available > .amount {
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+}
+
+.available small {
+  color: var(--muted);
+  font-size: 15px;
+}
+
+app-limit-bar {
+  --bar-height: 10px;
+}
+
+.legend {
+  display: flex;
+  gap: 28px;
+  margin: 0;
+  font-size: 14px;
+}
+
+.legend div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.legend dt {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+}
+
+.legend dd {
+  margin: 0;
+  font-weight: 600;
+}
+
+.swatch {
+  width: 14px;
+  height: 10px;
+  border-radius: 3px;
+}
+
+.swatch.spent {
+  background: var(--accent);
+}
+
+.swatch.held {
+  background: repeating-linear-gradient(135deg, var(--accent) 0 3px, transparent 3px 7px);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.note {
+  max-width: 62ch;
+  margin: 22px 0 6px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.credit {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* The editor slides in as a sheet: from the right on desktop, from the bottom on a phone. */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  width: 100%;
+  background: rgb(20 20 30 / 32%);
+  border: 0;
+  animation: fade-in 200ms ease-out;
+}
+
+.limit-modal {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 41;
+  width: min(440px, 100vw);
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  box-shadow: -12px 0 40px rgb(20 20 30 / 14%);
+  animation: sheet-in 320ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 28px 28px 8px;
+}
+
+.modal-header h2 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+
+.modal-sub {
+  margin: 4px 0 0;
+  color: var(--muted);
+}
+
+.modal-content {
+  flex: 1;
+  display: grid;
+  align-content: start;
+  gap: 18px;
+  padding: 20px 28px;
+  overflow-y: auto;
+}
+
+.selected-amount {
+  display: grid;
+  gap: 2px;
+}
+
+.selected-amount span {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.selected-amount strong {
+  font-size: 40px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+
+.limit-slider {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.range-labels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: -10px;
+  color: var(--muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.amount-field {
+  display: grid;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 46px;
+  padding: 0 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+}
+
+.input-wrap:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.input-wrap b {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.input-wrap input {
+  width: 100%;
+  font-size: 17px;
+  font-variant-numeric: tabular-nums;
+  background: none;
+  border: 0;
+  outline: 0;
+}
+
+.field-error {
+  margin-top: -10px;
+  color: var(--red);
+  font-size: 13px;
+}
+
+.exposure-note {
+  padding: 14px 16px;
+  background: var(--canvas);
+  border-radius: var(--radius-control);
+  font-size: 14px;
+}
+
+.exposure-note > span {
+  display: grid;
+  gap: 2px;
+}
+
+.exposure-note strong {
+  font-weight: 600;
+}
+
+.exposure-note small {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.edit-result {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: var(--radius-control);
+  font-size: 14px;
+}
+
+.edit-result.applied {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.edit-result.held {
+  color: var(--amber);
+  background: var(--amber-soft);
+}
+
+.pending-change,
+.approval-note {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  color: var(--amber);
+  background: var(--amber-soft);
+  border-radius: var(--radius-control);
+  font-size: 14px;
+}
+
+.pending-change > span {
+  flex: 1;
+  display: grid;
+  gap: 2px;
+}
+
+.pending-change strong {
+  font-weight: 600;
+}
+
+.pending-change small {
+  font-size: 13px;
+}
+
+.edit-result.rejected,
+.edit-result.conflict {
+  color: var(--red);
+  background: var(--red-soft);
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 18px 28px 24px;
+  border-top: 1px solid var(--border);
+}
+
+.spinning {
+  animation: spin 800ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes sheet-in {
+  from {
+    transform: translateX(40px);
+    opacity: 0;
+  }
+}
+
+@media (max-width: 600px) {
+  .limit {
+    padding: 16px;
+  }
+
+  .available > .amount {
+    font-size: 28px;
+  }
+
+  .limit-modal {
+    top: auto;
+    width: 100%;
+    max-height: 90vh;
+    border-radius: 20px 20px 0 0;
+    animation-name: sheet-up;
+  }
+
+  .modal-header,
+  .modal-content,
+  .modal-actions {
+    padding-right: 20px;
+    padding-left: 20px;
+  }
+
+  @keyframes sheet-up {
+    from {
+      transform: translateY(40px);
+      opacity: 0;
+    }
+  }
+}

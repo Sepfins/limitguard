@@ -1,0 +1,138 @@
+:host {
+  display: block;
+}
+
+.visibility-button {
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.account-list {
+  display: grid;
+  gap: 18px;
+}
+
+.account-detail {
+  min-height: 290px;
+  overflow: hidden;
+}
+
+.account-header {
+  min-height: 96px;
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.account-mark {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 50%;
+}
+
+.account-name {
+  min-width: 0;
+  display: grid;
+}
+
+.account-name strong {
+  margin-top: 2px;
+  overflow: hidden;
+  font-size: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-name small,
+.account-type {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.account-name small {
+  margin-top: 4px;
+}
+
+.account-type {
+  font-weight: 700;
+}
+
+.access-label {
+  padding: 5px 7px;
+  color: var(--muted);
+  background: none;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.balance-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  background: var(--canvas);
+  border-bottom: 1px solid var(--border);
+}
+
+.balance-row > span {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  padding: 17px 20px;
+}
+
+.balance-row > span + span {
+  border-left: 1px solid var(--border);
+}
+
+.balance-row small {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.balance-row strong {
+  overflow-wrap: anywhere;
+  font-size: 19px;
+}
+
+.account-activity h2 {
+  margin: 0;
+  padding: 16px 20px 7px;
+  font-size: 13px;
+}
+
+@media (max-width: 560px) {
+  .account-header {
+    grid-template-columns: 42px minmax(0, 1fr);
+    padding: 15px 14px;
+  }
+
+  .account-mark {
+    width: 40px;
+    height: 40px;
+  }
+
+  .access-label {
+    width: fit-content;
+    grid-column: 2;
+  }
+
+  .balance-row {
+    grid-template-columns: 1fr;
+  }
+
+  .balance-row > span {
+    padding: 14px;
+  }
+
+  .balance-row > span + span {
+    border-top: 1px solid var(--border);
+    border-left: 0;
+  }
+}
