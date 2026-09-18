@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./out-tsc/payment-app",
+    "types": []
+  },
+  "files": ["src/payment-main.ts"],
+  "include": ["src/**/*.d.ts"]
+}

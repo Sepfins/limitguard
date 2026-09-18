@@ -1,0 +1,162 @@
+@baseUrl = http://localhost:8081/limitguard/demo/api/v1
+
+### Discover the checked-in scenario's public identifiers
+GET {{baseUrl}}/scenario
+
+> {%
+  client.global.set("currentAccountId", response.body.accountIds[0]);
+  client.global.set("cardId", response.body.cardIds[0]);
+%}
+
+### Discover editable limit identifiers
+GET {{baseUrl}}/customer/limits
+
+> {%
+  const transferPerTransaction = response.body.find(
+    limit => limit.operation === "BANK_TRANSFER" && limit.limitKind === "PER_TRANSACTION"
+  );
+  client.global.set("transferPerTransactionLimitId", transferPerTransaction.id);
+%}
+
+### Card purchase authorization
+POST {{baseUrl}}/integrations/payment-authorizations
+Content-Type: application/json
+Idempotency-Key: http-card-auth-001
+
+{
+  "externalPaymentId": "http-card-001",
+  "operation": "CARD_PURCHASE",
+  "accountId": "{{currentAccountId}}",
+  "cardId": "{{cardId}}",
+  "amount": "85.40",
+  "currency": "EUR",
+  "description": "Corner Grocer",
+  "category": "GROCERIES"
+}
+
+### Capture the card purchase
+POST {{baseUrl}}/integrations/payments/http-card-001/captures
+Content-Type: application/json
+Idempotency-Key: http-card-capture-001
+
+{
+  "amount": "85.40",
+  "reason": "Clearing completed"
+}
+
+### Reverse the captured card purchase
+POST {{baseUrl}}/integrations/payments/http-card-001/reversals
+Content-Type: application/json
+Idempotency-Key: http-card-reversal-001
+
+{
+  "amount": "85.40",
+  "reason": "Merchant refund"
+}
+
+### Reserve most of the daily ATM limit
+POST {{baseUrl}}/integrations/payment-authorizations
+Content-Type: application/json
+Idempotency-Key: http-atm-auth-001
+
+{
+  "externalPaymentId": "http-atm-001",
+  "operation": "ATM_WITHDRAWAL",
+  "accountId": "{{currentAccountId}}",
+  "cardId": "{{cardId}}",
+  "amount": "400.00",
+  "currency": "EUR",
+  "description": "ATM authorization",
+  "category": "CASH"
+}
+
+### A further 150 EUR is a 200 response with decision DENIED
+POST {{baseUrl}}/integrations/payment-authorizations
+Content-Type: application/json
+Idempotency-Key: http-atm-denial-001
+
+{
+  "externalPaymentId": "http-atm-denied-001",
+  "operation": "ATM_WITHDRAWAL",
+  "accountId": "{{currentAccountId}}",
+  "cardId": "{{cardId}}",
+  "amount": "150.00",
+  "currency": "EUR",
+  "description": "ATM cumulative denial",
+  "category": "CASH"
+}
+
+### Release the ATM hold
+POST {{baseUrl}}/integrations/payments/http-atm-001/releases
+Content-Type: application/json
+Idempotency-Key: http-atm-release-001
+
+{
+  "amount": "400.00",
+  "reason": "Cash not dispensed"
+}
+
+### Transfer above the initial per-transaction cap is denied
+POST {{baseUrl}}/integrations/payment-authorizations
+Content-Type: application/json
+Idempotency-Key: http-transfer-denial-001
+
+{
+  "externalPaymentId": "http-transfer-denied-001",
+  "operation": "BANK_TRANSFER",
+  "accountId": "{{currentAccountId}}",
+  "amount": "2600.00",
+  "currency": "EUR",
+  "description": "Transfer above per-transaction cap",
+  "category": "TRANSFER"
+}
+
+### Raise the per-transaction transfer limit through the customer API
+PATCH {{baseUrl}}/customer/limits/{{transferPerTransactionLimitId}}
+Content-Type: application/json
+Idempotency-Key: http-transfer-limit-001
+
+{
+  "amount": "3000.00"
+}
+
+### The same transfer amount now succeeds under the new rule version
+POST {{baseUrl}}/integrations/payment-authorizations
+Content-Type: application/json
+Idempotency-Key: http-transfer-auth-001
+
+{
+  "externalPaymentId": "http-transfer-001",
+  "operation": "BANK_TRANSFER",
+  "accountId": "{{currentAccountId}}",
+  "amount": "2600.00",
+  "currency": "EUR",
+  "description": "Household transfer",
+  "category": "TRANSFER"
+}
+
+### Capture the transfer
+POST {{baseUrl}}/integrations/payments/http-transfer-001/captures
+Content-Type: application/json
+Idempotency-Key: http-transfer-capture-001
+
+{
+  "amount": "2600.00",
+  "reason": "Transfer settled"
+}
+
+### Reverse the transfer and restore booked balance and capacity
+POST {{baseUrl}}/integrations/payments/http-transfer-001/reversals
+Content-Type: application/json
+Idempotency-Key: http-transfer-reversal-001
+
+{
+  "amount": "2600.00",
+  "reason": "Transfer returned"
+}
+
+### Inspect live activity and balances
+GET {{baseUrl}}/customer/overview
+
+###
+GET {{baseUrl}}/customer/payments

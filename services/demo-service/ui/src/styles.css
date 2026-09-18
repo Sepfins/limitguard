@@ -1,4 +1,5 @@
-/* Wrenfield: a neutral grey canvas, white rounded rows and one ink-navy accent. */
+/* Wrenfield is a neutral grey canvas with white rounded rows and one ink-navy accent.
+   Payment Lab sets class="tool" on its body and swaps the accent for graphite. */
 :root {
   color-scheme: light;
   --canvas: #f5f5f7;
@@ -22,6 +23,17 @@
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, Roboto, "Helvetica Neue", sans-serif;
   font-synthesis: none;
   line-height: 1.45;
+}
+
+.tool {
+  --canvas: #f4f4f5;
+  --surface-soft: #ececee;
+  --accent: #2b2d33;
+  --accent-strong: #121316;
+  --accent-soft: #e9e9ec;
+  --radius: 8px;
+  --radius-control: 6px;
+  --shadow: none;
 }
 
 * {

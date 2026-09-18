@@ -1,0 +1,437 @@
+<div class="payment-lab">
+  <header class="lab-header">
+    <a class="lab-brand" routerLink="/">
+      <span>
+        <strong>Payment Lab</strong>
+        <small>Simulated card processor</small>
+      </span>
+    </a>
+    <div class="lab-header-actions">
+      <span class="integration-badge">
+        <span class="live-dot"></span>
+        <span class="desktop-integration-label">External integration</span>
+        <span class="mobile-integration-label">API</span>
+      </span>
+      <a class="back-link" href="/limitguard/demo/" target="_blank" rel="noopener">Open {{ bankName }}</a>
+    </div>
+  </header>
+
+  <main class="lab-content">
+    <section class="lab-intro" aria-labelledby="lab-title">
+      <div>
+        <h1 id="lab-title">Send a payment to {{ bankName }}</h1>
+        <p>This page plays the card processor. It calls the bank's integration API, and LimitGuard decides whether the payment fits the customer's limits.</p>
+      </div>
+      @if (store.scenario(); as scenario) {
+      <div class="scenario-summary">
+        <span>Scenario</span>
+        <strong>{{ scenario.scenarioKey }}</strong>
+        <small>{{ scenario.customer.displayName }}</small>
+      </div>
+      }
+    </section>
+
+    @if (store.loading()) {
+    <div class="lab-loading" aria-label="Loading payment scenario">
+      <div class="panel skeleton loading-form"></div>
+      <div class="loading-side">
+        <div class="panel skeleton"></div>
+        <div class="panel skeleton"></div>
+      </div>
+    </div>
+    } @else if (store.error()) {
+    <section class="panel error-state" role="alert">
+      <lucide-icon name="alert-circle" [size]="28" />
+      <strong>Payment scenario unavailable</strong>
+      <span>{{ store.error() }}</span>
+      <button class="button secondary" type="button" (click)="store.load()">Try again</button>
+    </section>
+    } @else {
+    <div class="lab-grid">
+      <form class="panel simulator-form" (submit)="onSubmit($event)" aria-labelledby="request-heading">
+        <header class="form-header">
+          <div>
+            <h2 id="request-heading">Create authorization</h2>
+          </div>
+          <button class="text-button" type="button" [disabled]="store.authorizing()" (click)="newPayment()">
+            New payment
+          </button>
+        </header>
+
+        <fieldset class="field-group operation-fieldset">
+          <legend>Operation</legend>
+          <div class="operation-options" role="group" aria-label="Payment operation">
+            @for (option of operationOptions; track option.value) {
+            <button
+              class="operation-option"
+              type="button"
+              [class.active]="operation() === option.value"
+              [attr.aria-pressed]="operation() === option.value"
+              [disabled]="requestLocked()"
+              (click)="selectOperation(option.value)"
+            >
+              <lucide-icon [name]="option.icon" [size]="18" />
+              <span><strong>{{ option.label }}</strong><small>{{ option.hint }}</small></span>
+            </button>
+            }
+          </div>
+        </fieldset>
+
+        <div class="field-grid">
+          <label class="field-group">
+            <span>Funding account</span>
+            <select id="funding-account" [formControl]="accountControl" (change)="onAccountChange()">
+              <option value="" disabled>Select account</option>
+              @for (account of store.accounts(); track account.id) {
+              <option [value]="account.id" [disabled]="account.accountType !== 'CURRENT'">
+                {{ accountLabel(account) }}
+              </option>
+              }
+            </select>
+          </label>
+
+          @if (requiresCard()) {
+          <label class="field-group">
+            <span>Card</span>
+            <select id="payment-card" [formControl]="cardControl">
+              <option value="" disabled>Select card</option>
+              @for (card of accountCards(); track card.id) {
+              <option [value]="card.id">{{ card.displayName }} · •••• {{ card.lastFour }}</option>
+              }
+            </select>
+          </label>
+          }
+        </div>
+
+        @if (selectedAccount()?.accountType !== 'CURRENT' && selectedAccount()) {
+        <div class="inline-error" role="alert">
+          <lucide-icon name="alert-circle" [size]="15" />
+          Payments are enabled for the household current account only.
+        </div>
+        }
+
+        <div class="field-grid amount-row">
+          <label class="field-group amount-field">
+            <span>Amount</span>
+            <span class="money-input">
+              <b>€</b>
+              <input
+                id="payment-amount"
+                type="text"
+                inputmode="decimal"
+                placeholder="0.00"
+                autocomplete="off"
+                [formControl]="amountControl"
+                [attr.aria-invalid]="amountControl.invalid && amountControl.touched"
+              />
+            </span>
+            @if (amountControl.invalid && amountControl.touched) {
+            <small class="field-error">Enter a positive EUR amount with up to two decimals.</small>
+            }
+          </label>
+
+          <div class="capacity-callout" aria-live="polite">
+            <span><lucide-icon name="shield-check" [size]="16" /> Current capacity</span>
+            <strong>{{ operationCapacityLabel() }}</strong>
+            @if (selectedLimit(); as limit) {
+            <small
+              >{{ limit.displayName }} · {{ limit.limitKind === 'PER_TRANSACTION' ? 'Per payment' : 'Resets daily'
+              }}</small
+            >
+            }
+          </div>
+        </div>
+
+        <label class="field-group">
+          <span>Description</span>
+          <input
+            id="payment-description"
+            type="text"
+            autocomplete="off"
+            [formControl]="descriptionControl"
+            maxlength="160"
+          />
+          @if (descriptionControl.invalid && descriptionControl.touched) {
+          <small class="field-error">Add a short description.</small>
+          }
+        </label>
+
+        <div class="field-grid">
+          <label class="field-group">
+            <span>Category</span>
+            <select id="payment-category" [formControl]="categoryControl">
+              @for (category of categories; track category.value) {
+              <option [value]="category.value">{{ category.label }}</option>
+              }
+            </select>
+          </label>
+          <label class="field-group">
+            <span>External reference</span>
+            <input
+              id="external-payment-id"
+              type="text"
+              autocomplete="off"
+              [formControl]="externalPaymentIdControl"
+              maxlength="100"
+            />
+            <small class="field-hint">Stable payment reference</small>
+          </label>
+        </div>
+
+        <footer class="form-footer">
+          <span class="form-note"><lucide-icon name="shield-check" [size]="15" /> EUR · LimitGuard decision</span>
+          <button class="button" type="submit" [disabled]="!canSubmit() || store.authorizing() || requestLocked()">
+            @if (store.authorizing()) {
+            <lucide-icon class="spinning" name="refresh-cw" [size]="16" />
+            Checking } @else {
+            <lucide-icon name="send" [size]="16" />
+            Authorize payment }
+          </button>
+        </footer>
+      </form>
+
+      <aside class="lab-side">
+        <section class="panel capacity-panel" aria-labelledby="capacity-heading">
+          <header>
+            <div>
+              <h2 id="capacity-heading">Limit check</h2>
+            </div>
+            @if (store.refreshing()) {
+            <lucide-icon class="spinning muted-icon" name="refresh-cw" [size]="16" />
+            }
+          </header>
+
+          @if (selectedLimit(); as limit) {
+          <div class="capacity-amount">
+            <span>Available now</span>
+            <strong>{{ formatMoney(limit.availableAmount) }}</strong>
+          </div>
+          <div class="capacity-meter" aria-hidden="true">
+            <span [style.width.%]="utilization()"></span>
+          </div>
+          <dl class="capacity-stats">
+            <div>
+              <dt>Current cap</dt>
+              <dd>{{ formatMoney(limit.currentAmount) }}</dd>
+            </div>
+            <div>
+              <dt>Consumed</dt>
+              <dd>{{ formatMoney(limit.consumedAmount) }}</dd>
+            </div>
+            <div>
+              <dt>Reserved</dt>
+              <dd>{{ formatMoney(limit.reservedAmount) }}</dd>
+            </div>
+            <div>
+              <dt>Reset</dt>
+              <dd>{{ limit.resetsAt ? formatDateTime(limit.resetsAt) : 'Per payment' }}</dd>
+            </div>
+          </dl>
+          } @else {
+          <div class="empty-capacity">
+            <lucide-icon name="shield-check" [size]="22" /><span>No limit found for this operation.</span>
+          </div>
+          }
+        </section>
+
+        <section class="panel result-panel" aria-labelledby="result-heading" aria-live="polite">
+          <header>
+            <div>
+              <h2 id="result-heading">Integration response</h2>
+            </div>
+            @if (store.authorization(); as authorization) {
+            <span
+              class="status-pill"
+              [class.success]="authorization.decision === 'ALLOWED'"
+              [class.declined]="authorization.decision === 'DENIED'"
+            >
+              {{ authorization.decision === 'ALLOWED' ? 'Allowed' : 'Declined' }}
+            </span>
+            }
+          </header>
+
+          @if (store.resultError(); as resultError) {
+          <div class="result-error" role="alert">
+            <lucide-icon name="alert-circle" [size]="18" />
+            <span>{{ resultError }}</span>
+            <button class="text-button" type="button" (click)="retryAuthorization()">Retry</button>
+          </div>
+          } @else if (store.authorization(); as authorization) {
+          <div
+            class="result-summary"
+            [class.allowed]="authorization.decision === 'ALLOWED'"
+            [class.denied]="authorization.decision === 'DENIED'"
+          >
+            <div class="result-icon">
+              <lucide-icon [name]="authorization.decision === 'ALLOWED' ? 'check' : 'x'" [size]="22" />
+            </div>
+            <div>
+              <strong
+                >{{ authorization.decision === 'ALLOWED' ? 'Authorization approved' : 'Authorization declined'
+                }}</strong
+              >
+              <span>{{ formatMoney(authorization.amount) }} · {{ operationLabel(operation()) }}</span>
+            </div>
+          </div>
+
+          @if (authorization.replayed) {
+          <div class="replay-note"><lucide-icon name="refresh-cw" [size]="14" /> Stored result replayed safely.</div>
+          } @if (authorization.violations.length > 0) {
+          <div class="violation-list">
+            <h3>Decision details</h3>
+            @for (violation of authorization.violations; track violation.code) {
+            <div class="violation-item">
+              <lucide-icon name="alert-circle" [size]="16" />
+              <span
+                ><strong>{{ violation.message }}</strong
+                ><small
+                  >Attempted {{ formatMoney(violation.attemptedAmount) }}@if (violation.remainingAmount) { · {{
+                  formatMoney(violation.remainingAmount) }} remaining }</small
+                ></span
+              >
+            </div>
+            }
+          </div>
+          } @if (authorization.decision === 'ALLOWED') {
+          <div class="lifecycle">
+            <div class="lifecycle-heading">
+              <h3>Transaction lifecycle</h3>
+              <span class="status-pill" [class]="'status-pill ' + statusClass(lifecycleStatus())"
+                >{{ statusLabel(lifecycleStatus()) }}</span
+              >
+            </div>
+            <div class="lifecycle-track">
+              <span class="lifecycle-step done"><span>1</span>Authorized</span>
+              <span class="track-line"></span>
+              @if (lifecycleStatus() === 'VOIDED') {
+              <span class="lifecycle-step done"><span>2</span>Released</span>
+              } @else {
+              <span
+                class="lifecycle-step"
+                [class.done]="lifecycleStatus() === 'CAPTURED' || lifecycleStatus() === 'REVERSED'"
+                ><span>2</span>Captured</span
+              >
+              <span class="track-line"></span>
+              <span class="lifecycle-step" [class.done]="lifecycleStatus() === 'REVERSED'"><span>3</span>Reversed</span>
+              }
+            </div>
+            @if (store.mutation(); as mutation) {
+            <div class="mutation-summary">
+              <span>Latest {{ statusLabel(mutation.transactionStatus).toLowerCase() }}</span>
+              <strong>{{ formatMoney(mutation.mutationAmount) }}</strong>
+              @if (mutation.replayed) { <small>Replay</small> }
+            </div>
+            }
+            <div class="lifecycle-actions">
+              @if (canCapture()) {
+              <button
+                class="button"
+                type="button"
+                [disabled]="store.activeAction() !== null"
+                (click)="runMutation('capture')"
+              >
+                @if (store.activeAction() === 'capture') {
+                <lucide-icon class="spinning" name="refresh-cw" [size]="15" />
+                } @else {
+                <lucide-icon name="check" [size]="15" />
+                } Capture
+              </button>
+              } @if (canRelease()) {
+              <button
+                class="button secondary"
+                type="button"
+                [disabled]="store.activeAction() !== null"
+                (click)="runMutation('release')"
+              >
+                @if (store.activeAction() === 'release') {
+                <lucide-icon class="spinning" name="refresh-cw" [size]="15" />
+                } @else {
+                <lucide-icon name="x" [size]="15" />
+                } Release
+              </button>
+              } @if (canReverse()) {
+              <button
+                class="button secondary"
+                type="button"
+                [disabled]="store.activeAction() !== null"
+                (click)="runMutation('reverse')"
+              >
+                <lucide-icon name="refresh-cw" [size]="15" [class.spinning]="store.activeAction() === 'reverse'" />
+                Reverse
+              </button>
+              }
+            </div>
+          </div>
+          } @if (paymentSettled()) {
+          <button class="button next-payment" type="button" (click)="newPayment()">
+            <lucide-icon name="send" [size]="15" /> New payment
+          </button>
+          } } @else {
+          <div class="empty-result">
+            <span class="empty-result-icon"><lucide-icon name="shield-check" [size]="24" /></span>
+            <strong>No authorization yet</strong>
+          </div>
+          }
+        </section>
+
+        <section class="panel approval-panel" aria-labelledby="approval-heading">
+          <header>
+            <div>
+              <h2 id="approval-heading">Account holder</h2>
+              <small>Limit changes waiting for Daniel Clarke</small>
+            </div>
+            <button
+              class="icon-button"
+              type="button"
+              aria-label="Check for limit changes"
+              title="Check for limit changes"
+              [disabled]="store.refreshing()"
+              (click)="store.refreshCapacity()"
+            >
+              <lucide-icon name="refresh-cw" [size]="16" [class.spinning]="store.refreshing()" />
+            </button>
+          </header>
+
+          @if (store.decisionError(); as decisionError) {
+          <div class="result-error" role="alert">
+            <lucide-icon name="alert-circle" [size]="18" />
+            <span>{{ decisionError }}</span>
+          </div>
+          } @for (limit of store.heldLimits(); track limit.id) { @if (limit.pendingChange; as pending) {
+          <div class="held-change">
+            <span>
+              <strong>{{ limit.displayName }}</strong>
+              <small>{{ formatMoney(pending.requestedAmount) }} asked · now {{ formatMoney(limit.currentAmount) }}</small>
+            </span>
+            <div class="held-change-actions">
+              <button
+                class="button secondary"
+                type="button"
+                [disabled]="store.decidingChange() !== null"
+                (click)="store.decideLimitChange(pending.id, 'reject')"
+              >
+                <lucide-icon name="x" [size]="15" /> Reject
+              </button>
+              <button
+                class="button"
+                type="button"
+                [disabled]="store.decidingChange() !== null"
+                (click)="store.decideLimitChange(pending.id, 'approve')"
+              >
+                @if (store.decidingChange() === pending.id) {
+                <lucide-icon class="spinning" name="refresh-cw" [size]="15" />
+                } @else {
+                <lucide-icon name="check" [size]="15" />
+                } Approve
+              </button>
+            </div>
+          </div>
+          } } @empty {
+          <div class="empty-approvals">Nothing waits for approval.</div>
+          }
+        </section>
+      </aside>
+    </div>
+    }
+  </main>
+</div>
