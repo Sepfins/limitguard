@@ -1,0 +1,51 @@
+spring:
+  application:
+    name: limitguard-admin
+  datasource:
+    url: ${LIMITGUARD_DB_URL:jdbc:postgresql://localhost:5432/limitguard}
+    username: ${POSTGRES_USER:limitguard}
+    password: ${POSTGRES_PASSWORD:limitguard}
+  flyway:
+    locations: classpath:db/limitguard/migration
+  security:
+    oauth2:
+      client:
+        registration:
+          keycloak:
+            provider: keycloak
+            client-id: ${LIMITGUARD_ADMIN_CLIENT_ID:limitguard-admin}
+            client-secret: ${LIMITGUARD_ADMIN_CLIENT_SECRET:limitguard-admin-local-secret}
+            authorization-grant-type: authorization_code
+            scope: openid,profile,email
+        provider:
+          keycloak:
+            issuer-uri: ${LIMITGUARD_OIDC_ISSUER:http://localhost:8180/realms/limitguard}
+  web:
+    resources:
+      cache:
+        cachecontrol:
+          no-cache: true
+
+server:
+  port: ${LIMITGUARD_ADMIN_PORT:8080}
+  servlet:
+    session:
+      timeout: 30m
+      cookie:
+        http-only: true
+        same-site: lax
+        secure: ${LIMITGUARD_SESSION_SECURE:false}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+limitguard:
+  admin:
+    tenant-claim: ${LIMITGUARD_TENANT_CLAIM:limitguard_tenant_ids}

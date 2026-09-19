@@ -1,0 +1,5 @@
+.gradle/
+build/
+ui/.angular/
+ui/dist/
+ui/node_modules/
