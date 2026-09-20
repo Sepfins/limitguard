@@ -1,0 +1,22 @@
+<header class="topbar">
+  <a class="brand" routerLink="/tenants" aria-label="LimitGuard Admin, all tenants">
+    LimitGuard <span>Admin</span>
+  </a>
+  <span class="environment">Local environment</span>
+
+  <form class="account" method="post" [attr.action]="auth.user()?.logoutUrl">
+    <input type="hidden" [attr.name]="auth.user()?.csrfParameterName" [value]="auth.user()?.csrfToken" />
+    <div class="account-copy">
+      <strong>{{ auth.user()?.displayName }}</strong>
+      <span>{{ roleLabel() }}</span>
+    </div>
+    <button class="button secondary compact" type="submit" title="Sign out">
+      <lucide-icon name="log-out" [size]="15" />
+      <span class="logout-label">Sign out</span>
+    </button>
+  </form>
+</header>
+
+<main class="content" tabindex="-1">
+  <router-outlet />
+</main>

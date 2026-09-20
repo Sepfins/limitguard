@@ -1,0 +1,80 @@
+:host {
+  display: block;
+  min-height: 100vh;
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 24px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.brand {
+  color: var(--ink);
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  text-decoration: none;
+}
+
+.brand span {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.environment {
+  padding-left: 16px;
+  color: var(--text-muted);
+  font-size: 12px;
+  border-left: 1px solid var(--border);
+}
+
+.account {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.account-copy {
+  display: grid;
+  text-align: right;
+}
+
+.account-copy strong {
+  max-width: 240px;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-copy span {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.content {
+  min-width: 0;
+  outline: 0;
+}
+
+@media (max-width: 760px) {
+  .topbar {
+    padding: 0 16px;
+  }
+
+  .environment,
+  .account-copy,
+  .logout-label {
+    display: none;
+  }
+}
