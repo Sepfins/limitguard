@@ -1,0 +1,155 @@
+{
+  "realm": "limitguard",
+  "displayName": "LimitGuard Local",
+  "enabled": true,
+  "registrationAllowed": false,
+  "resetPasswordAllowed": false,
+  "rememberMe": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "roles": {
+    "realm": [
+      {
+        "name": "PLATFORM_ADMIN",
+        "description": "Creates tenants and administers all tenant catalogs"
+      },
+      {
+        "name": "TENANT_ADMIN",
+        "description": "Administers the catalogs of assigned tenants"
+      },
+      {
+        "name": "VIEWER",
+        "description": "Reads the catalogs of assigned tenants"
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "limitguard-admin",
+      "name": "LimitGuard Admin",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${LIMITGUARD_ADMIN_CLIENT_SECRET}",
+      "publicClient": false,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "frontchannelLogout": true,
+      "redirectUris": [
+        "http://localhost:8080/login/oauth2/code/keycloak"
+      ],
+      "webOrigins": [
+        "http://localhost:8080"
+      ],
+      "attributes": {
+        "post.logout.redirect.uris": "http://localhost:8080/limitguard/admin/*"
+      },
+      "defaultClientScopes": [
+        "web-origins",
+        "acr",
+        "roles",
+        "profile",
+        "basic",
+        "email"
+      ],
+      "protocolMappers": [
+        {
+          "name": "LimitGuard realm roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "realm_access.roles",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        },
+        {
+          "name": "LimitGuard tenant memberships",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "limitguard_tenant_ids",
+            "claim.name": "limitguard_tenant_ids",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "platform-admin",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Platform",
+      "lastName": "Administrator",
+      "email": "platform-admin@limitguard.local",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${LIMITGUARD_ADMIN_DEV_PASSWORD}",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "PLATFORM_ADMIN"
+      ]
+    },
+    {
+      "username": "tenant-admin",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Tenant",
+      "lastName": "Administrator",
+      "email": "tenant-admin@limitguard.local",
+      "attributes": {
+        "limitguard_tenant_ids": [
+          "00000000-0000-0000-0000-000000000001"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${LIMITGUARD_ADMIN_DEV_PASSWORD}",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "TENANT_ADMIN"
+      ]
+    },
+    {
+      "username": "viewer",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Read-only",
+      "lastName": "Viewer",
+      "email": "viewer@limitguard.local",
+      "attributes": {
+        "limitguard_tenant_ids": [
+          "00000000-0000-0000-0000-000000000001"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${LIMITGUARD_ADMIN_DEV_PASSWORD}",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "VIEWER"
+      ]
+    }
+  ]
+}

@@ -8,11 +8,11 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-limitguard}
       POSTGRES_USER: ${POSTGRES_USER:-limitguard}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-limitguard}
-      PGDATA: /var/lib/postgresql/data
+      PGDATA: /var/lib/postgresql/18/docker
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql
     healthcheck:
       test:
         [
@@ -38,5 +38,36 @@ services:
       postgres:
         condition: service_healthy
 
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.7.0
+    restart: unless-stopped
+    profiles:
+      - identity
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-limitguard}
+      KC_HTTP_PORT: 8080
+      KC_HEALTH_ENABLED: true
+      KC_METRICS_ENABLED: true
+      LIMITGUARD_ADMIN_CLIENT_SECRET: ${LIMITGUARD_ADMIN_CLIENT_SECRET:-limitguard-admin-local-secret}
+      LIMITGUARD_ADMIN_DEV_PASSWORD: ${LIMITGUARD_ADMIN_DEV_PASSWORD:-limitguard}
+    ports:
+      - "${KEYCLOAK_PORT:-8180}:8080"
+    volumes:
+      - keycloak_data:/opt/keycloak/data
+      - ./infra/keycloak:/opt/keycloak/data/import:ro
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q '200 OK' <&3",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 35s
+
 volumes:
   postgres_data:
+  keycloak_data:
