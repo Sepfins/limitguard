@@ -1,0 +1,92 @@
+<dialog #dialog class="admin-dialog" (cancel)="$event.preventDefault(); close()">
+  <form [formGroup]="form" (ngSubmit)="submit()">
+    <header>
+      <div>
+        <h2>Create product node</h2>
+      </div>
+      <button class="icon-button" type="button" title="Close dialog" aria-label="Close dialog" (click)="close()">
+        <lucide-icon name="x" [size]="19" />
+      </button>
+    </header>
+
+    <div class="dialog-body">
+      @if (error()) {
+        <div class="inline-alert" role="alert">{{ error() }}</div>
+      }
+
+      <div class="form-grid two-columns">
+        <label class="field">
+          <span>Code</span>
+          <input formControlName="code" autocomplete="off" maxlength="100" />
+          @if (form.controls.code.touched && form.controls.code.hasError('required')) {
+            <small>A product code is required.</small>
+          }
+        </label>
+
+        <label class="field">
+          <span>Name</span>
+          <input formControlName="name" autocomplete="off" maxlength="255" />
+          @if (form.controls.name.touched && form.controls.name.hasError('required')) {
+            <small>A product name is required.</small>
+          }
+        </label>
+      </div>
+
+      <div class="form-grid two-columns">
+        <label class="field">
+          <span>Node type</span>
+          <select formControlName="nodeType">
+            @for (nodeType of nodeTypes; track nodeType) {
+              <option [value]="nodeType">{{ label(nodeType) }}</option>
+            }
+          </select>
+        </label>
+
+        <label class="field">
+          <span>Category</span>
+          <select formControlName="category">
+            @for (category of categories; track category) {
+              <option [value]="category">{{ label(category) }}</option>
+            }
+          </select>
+        </label>
+      </div>
+
+      <label class="field">
+        <span>Parent node</span>
+        <select formControlName="parentId">
+          <option value="">No parent</option>
+          @for (product of parentOptions(); track product.id) {
+            @if (!product.isLeaf) {
+              <option [value]="product.id">{{ product.code }} - {{ product.name }}</option>
+            }
+          }
+        </select>
+      </label>
+
+      <div class="toggle-group">
+        <label class="check-field">
+          <input type="checkbox" formControlName="isLeaf" />
+          <span>
+            <strong>Leaf node</strong>
+            <small>Can be assigned to a funding source</small>
+          </span>
+        </label>
+        <label class="check-field">
+          <input type="checkbox" formControlName="isActive" />
+          <span>
+            <strong>Active</strong>
+            <small>Available for new configuration</small>
+          </span>
+        </label>
+      </div>
+    </div>
+
+    <footer>
+      <button class="button secondary" type="button" (click)="close()">Cancel</button>
+      <button class="button primary" type="submit" [disabled]="submitting()">
+        {{ submitting() ? 'Creating...' : 'Create product' }}
+      </button>
+    </footer>
+  </form>
+</dialog>

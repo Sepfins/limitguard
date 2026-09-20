@@ -1,0 +1,52 @@
+:host {
+  width: min(1180px, 100%);
+  margin: 0 auto;
+  padding: 36px 40px 56px;
+}
+
+.entity-cell {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.entity-rosette {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  color: var(--ink);
+}
+
+.entity-cell strong,
+.entity-cell code {
+  display: block;
+}
+
+.entity-cell code {
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.actions-cell {
+  text-align: right;
+}
+
+@media (max-width: 680px) {
+  :host {
+    padding: 24px 16px 44px;
+  }
+
+  .actions-cell {
+    display: block;
+    padding-top: 10px;
+  }
+
+  .actions-cell::before {
+    display: none;
+  }
+
+  .actions-cell .button {
+    width: 100%;
+  }
+}

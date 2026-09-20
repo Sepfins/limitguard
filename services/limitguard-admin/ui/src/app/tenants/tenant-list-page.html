@@ -1,0 +1,109 @@
+<section class="page-heading">
+  <div>
+    <h1>Tenants</h1>
+    <p class="page-summary">{{ result().totalElements }} registered {{ result().totalElements === 1 ? 'tenant' : 'tenants' }}</p>
+  </div>
+  @if (auth.isPlatformAdmin()) {
+    <button class="button primary" type="button" (click)="openCreateDialog()">
+      <lucide-icon name="plus" [size]="17" />
+      Create tenant
+    </button>
+  }
+</section>
+
+<section class="data-section" aria-labelledby="tenant-table-title">
+  <div class="table-toolbar">
+    <h2 id="tenant-table-title">Tenant catalog</h2>
+    <label class="search-control">
+      <lucide-icon name="search" [size]="17" />
+      <span class="sr-only">Search tenants</span>
+      <input [formControl]="search" type="search" placeholder="Search tenants" maxlength="100" />
+    </label>
+  </div>
+
+  @if (loading()) {
+    <div class="state-block" aria-live="polite">
+      <span class="spinner"></span>
+      <strong>Loading tenants</strong>
+    </div>
+  } @else if (error()) {
+    <div class="state-block error-state" role="alert">
+      <strong>{{ error() }}</strong>
+      <button class="button secondary" type="button" (click)="load()">
+        <lucide-icon name="refresh-cw" [size]="16" />
+        Retry
+      </button>
+    </div>
+  } @else if (result().items.length === 0) {
+    <div class="state-block">
+      <app-guilloche class="state-rosette" variant="rosette" />
+      <strong>{{ search.value ? 'No tenants match your search' : 'No tenants registered' }}</strong>
+    </div>
+  } @else {
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">Tenant</th>
+            <th scope="col">Fallback decision</th>
+            <th scope="col">Created</th>
+            <th scope="col"><span class="sr-only">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (tenant of result().items; track tenant.id) {
+            <tr>
+              <td data-label="Tenant">
+                <div class="entity-cell">
+                  <app-guilloche class="entity-rosette" variant="rosette" [seed]="tenant.id" />
+                  <div>
+                    <strong>{{ tenant.name }}</strong>
+                    <code>…{{ tenant.id.slice(-8) }}</code>
+                  </div>
+                </div>
+              </td>
+              <td data-label="Fallback decision">
+                {{ fallbackLabel(tenant.noMatchingRuleBehavior) }}
+              </td>
+              <td data-label="Created">{{ tenant.createdAt | date: 'mediumDate' }}</td>
+              <td class="actions-cell">
+                <a class="button compact secondary" [routerLink]="[tenant.id, 'products']">
+                  Open tenant
+                  <lucide-icon name="arrow-right" [size]="15" />
+                </a>
+              </td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+
+    <footer class="pagination">
+      <span>Page {{ result().page + 1 }} of {{ result().totalPages }}</span>
+      <div>
+        <button
+          class="icon-button bordered"
+          type="button"
+          title="Previous page"
+          aria-label="Previous page"
+          [disabled]="result().page === 0"
+          (click)="load(result().page - 1)"
+        >
+          <lucide-icon name="chevron-left" [size]="18" />
+        </button>
+        <button
+          class="icon-button bordered"
+          type="button"
+          title="Next page"
+          aria-label="Next page"
+          [disabled]="result().page + 1 >= result().totalPages"
+          (click)="load(result().page + 1)"
+        >
+          <lucide-icon name="chevron-right" [size]="18" />
+        </button>
+      </div>
+    </footer>
+  }
+</section>
+
+<app-create-tenant-dialog (created)="tenantCreated()" />

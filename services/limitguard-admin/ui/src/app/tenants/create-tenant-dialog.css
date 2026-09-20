@@ -1,0 +1,61 @@
+:host {
+  display: contents;
+}
+
+.admin-dialog {
+  width: min(500px, calc(100vw - 28px));
+  max-height: calc(100vh - 32px);
+  padding: 0;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  box-shadow: 0 18px 48px rgb(22 22 29 / 22%);
+}
+
+.admin-dialog::backdrop {
+  background: rgb(22 22 29 / 45%);
+}
+
+form {
+  display: grid;
+  max-height: inherit;
+}
+
+header,
+footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 20px;
+}
+
+header {
+  border-bottom: 1px solid var(--border);
+}
+
+header h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.dialog-sub {
+  margin: 4px 0 0;
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.dialog-body {
+  display: grid;
+  gap: 18px;
+  padding: 22px 20px 24px;
+  overflow-y: auto;
+}
+
+footer {
+  justify-content: flex-end;
+  gap: 10px;
+  background: var(--surface-subtle);
+  border-top: 1px solid var(--border);
+}

@@ -1,0 +1,42 @@
+<dialog #dialog class="admin-dialog" (cancel)="$event.preventDefault(); close()">
+  <form [formGroup]="form" (ngSubmit)="submit()">
+    <header>
+      <div>
+        <h2>Create tenant</h2>
+      </div>
+      <button class="icon-button" type="button" title="Close dialog" aria-label="Close dialog" (click)="close()">
+        <lucide-icon name="x" [size]="19" />
+      </button>
+    </header>
+
+    <div class="dialog-body">
+      @if (error()) {
+        <div class="inline-alert" role="alert">{{ error() }}</div>
+      }
+
+      <label class="field">
+        <span>Tenant name</span>
+        <input formControlName="name" autocomplete="organization" maxlength="255" />
+        @if (form.controls.name.touched && form.controls.name.hasError('required')) {
+          <small>A tenant name is required.</small>
+        }
+      </label>
+
+      <label class="field">
+        <span>No matching rule behavior</span>
+        <select formControlName="noMatchingRuleBehavior">
+          <option value="DENY">Deny</option>
+          <option value="NOT_APPLICABLE">Not applicable</option>
+          <option value="ALLOW">Allow</option>
+        </select>
+      </label>
+    </div>
+
+    <footer>
+      <button class="button secondary" type="button" (click)="close()">Cancel</button>
+      <button class="button primary" type="submit" [disabled]="submitting()">
+        {{ submitting() ? 'Creating...' : 'Create tenant' }}
+      </button>
+    </footer>
+  </form>
+</dialog>

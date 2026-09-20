@@ -2,8 +2,16 @@ import { ApplicationConfig, importProvidersFrom, provideBrowserGlobalErrorListen
 import { provideHttpClient, withXsrfConfiguration } from '@angular/common/http';
 import { provideRouter } from '@angular/router';
 import {
+  ArrowLeft,
+  ArrowRight,
+  ChevronLeft,
+  ChevronRight,
   LogOut,
-  LucideAngularModule
+  LucideAngularModule,
+  Plus,
+  RefreshCw,
+  Search,
+  X
 } from 'lucide-angular';
 
 import { routes } from './app.routes';
@@ -13,7 +21,15 @@ export const appConfig: ApplicationConfig = {
     provideBrowserGlobalErrorListeners(),
     importProvidersFrom(
       LucideAngularModule.pick({
-        LogOut
+        ArrowLeft,
+        ArrowRight,
+        ChevronLeft,
+        ChevronRight,
+        LogOut,
+        Plus,
+        RefreshCw,
+        Search,
+        X
       })
     ),
     provideHttpClient(
