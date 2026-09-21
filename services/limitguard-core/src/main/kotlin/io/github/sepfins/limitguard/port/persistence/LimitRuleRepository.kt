@@ -12,6 +12,8 @@ interface LimitRuleRepository {
 
     fun findByIdForUpdate(tenantId: TenantId, id: LimitRuleId): LimitRule?
 
+    fun findByOwner(tenantId: TenantId, owner: PartyProfileId): List<LimitRule>
+
     fun findActiveForOwner(tenantId: TenantId, owner: PartyProfileId, at: Instant): List<LimitRule>
     fun insert(tenantId: TenantId, limitRule: LimitRule): LimitRule
 

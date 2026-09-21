@@ -20,28 +20,28 @@ import io.github.sepfins.limitguard.domain.limit.LimitOperationScope
 import io.github.sepfins.limitguard.domain.limit.LimitPeriod
 import io.github.sepfins.limitguard.domain.limit.LimitPriority
 import io.github.sepfins.limitguard.infrastructure.jooq.JooqPersistenceContext
-import io.github.sepfins.limitguard.infrastructure.jooq.eqPostgresEnum
-import io.github.sepfins.limitguard.infrastructure.jooq.jooqField
 import io.github.sepfins.limitguard.infrastructure.jooq.jooqOperation
-import io.github.sepfins.limitguard.infrastructure.jooq.jooqTable
-import io.github.sepfins.limitguard.infrastructure.jooq.nullablePostgresEnum
-import io.github.sepfins.limitguard.infrastructure.jooq.postgresEnum
 import io.github.sepfins.limitguard.infrastructure.jooq.toJsonb
 import io.github.sepfins.limitguard.infrastructure.jooq.toMetadata
+import io.github.sepfins.limitguard.infrastructure.jooq.generated.enums.FundingSourceCategory as GeneratedFundingSourceCategory
+import io.github.sepfins.limitguard.infrastructure.jooq.generated.enums.LimitChannelScope as GeneratedLimitChannelScope
+import io.github.sepfins.limitguard.infrastructure.jooq.generated.enums.LimitConfigurationFundingScope as GeneratedLimitConfigurationFundingScope
+import io.github.sepfins.limitguard.infrastructure.jooq.generated.enums.LimitKind as GeneratedLimitKind
+import io.github.sepfins.limitguard.infrastructure.jooq.generated.enums.LimitPeriod as GeneratedLimitPeriod
+import io.github.sepfins.limitguard.infrastructure.jooq.generated.tables.LimitConfiguration as GeneratedLimitConfigurationTable
 import io.github.sepfins.limitguard.port.persistence.LimitConfigurationRepository
 import org.jooq.Condition
-import org.jooq.Field
-import org.jooq.JSONB
 import org.jooq.Record
-import org.jooq.SelectFieldOrAsterisk
 import org.jooq.impl.DSL
-import java.math.BigDecimal
 import java.time.Instant
-import java.util.UUID
+import java.time.OffsetDateTime
+import java.time.ZoneOffset
 
 class JooqLimitConfigurationRepository(
     private val context: JooqPersistenceContext,
 ) : LimitConfigurationRepository {
+    private val table = GeneratedLimitConfigurationTable.LIMIT_CONFIGURATION
+
     override fun findAllActive(tenantId: TenantId, at: Instant): List<LimitConfiguration> =
         findActive(tenantId, at, DSL.trueCondition(), "find active limit configurations")
 
@@ -63,11 +63,9 @@ class JooqLimitConfigurationRepository(
     ): List<LimitConfiguration> = findActive(
         tenantId,
         at,
-        LimitConfigurationTable.limitKind.eqPostgresEnum(kind.name(), "limit_kind")
+        table.LIMIT_KIND.eq(kind.toGenerated())
             .and(
-                kind.periodName()?.let {
-                    LimitConfigurationTable.period.eqPostgresEnum(it, "limit_period")
-                } ?: LimitConfigurationTable.period.isNull
+                kind.period()?.let { table.PERIOD.eq(it.toGenerated()) } ?: table.PERIOD.isNull
             ),
         "find active limit configurations by kind",
     )
@@ -91,9 +89,8 @@ class JooqLimitConfigurationRepository(
         tenantId,
         at,
         when (scope) {
-            LimitOperationScope.AllOperations -> LimitConfigurationTable.operationTypeId.isNull
-            is LimitOperationScope.OperationTypeSpecific ->
-                LimitConfigurationTable.operationTypeId.eq(scope.operationTypeId.value)
+            LimitOperationScope.AllOperations -> table.OPERATION_TYPE_ID.isNull
+            is LimitOperationScope.OperationTypeSpecific -> table.OPERATION_TYPE_ID.eq(scope.operationTypeId.value)
         },
         "find active limit configurations by operation scope",
     )
@@ -101,8 +98,8 @@ class JooqLimitConfigurationRepository(
     override fun findById(tenantId: TenantId, id: LimitConfigurationId): LimitConfiguration? =
         jooqOperation("find limit configuration by id") {
             selectConfigurations()
-                .where(LimitConfigurationTable.tenantId.eq(tenantId.value))
-                .and(LimitConfigurationTable.id.eq(id.value))
+                .where(table.TENANT_ID.eq(tenantId.value))
+                .and(table.ID.eq(id.value))
                 .fetchOne { it.toDomain() }
         }
 
@@ -112,8 +109,8 @@ class JooqLimitConfigurationRepository(
     ): LimitConfiguration? = jooqOperation("lock limit configuration by id") {
         context.requireTransaction("locking a limit configuration row")
         selectConfigurations()
-            .where(LimitConfigurationTable.tenantId.eq(tenantId.value))
-            .and(LimitConfigurationTable.id.eq(id.value))
+            .where(table.TENANT_ID.eq(tenantId.value))
+            .and(table.ID.eq(id.value))
             .forUpdate()
             .fetchOne { it.toDomain() }
     }
@@ -123,8 +120,8 @@ class JooqLimitConfigurationRepository(
         code: LimitConfigurationCode,
     ): LimitConfiguration? = jooqOperation("find limit configuration by code") {
         selectConfigurations()
-            .where(LimitConfigurationTable.tenantId.eq(tenantId.value))
-            .and(LimitConfigurationTable.code.eq(code.value))
+            .where(table.TENANT_ID.eq(tenantId.value))
+            .and(table.CODE.eq(code.value))
             .fetchOne { it.toDomain() }
     }
 
@@ -136,51 +133,33 @@ class JooqLimitConfigurationRepository(
             "limit configuration tenant does not match repository tenant"
         }
         val insert = context.dsl()
-            .insertInto(LimitConfigurationTable.table)
-            .set(LimitConfigurationTable.id, limitConfiguration.id.value)
-            .set(LimitConfigurationTable.tenantId, tenantId.value)
-            .set(LimitConfigurationTable.parentConfigurationId, limitConfiguration.parentConfigurationId?.value)
-            .set(LimitConfigurationTable.code, limitConfiguration.code.value)
-            .set(LimitConfigurationTable.name, limitConfiguration.name.value)
-            .set(LimitConfigurationTable.description, limitConfiguration.description)
-            .set(
-                LimitConfigurationTable.limitKind,
-                postgresEnum(limitConfiguration.limitKind.name(), "limit_kind"),
-            )
-            .set(
-                LimitConfigurationTable.period,
-                nullablePostgresEnum(limitConfiguration.limitKind.periodName(), "limit_period"),
-            )
-            .set(LimitConfigurationTable.currency, limitConfiguration.maxAssignableAmount.currency.value)
-            .set(
-                LimitConfigurationTable.fundingScope,
-                postgresEnum(limitConfiguration.fundingScope.name(), "limit_configuration_funding_scope"),
-            )
-            .set(
-                LimitConfigurationTable.fundingSourceCategory,
-                nullablePostgresEnum(
-                    limitConfiguration.fundingScope.categoryName(),
-                    "funding_source_category",
-                ),
-            )
-            .set(LimitConfigurationTable.fundingSourceProductId, limitConfiguration.fundingScope.productId())
-            .set(
-                LimitConfigurationTable.channelScope,
-                postgresEnum(limitConfiguration.channelScope.name(), "limit_channel_scope"),
-            )
-            .set(LimitConfigurationTable.channelId, limitConfiguration.channelScope.channelId())
-            .set(LimitConfigurationTable.channelGroupId, limitConfiguration.channelScope.channelGroupId())
-            .set(LimitConfigurationTable.operationTypeId, limitConfiguration.operationScope.operationTypeId())
-            .set(LimitConfigurationTable.maxAssignableAmount, limitConfiguration.maxAssignableAmount.amount)
-            .set(LimitConfigurationTable.defaultAmount, limitConfiguration.defaultAmount?.amount)
-            .set(LimitConfigurationTable.priority, limitConfiguration.priority.value)
-            .set(LimitConfigurationTable.isActive, limitConfiguration.isActive)
-            .set(LimitConfigurationTable.startsAt, limitConfiguration.effectiveWindow.startsAt)
-            .set(LimitConfigurationTable.endsAt, limitConfiguration.effectiveWindow.endsAt)
-            .set(LimitConfigurationTable.metadata, limitConfiguration.metadata.toJsonb())
-        limitConfiguration.createdAt?.let { insert.set(LimitConfigurationTable.createdAt, it) }
-        limitConfiguration.updatedAt?.let { insert.set(LimitConfigurationTable.updatedAt, it) }
-        requireNotNull(insert.returning(LimitConfigurationTable.fields).fetchOne()).toDomain()
+            .insertInto(table)
+            .set(table.ID, limitConfiguration.id.value)
+            .set(table.TENANT_ID, tenantId.value)
+            .set(table.PARENT_CONFIGURATION_ID, limitConfiguration.parentConfigurationId?.value)
+            .set(table.CODE, limitConfiguration.code.value)
+            .set(table.NAME, limitConfiguration.name.value)
+            .set(table.DESCRIPTION, limitConfiguration.description)
+            .set(table.LIMIT_KIND, limitConfiguration.limitKind.toGenerated())
+            .set(table.PERIOD, limitConfiguration.limitKind.period()?.toGenerated())
+            .set(table.CURRENCY, limitConfiguration.maxAssignableAmount.currency.value)
+            .set(table.FUNDING_SCOPE, limitConfiguration.fundingScope.toGenerated())
+            .set(table.FUNDING_SOURCE_CATEGORY, limitConfiguration.fundingScope.category()?.toGenerated())
+            .set(table.FUNDING_SOURCE_PRODUCT_ID, limitConfiguration.fundingScope.productId())
+            .set(table.CHANNEL_SCOPE, limitConfiguration.channelScope.toGenerated())
+            .set(table.CHANNEL_ID, limitConfiguration.channelScope.channelId())
+            .set(table.CHANNEL_GROUP_ID, limitConfiguration.channelScope.channelGroupId())
+            .set(table.OPERATION_TYPE_ID, limitConfiguration.operationScope.operationTypeId())
+            .set(table.MAX_ASSIGNABLE_AMOUNT, limitConfiguration.maxAssignableAmount.amount)
+            .set(table.DEFAULT_AMOUNT, limitConfiguration.defaultAmount?.amount)
+            .set(table.PRIORITY, limitConfiguration.priority.value)
+            .set(table.IS_ACTIVE, limitConfiguration.isActive)
+            .set(table.STARTS_AT, limitConfiguration.effectiveWindow.startsAt.toOffsetDateTime())
+            .set(table.ENDS_AT, limitConfiguration.effectiveWindow.endsAt?.toOffsetDateTime())
+            .set(table.METADATA, limitConfiguration.metadata.toJsonb())
+        limitConfiguration.createdAt?.let { insert.set(table.CREATED_AT, it.toOffsetDateTime()) }
+        limitConfiguration.updatedAt?.let { insert.set(table.UPDATED_AT, it.toOffsetDateTime()) }
+        requireNotNull(insert.returning(table.fields().toList()).fetchOne()).toDomain()
     }
 
     override fun update(
@@ -191,51 +170,33 @@ class JooqLimitConfigurationRepository(
             "limit configuration tenant does not match repository tenant"
         }
         val update = context.dsl()
-            .update(LimitConfigurationTable.table)
-            .set(LimitConfigurationTable.parentConfigurationId, limitConfiguration.parentConfigurationId?.value)
-            .set(LimitConfigurationTable.code, limitConfiguration.code.value)
-            .set(LimitConfigurationTable.name, limitConfiguration.name.value)
-            .set(LimitConfigurationTable.description, limitConfiguration.description)
-            .set(
-                LimitConfigurationTable.limitKind,
-                postgresEnum(limitConfiguration.limitKind.name(), "limit_kind"),
-            )
-            .set(
-                LimitConfigurationTable.period,
-                nullablePostgresEnum(limitConfiguration.limitKind.periodName(), "limit_period"),
-            )
-            .set(LimitConfigurationTable.currency, limitConfiguration.maxAssignableAmount.currency.value)
-            .set(
-                LimitConfigurationTable.fundingScope,
-                postgresEnum(limitConfiguration.fundingScope.name(), "limit_configuration_funding_scope"),
-            )
-            .set(
-                LimitConfigurationTable.fundingSourceCategory,
-                nullablePostgresEnum(
-                    limitConfiguration.fundingScope.categoryName(),
-                    "funding_source_category",
-                ),
-            )
-            .set(LimitConfigurationTable.fundingSourceProductId, limitConfiguration.fundingScope.productId())
-            .set(
-                LimitConfigurationTable.channelScope,
-                postgresEnum(limitConfiguration.channelScope.name(), "limit_channel_scope"),
-            )
-            .set(LimitConfigurationTable.channelId, limitConfiguration.channelScope.channelId())
-            .set(LimitConfigurationTable.channelGroupId, limitConfiguration.channelScope.channelGroupId())
-            .set(LimitConfigurationTable.operationTypeId, limitConfiguration.operationScope.operationTypeId())
-            .set(LimitConfigurationTable.maxAssignableAmount, limitConfiguration.maxAssignableAmount.amount)
-            .set(LimitConfigurationTable.defaultAmount, limitConfiguration.defaultAmount?.amount)
-            .set(LimitConfigurationTable.priority, limitConfiguration.priority.value)
-            .set(LimitConfigurationTable.isActive, limitConfiguration.isActive)
-            .set(LimitConfigurationTable.startsAt, limitConfiguration.effectiveWindow.startsAt)
-            .set(LimitConfigurationTable.endsAt, limitConfiguration.effectiveWindow.endsAt)
-            .set(LimitConfigurationTable.metadata, limitConfiguration.metadata.toJsonb())
-        limitConfiguration.updatedAt?.let { update.set(LimitConfigurationTable.updatedAt, it) }
+            .update(table)
+            .set(table.PARENT_CONFIGURATION_ID, limitConfiguration.parentConfigurationId?.value)
+            .set(table.CODE, limitConfiguration.code.value)
+            .set(table.NAME, limitConfiguration.name.value)
+            .set(table.DESCRIPTION, limitConfiguration.description)
+            .set(table.LIMIT_KIND, limitConfiguration.limitKind.toGenerated())
+            .set(table.PERIOD, limitConfiguration.limitKind.period()?.toGenerated())
+            .set(table.CURRENCY, limitConfiguration.maxAssignableAmount.currency.value)
+            .set(table.FUNDING_SCOPE, limitConfiguration.fundingScope.toGenerated())
+            .set(table.FUNDING_SOURCE_CATEGORY, limitConfiguration.fundingScope.category()?.toGenerated())
+            .set(table.FUNDING_SOURCE_PRODUCT_ID, limitConfiguration.fundingScope.productId())
+            .set(table.CHANNEL_SCOPE, limitConfiguration.channelScope.toGenerated())
+            .set(table.CHANNEL_ID, limitConfiguration.channelScope.channelId())
+            .set(table.CHANNEL_GROUP_ID, limitConfiguration.channelScope.channelGroupId())
+            .set(table.OPERATION_TYPE_ID, limitConfiguration.operationScope.operationTypeId())
+            .set(table.MAX_ASSIGNABLE_AMOUNT, limitConfiguration.maxAssignableAmount.amount)
+            .set(table.DEFAULT_AMOUNT, limitConfiguration.defaultAmount?.amount)
+            .set(table.PRIORITY, limitConfiguration.priority.value)
+            .set(table.IS_ACTIVE, limitConfiguration.isActive)
+            .set(table.STARTS_AT, limitConfiguration.effectiveWindow.startsAt.toOffsetDateTime())
+            .set(table.ENDS_AT, limitConfiguration.effectiveWindow.endsAt?.toOffsetDateTime())
+            .set(table.METADATA, limitConfiguration.metadata.toJsonb())
+        limitConfiguration.updatedAt?.let { update.set(table.UPDATED_AT, it.toOffsetDateTime()) }
         requireNotNull(
-            update.where(LimitConfigurationTable.tenantId.eq(tenantId.value))
-                .and(LimitConfigurationTable.id.eq(limitConfiguration.id.value))
-                .returning(LimitConfigurationTable.fields)
+            update.where(table.TENANT_ID.eq(tenantId.value))
+                .and(table.ID.eq(limitConfiguration.id.value))
+                .returning(table.fields().toList())
                 .fetchOne()
         ) { "limit configuration not found: ${limitConfiguration.id.value}" }.toDomain()
     }
@@ -246,203 +207,141 @@ class JooqLimitConfigurationRepository(
         condition: Condition,
         operation: String,
     ): List<LimitConfiguration> = jooqOperation(operation) {
+        val timestamp = at.toOffsetDateTime()
         selectConfigurations()
-            .where(LimitConfigurationTable.tenantId.eq(tenantId.value))
-            .and(LimitConfigurationTable.isActive.isTrue)
-            .and(LimitConfigurationTable.startsAt.le(at))
-            .and(LimitConfigurationTable.endsAt.isNull.or(LimitConfigurationTable.endsAt.gt(at)))
+            .where(table.TENANT_ID.eq(tenantId.value))
+            .and(table.IS_ACTIVE.isTrue)
+            .and(table.STARTS_AT.le(timestamp))
+            .and(table.ENDS_AT.isNull.or(table.ENDS_AT.gt(timestamp)))
             .and(condition)
-            .orderBy(LimitConfigurationTable.priority, LimitConfigurationTable.code, LimitConfigurationTable.id)
+            .orderBy(table.PRIORITY, table.CODE, table.ID)
             .fetch { it.toDomain() }
     }
 
     private fun channelScopeCondition(scope: LimitChannelScope): Condition =
-        LimitConfigurationTable.channelScope.eqPostgresEnum(scope.name(), "limit_channel_scope")
+        table.CHANNEL_SCOPE.eq(scope.toGenerated())
             .and(
                 when (scope) {
                     LimitChannelScope.AllChannels -> DSL.trueCondition()
-                    is LimitChannelScope.ChannelSpecific -> LimitConfigurationTable.channelId.eq(scope.channelId.value)
-                    is LimitChannelScope.ChannelGroupSpecific ->
-                        LimitConfigurationTable.channelGroupId.eq(scope.channelGroupId.value)
+                    is LimitChannelScope.ChannelSpecific -> table.CHANNEL_ID.eq(scope.channelId.value)
+                    is LimitChannelScope.ChannelGroupSpecific -> table.CHANNEL_GROUP_ID.eq(scope.channelGroupId.value)
                 }
             )
 
     private fun fundingScopeCondition(scope: LimitConfigurationFundingScope): Condition =
-        LimitConfigurationTable.fundingScope.eqPostgresEnum(
-            scope.name(),
-            "limit_configuration_funding_scope",
-        ).and(
+        table.FUNDING_SCOPE.eq(scope.toGenerated()).and(
             when (scope) {
                 LimitConfigurationFundingScope.AllFundingSources -> DSL.trueCondition()
                 is LimitConfigurationFundingScope.FundingSourceCategorySpecific ->
-                    LimitConfigurationTable.fundingSourceCategory.eqPostgresEnum(
-                        scope.sourceCategory.name,
-                        "funding_source_category",
-                    )
+                    table.FUNDING_SOURCE_CATEGORY.eq(scope.sourceCategory.toGenerated())
                 is LimitConfigurationFundingScope.FundingSourceProductSpecific ->
-                    LimitConfigurationTable.fundingSourceProductId.eq(scope.productId.value)
+                    table.FUNDING_SOURCE_PRODUCT_ID.eq(scope.productId.value)
             }
         )
 
     private fun selectConfigurations() = context.dsl()
-        .select(LimitConfigurationTable.fields)
-        .from(LimitConfigurationTable.table)
+        .select(table.fields().toList())
+        .from(table)
 
     private fun Record.toDomain(): LimitConfiguration {
-        val currency = CurrencyCode.of(requireNotNull(get(LimitConfigurationTable.currency)))
-        val limitKind = when (val kind = requireNotNull(get(LimitConfigurationTable.limitKind))) {
-            "PER_TRANSACTION" -> LimitKind.PerTransaction
-            "PERIODIC" -> LimitKind.Periodic(
-                LimitPeriod.valueOf(requireNotNull(get(LimitConfigurationTable.period)))
+        val currency = CurrencyCode.of(requireNotNull(get(table.CURRENCY)))
+        val limitKind = when (requireNotNull(get(table.LIMIT_KIND))) {
+            GeneratedLimitKind.PER_TRANSACTION -> LimitKind.PerTransaction
+            GeneratedLimitKind.PERIODIC -> LimitKind.Periodic(
+                LimitPeriod.valueOf(requireNotNull(get(table.PERIOD)).name)
             )
-            else -> error("unsupported limit configuration kind: $kind")
         }
-        val fundingScope = when (val scope = requireNotNull(get(LimitConfigurationTable.fundingScope))) {
-            "ALL_FUNDING_SOURCES" -> LimitConfigurationFundingScope.AllFundingSources
-            "FUNDING_SOURCE_CATEGORY" -> LimitConfigurationFundingScope.FundingSourceCategorySpecific(
-                FundingSourceCategory.valueOf(
-                    requireNotNull(get(LimitConfigurationTable.fundingSourceCategory))
+        val fundingScope = when (requireNotNull(get(table.FUNDING_SCOPE))) {
+            GeneratedLimitConfigurationFundingScope.ALL_FUNDING_SOURCES ->
+                LimitConfigurationFundingScope.AllFundingSources
+            GeneratedLimitConfigurationFundingScope.FUNDING_SOURCE_CATEGORY ->
+                LimitConfigurationFundingScope.FundingSourceCategorySpecific(
+                    FundingSourceCategory.valueOf(requireNotNull(get(table.FUNDING_SOURCE_CATEGORY)).name)
                 )
-            )
-            "FUNDING_SOURCE_PRODUCT" -> LimitConfigurationFundingScope.FundingSourceProductSpecific(
-                FundingSourceProductId.of(
-                    requireNotNull(get(LimitConfigurationTable.fundingSourceProductId))
+            GeneratedLimitConfigurationFundingScope.FUNDING_SOURCE_PRODUCT ->
+                LimitConfigurationFundingScope.FundingSourceProductSpecific(
+                    FundingSourceProductId.of(requireNotNull(get(table.FUNDING_SOURCE_PRODUCT_ID)))
                 )
-            )
-            else -> error("unsupported limit configuration funding scope: $scope")
         }
-        val channelScope = when (val scope = requireNotNull(get(LimitConfigurationTable.channelScope))) {
-            "ALL_CHANNELS" -> LimitChannelScope.AllChannels
-            "CHANNEL" -> LimitChannelScope.ChannelSpecific(
-                ChannelId.of(requireNotNull(get(LimitConfigurationTable.channelId)))
+        val channelScope = when (requireNotNull(get(table.CHANNEL_SCOPE))) {
+            GeneratedLimitChannelScope.ALL_CHANNELS -> LimitChannelScope.AllChannels
+            GeneratedLimitChannelScope.CHANNEL -> LimitChannelScope.ChannelSpecific(
+                ChannelId.of(requireNotNull(get(table.CHANNEL_ID)))
             )
-            "CHANNEL_GROUP" -> LimitChannelScope.ChannelGroupSpecific(
-                ChannelGroupId.of(requireNotNull(get(LimitConfigurationTable.channelGroupId)))
+            GeneratedLimitChannelScope.CHANNEL_GROUP -> LimitChannelScope.ChannelGroupSpecific(
+                ChannelGroupId.of(requireNotNull(get(table.CHANNEL_GROUP_ID)))
             )
-            else -> error("unsupported limit configuration channel scope: $scope")
         }
-        val operationScope = get(LimitConfigurationTable.operationTypeId)?.let {
+        val operationScope = get(table.OPERATION_TYPE_ID)?.let {
             LimitOperationScope.OperationTypeSpecific(OperationTypeId.of(it))
         } ?: LimitOperationScope.AllOperations
 
         return LimitConfiguration(
-            id = LimitConfigurationId.of(requireNotNull(get(LimitConfigurationTable.id))),
-            tenantId = TenantId.of(requireNotNull(get(LimitConfigurationTable.tenantId))),
-            parentConfigurationId = get(LimitConfigurationTable.parentConfigurationId)
-                ?.let(LimitConfigurationId::of),
-            code = LimitConfigurationCode.of(requireNotNull(get(LimitConfigurationTable.code))),
-            name = LimitConfigurationName.of(requireNotNull(get(LimitConfigurationTable.name))),
-            description = get(LimitConfigurationTable.description),
+            id = LimitConfigurationId.of(requireNotNull(get(table.ID))),
+            tenantId = TenantId.of(requireNotNull(get(table.TENANT_ID))),
+            parentConfigurationId = get(table.PARENT_CONFIGURATION_ID)?.let(LimitConfigurationId::of),
+            code = LimitConfigurationCode.of(requireNotNull(get(table.CODE))),
+            name = LimitConfigurationName.of(requireNotNull(get(table.NAME))),
+            description = get(table.DESCRIPTION),
             limitKind = limitKind,
             fundingScope = fundingScope,
             channelScope = channelScope,
             operationScope = operationScope,
-            maxAssignableAmount = Money.positive(
-                requireNotNull(get(LimitConfigurationTable.maxAssignableAmount)),
-                currency,
-            ),
-            defaultAmount = get(LimitConfigurationTable.defaultAmount)?.let { Money.positive(it, currency) },
-            priority = LimitPriority.of(requireNotNull(get(LimitConfigurationTable.priority))),
-            isActive = requireNotNull(get(LimitConfigurationTable.isActive)),
+            maxAssignableAmount = Money.positive(requireNotNull(get(table.MAX_ASSIGNABLE_AMOUNT)), currency),
+            defaultAmount = get(table.DEFAULT_AMOUNT)?.let { Money.positive(it, currency) },
+            priority = LimitPriority.of(requireNotNull(get(table.PRIORITY))),
+            isActive = requireNotNull(get(table.IS_ACTIVE)),
             effectiveWindow = EffectiveWindow(
-                startsAt = requireNotNull(get(LimitConfigurationTable.startsAt)),
-                endsAt = get(LimitConfigurationTable.endsAt),
+                startsAt = requireNotNull(get(table.STARTS_AT)).toInstant(),
+                endsAt = get(table.ENDS_AT)?.toInstant(),
             ),
-            metadata = get(LimitConfigurationTable.metadata).toMetadata(),
-            createdAt = get(LimitConfigurationTable.createdAt),
-            updatedAt = get(LimitConfigurationTable.updatedAt),
+            metadata = get(table.METADATA).toMetadata(),
+            createdAt = get(table.CREATED_AT)?.toInstant(),
+            updatedAt = get(table.UPDATED_AT)?.toInstant(),
         )
     }
 
-    private fun LimitKind.name(): String = when (this) {
-        LimitKind.PerTransaction -> "PER_TRANSACTION"
-        is LimitKind.Periodic -> "PERIODIC"
+    private fun LimitKind.toGenerated(): GeneratedLimitKind = when (this) {
+        LimitKind.PerTransaction -> GeneratedLimitKind.PER_TRANSACTION
+        is LimitKind.Periodic -> GeneratedLimitKind.PERIODIC
     }
 
-    private fun LimitKind.periodName(): String? = (this as? LimitKind.Periodic)?.period?.name
+    private fun LimitKind.period(): LimitPeriod? = (this as? LimitKind.Periodic)?.period
 
-    private fun LimitConfigurationFundingScope.name(): String = when (this) {
-        LimitConfigurationFundingScope.AllFundingSources -> "ALL_FUNDING_SOURCES"
-        is LimitConfigurationFundingScope.FundingSourceCategorySpecific -> "FUNDING_SOURCE_CATEGORY"
-        is LimitConfigurationFundingScope.FundingSourceProductSpecific -> "FUNDING_SOURCE_PRODUCT"
+    private fun LimitPeriod.toGenerated(): GeneratedLimitPeriod = GeneratedLimitPeriod.valueOf(name)
+
+    private fun LimitConfigurationFundingScope.toGenerated(): GeneratedLimitConfigurationFundingScope = when (this) {
+        LimitConfigurationFundingScope.AllFundingSources ->
+            GeneratedLimitConfigurationFundingScope.ALL_FUNDING_SOURCES
+        is LimitConfigurationFundingScope.FundingSourceCategorySpecific ->
+            GeneratedLimitConfigurationFundingScope.FUNDING_SOURCE_CATEGORY
+        is LimitConfigurationFundingScope.FundingSourceProductSpecific ->
+            GeneratedLimitConfigurationFundingScope.FUNDING_SOURCE_PRODUCT
     }
 
-    private fun LimitConfigurationFundingScope.categoryName(): String? =
-        (this as? LimitConfigurationFundingScope.FundingSourceCategorySpecific)?.sourceCategory?.name
+    private fun LimitConfigurationFundingScope.category(): FundingSourceCategory? =
+        (this as? LimitConfigurationFundingScope.FundingSourceCategorySpecific)?.sourceCategory
 
-    private fun LimitConfigurationFundingScope.productId(): UUID? =
+    private fun FundingSourceCategory.toGenerated(): GeneratedFundingSourceCategory =
+        GeneratedFundingSourceCategory.valueOf(name)
+
+    private fun LimitConfigurationFundingScope.productId() =
         (this as? LimitConfigurationFundingScope.FundingSourceProductSpecific)?.productId?.value
 
-    private fun LimitChannelScope.name(): String = when (this) {
-        LimitChannelScope.AllChannels -> "ALL_CHANNELS"
-        is LimitChannelScope.ChannelSpecific -> "CHANNEL"
-        is LimitChannelScope.ChannelGroupSpecific -> "CHANNEL_GROUP"
+    private fun LimitChannelScope.toGenerated(): GeneratedLimitChannelScope = when (this) {
+        LimitChannelScope.AllChannels -> GeneratedLimitChannelScope.ALL_CHANNELS
+        is LimitChannelScope.ChannelSpecific -> GeneratedLimitChannelScope.CHANNEL
+        is LimitChannelScope.ChannelGroupSpecific -> GeneratedLimitChannelScope.CHANNEL_GROUP
     }
 
-    private fun LimitChannelScope.channelId(): UUID? =
+    private fun LimitChannelScope.channelId(): java.util.UUID? =
         (this as? LimitChannelScope.ChannelSpecific)?.channelId?.value
 
-    private fun LimitChannelScope.channelGroupId(): UUID? =
+    private fun LimitChannelScope.channelGroupId(): java.util.UUID? =
         (this as? LimitChannelScope.ChannelGroupSpecific)?.channelGroupId?.value
 
-    private fun LimitOperationScope.operationTypeId(): UUID? =
+    private fun LimitOperationScope.operationTypeId(): java.util.UUID? =
         (this as? LimitOperationScope.OperationTypeSpecific)?.operationTypeId?.value
 }
 
-private object LimitConfigurationTable {
-    const val NAME = "limit_configuration"
-    val table = jooqTable(NAME)
-    val id: Field<UUID> = jooqField(NAME, "id", UUID::class.java)
-    val tenantId: Field<UUID> = jooqField(NAME, "tenant_id", UUID::class.java)
-    val parentConfigurationId: Field<UUID> = jooqField(NAME, "parent_configuration_id", UUID::class.java)
-    val code: Field<String> = jooqField(NAME, "code", String::class.java)
-    val name: Field<String> = jooqField(NAME, "name", String::class.java)
-    val description: Field<String> = jooqField(NAME, "description", String::class.java)
-    val limitKind: Field<String> = jooqField(NAME, "limit_kind", String::class.java)
-    val period: Field<String> = jooqField(NAME, "period", String::class.java)
-    val currency: Field<String> = jooqField(NAME, "currency", String::class.java)
-    val fundingScope: Field<String> = jooqField(NAME, "funding_scope", String::class.java)
-    val fundingSourceCategory: Field<String> = jooqField(NAME, "funding_source_category", String::class.java)
-    val fundingSourceProductId: Field<UUID> = jooqField(NAME, "funding_source_product_id", UUID::class.java)
-    val channelScope: Field<String> = jooqField(NAME, "channel_scope", String::class.java)
-    val channelId: Field<UUID> = jooqField(NAME, "channel_id", UUID::class.java)
-    val channelGroupId: Field<UUID> = jooqField(NAME, "channel_group_id", UUID::class.java)
-    val operationTypeId: Field<UUID> = jooqField(NAME, "operation_type_id", UUID::class.java)
-    val maxAssignableAmount: Field<BigDecimal> =
-        jooqField(NAME, "max_assignable_amount", BigDecimal::class.java)
-    val defaultAmount: Field<BigDecimal> = jooqField(NAME, "default_amount", BigDecimal::class.java)
-    val priority: Field<Int> = jooqField(NAME, "priority", Int::class.java)
-    val isActive: Field<Boolean> = jooqField(NAME, "is_active", Boolean::class.java)
-    val startsAt: Field<Instant> = jooqField(NAME, "starts_at", Instant::class.java)
-    val endsAt: Field<Instant> = jooqField(NAME, "ends_at", Instant::class.java)
-    val metadata: Field<JSONB> = jooqField(NAME, "metadata", JSONB::class.java)
-    val createdAt: Field<Instant> = jooqField(NAME, "created_at", Instant::class.java)
-    val updatedAt: Field<Instant> = jooqField(NAME, "updated_at", Instant::class.java)
-    val fields: List<SelectFieldOrAsterisk> = listOf(
-        id,
-        tenantId,
-        parentConfigurationId,
-        code,
-        name,
-        description,
-        limitKind,
-        period,
-        currency,
-        fundingScope,
-        fundingSourceCategory,
-        fundingSourceProductId,
-        channelScope,
-        channelId,
-        channelGroupId,
-        operationTypeId,
-        maxAssignableAmount,
-        defaultAmount,
-        priority,
-        isActive,
-        startsAt,
-        endsAt,
-        metadata,
-        createdAt,
-        updatedAt,
-    )
-}
+private fun Instant.toOffsetDateTime(): OffsetDateTime = OffsetDateTime.ofInstant(this, ZoneOffset.UTC)

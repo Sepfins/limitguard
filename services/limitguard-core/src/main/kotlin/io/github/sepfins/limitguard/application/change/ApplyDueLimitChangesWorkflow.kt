@@ -45,7 +45,9 @@ internal class ApplyDueLimitChangesWorkflow(
 
             dueRequests.forEach { request ->
                 try {
-                    applyClaimed(request, dueAt)
+                    transactionRunner.inSavepoint {
+                        applyClaimed(request, dueAt)
+                    }
                     appliedRequestIds += request.id
                 } catch (exception: ConflictException) {
                     markFailed(request, dueAt, exception)

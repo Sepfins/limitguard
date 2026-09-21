@@ -9,15 +9,16 @@ import io.github.sepfins.limitguard.domain.identifier.IdentifierScheme
 import io.github.sepfins.limitguard.domain.identifier.IdentifierValue
 import io.github.sepfins.limitguard.domain.identifier.SchemeName
 import io.github.sepfins.limitguard.infrastructure.jooq.JooqPersistenceContext
-import io.github.sepfins.limitguard.infrastructure.jooq.jooqField
 import io.github.sepfins.limitguard.infrastructure.jooq.jooqOperation
-import io.github.sepfins.limitguard.infrastructure.jooq.jooqTable
+import io.github.sepfins.limitguard.infrastructure.jooq.generated.tables.EntityIdentifier as GeneratedEntityIdentifierTable
+import io.github.sepfins.limitguard.infrastructure.jooq.generated.tables.IdentifierScheme as GeneratedIdentifierSchemeTable
 import io.github.sepfins.limitguard.port.persistence.EntityIdentifierRepository
 import io.github.sepfins.limitguard.port.persistence.IdentifierSchemeRepository
-import org.jooq.Field
 import org.jooq.Record
 import org.jooq.SelectFieldOrAsterisk
 import java.time.Instant
+import java.time.OffsetDateTime
+import java.time.ZoneOffset
 import java.util.UUID
 
 class JooqIdentifierSchemeRepository(
@@ -64,7 +65,7 @@ class JooqIdentifierSchemeRepository(
                 .set(IdentifierSchemeTable.formatRegex, scheme.formatRegex)
                 .set(IdentifierSchemeTable.maxLength, scheme.maxLength)
                 .set(IdentifierSchemeTable.isPrimary, scheme.isPrimary)
-            scheme.createdAt?.let { insert.set(IdentifierSchemeTable.createdAt, it) }
+            scheme.createdAt?.let { insert.set(IdentifierSchemeTable.createdAt, it.toOffsetDateTime()) }
             requireNotNull(insert.returning(IdentifierSchemeTable.fields).fetchOne()).toDomain()
         }
 
@@ -98,7 +99,7 @@ class JooqIdentifierSchemeRepository(
         formatRegex = get(IdentifierSchemeTable.formatRegex),
         maxLength = get(IdentifierSchemeTable.maxLength),
         isPrimary = requireNotNull(get(IdentifierSchemeTable.isPrimary)),
-        createdAt = get(IdentifierSchemeTable.createdAt),
+        createdAt = get(IdentifierSchemeTable.createdAt)?.toInstant(),
     )
 }
 
@@ -155,7 +156,9 @@ class JooqEntityIdentifierRepository(
                 .set(EntityIdentifierTable.entityId, entityIdentifier.entityId)
                 .set(EntityIdentifierTable.schemeId, entityIdentifier.schemeId.value)
                 .set(EntityIdentifierTable.identifier, entityIdentifier.identifier.value)
-            entityIdentifier.createdAt?.let { insert.set(EntityIdentifierTable.createdAt, it) }
+            entityIdentifier.createdAt?.let {
+                insert.set(EntityIdentifierTable.createdAt, it.toOffsetDateTime())
+            }
             requireNotNull(insert.returning(EntityIdentifierTable.fields).fetchOne()).toDomain()
         }
 
@@ -172,33 +175,32 @@ class JooqEntityIdentifierRepository(
         entityId = requireNotNull(get(EntityIdentifierTable.entityId)),
         schemeId = IdentifierSchemeId.of(requireNotNull(get(EntityIdentifierTable.schemeId))),
         identifier = IdentifierValue.of(requireNotNull(get(EntityIdentifierTable.identifier))),
-        createdAt = get(EntityIdentifierTable.createdAt),
+        createdAt = get(EntityIdentifierTable.createdAt)?.toInstant(),
     )
 }
 
 private object IdentifierSchemeTable {
-    const val NAME = "identifier_scheme"
-    val table = jooqTable(NAME)
-    val id: Field<UUID> = jooqField(NAME, "id", UUID::class.java)
-    val tenantId: Field<UUID> = jooqField(NAME, "tenant_id", UUID::class.java)
-    val entityType: Field<String> = jooqField(NAME, "entity_type", String::class.java)
-    val schemeName: Field<String> = jooqField(NAME, "scheme_name", String::class.java)
-    val formatRegex: Field<String> = jooqField(NAME, "format_regex", String::class.java)
-    val maxLength: Field<Int> = jooqField(NAME, "max_length", Int::class.java)
-    val isPrimary: Field<Boolean> = jooqField(NAME, "is_primary", Boolean::class.java)
-    val createdAt: Field<Instant> = jooqField(NAME, "created_at", Instant::class.java)
-    val fields: List<SelectFieldOrAsterisk> =
-        listOf(id, tenantId, entityType, schemeName, formatRegex, maxLength, isPrimary, createdAt)
+    val table = GeneratedIdentifierSchemeTable.IDENTIFIER_SCHEME
+    val id = table.ID
+    val tenantId = table.TENANT_ID
+    val entityType = table.ENTITY_TYPE
+    val schemeName = table.SCHEME_NAME
+    val formatRegex = table.FORMAT_REGEX
+    val maxLength = table.MAX_LENGTH
+    val isPrimary = table.IS_PRIMARY
+    val createdAt = table.CREATED_AT
+    val fields: List<SelectFieldOrAsterisk> = table.fields().toList()
 }
 
 private object EntityIdentifierTable {
-    const val NAME = "entity_identifier"
-    val table = jooqTable(NAME)
-    val id: Field<UUID> = jooqField(NAME, "id", UUID::class.java)
-    val entityType: Field<String> = jooqField(NAME, "entity_type", String::class.java)
-    val entityId: Field<UUID> = jooqField(NAME, "entity_id", UUID::class.java)
-    val schemeId: Field<UUID> = jooqField(NAME, "scheme_id", UUID::class.java)
-    val identifier: Field<String> = jooqField(NAME, "identifier", String::class.java)
-    val createdAt: Field<Instant> = jooqField(NAME, "created_at", Instant::class.java)
-    val fields: List<SelectFieldOrAsterisk> = listOf(id, entityType, entityId, schemeId, identifier, createdAt)
+    val table = GeneratedEntityIdentifierTable.ENTITY_IDENTIFIER
+    val id = table.ID
+    val entityType = table.ENTITY_TYPE
+    val entityId = table.ENTITY_ID
+    val schemeId = table.SCHEME_ID
+    val identifier = table.IDENTIFIER
+    val createdAt = table.CREATED_AT
+    val fields: List<SelectFieldOrAsterisk> = table.fields().toList()
 }
+
+private fun Instant.toOffsetDateTime(): OffsetDateTime = OffsetDateTime.ofInstant(this, ZoneOffset.UTC)

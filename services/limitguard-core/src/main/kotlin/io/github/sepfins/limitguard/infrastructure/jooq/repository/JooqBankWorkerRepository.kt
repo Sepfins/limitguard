@@ -7,27 +7,26 @@ import io.github.sepfins.limitguard.domain.worker.BankWorker
 import io.github.sepfins.limitguard.domain.worker.BranchCode
 import io.github.sepfins.limitguard.domain.worker.DisplayName
 import io.github.sepfins.limitguard.infrastructure.jooq.JooqPersistenceContext
-import io.github.sepfins.limitguard.infrastructure.jooq.jooqField
 import io.github.sepfins.limitguard.infrastructure.jooq.jooqOperation
-import io.github.sepfins.limitguard.infrastructure.jooq.jooqTable
 import io.github.sepfins.limitguard.infrastructure.jooq.toJsonb
 import io.github.sepfins.limitguard.infrastructure.jooq.toMetadata
+import io.github.sepfins.limitguard.infrastructure.jooq.generated.tables.BankWorker as GeneratedBankWorkerTable
 import io.github.sepfins.limitguard.port.persistence.BankWorkerRepository
-import org.jooq.Field
-import org.jooq.JSONB
 import org.jooq.Record
-import org.jooq.SelectFieldOrAsterisk
 import java.time.Instant
-import java.util.UUID
+import java.time.OffsetDateTime
+import java.time.ZoneOffset
 
 class JooqBankWorkerRepository(
     private val context: JooqPersistenceContext,
 ) : BankWorkerRepository {
+    private val table = GeneratedBankWorkerTable.BANK_WORKER
+
     override fun findById(tenantId: TenantId, id: BankWorkerId): BankWorker? =
         jooqOperation("find bank worker by id") {
             selectWorkers()
-                .where(BankWorkerTable.tenantId.eq(tenantId.value))
-                .and(BankWorkerTable.id.eq(id.value))
+                .where(table.TENANT_ID.eq(tenantId.value))
+                .and(table.ID.eq(id.value))
                 .fetchOne { it.toDomain() }
         }
 
@@ -36,8 +35,8 @@ class JooqBankWorkerRepository(
         externalReference: ExternalReference,
     ): BankWorker? = jooqOperation("find bank worker by external reference") {
         selectWorkers()
-            .where(BankWorkerTable.tenantId.eq(tenantId.value))
-            .and(BankWorkerTable.externalReference.eq(externalReference.value))
+            .where(table.TENANT_ID.eq(tenantId.value))
+            .and(table.EXTERNAL_REFERENCE.eq(externalReference.value))
             .fetchOne { it.toDomain() }
     }
 
@@ -45,16 +44,18 @@ class JooqBankWorkerRepository(
         jooqOperation("insert bank worker") {
             require(bankWorker.tenantId == tenantId) { "bank worker tenant does not match repository tenant" }
             val insert = context.dsl()
-                .insertInto(BankWorkerTable.table)
-                .set(BankWorkerTable.id, bankWorker.id.value)
-                .set(BankWorkerTable.tenantId, tenantId.value)
-                .set(BankWorkerTable.externalReference, bankWorker.externalReference.value)
-                .set(BankWorkerTable.displayName, bankWorker.displayName.value)
-                .set(BankWorkerTable.branchCode, bankWorker.branchCode?.value)
-                .set(BankWorkerTable.isActive, bankWorker.isActive)
-                .set(BankWorkerTable.metadata, bankWorker.metadata.toJsonb())
-            bankWorker.createdAt?.let { insert.set(BankWorkerTable.createdAt, it) }
-            requireNotNull(insert.returning(BankWorkerTable.fields).fetchOne()).toDomain()
+                .insertInto(table)
+                .set(table.ID, bankWorker.id.value)
+                .set(table.TENANT_ID, tenantId.value)
+                .set(table.EXTERNAL_REFERENCE, bankWorker.externalReference.value)
+                .set(table.DISPLAY_NAME, bankWorker.displayName.value)
+                .set(table.BRANCH_CODE, bankWorker.branchCode?.value)
+                .set(table.IS_ACTIVE, bankWorker.isActive)
+                .set(table.METADATA, bankWorker.metadata.toJsonb())
+            bankWorker.createdAt?.let {
+                insert.set(table.CREATED_AT, it.toOffsetDateTime())
+            }
+            requireNotNull(insert.returning(table.fields().toList()).fetchOne()).toDomain()
         }
 
     override fun update(tenantId: TenantId, bankWorker: BankWorker): BankWorker =
@@ -62,44 +63,42 @@ class JooqBankWorkerRepository(
             require(bankWorker.tenantId == tenantId) { "bank worker tenant does not match repository tenant" }
             requireNotNull(
                 context.dsl()
-                    .update(BankWorkerTable.table)
-                    .set(BankWorkerTable.externalReference, bankWorker.externalReference.value)
-                    .set(BankWorkerTable.displayName, bankWorker.displayName.value)
-                    .set(BankWorkerTable.branchCode, bankWorker.branchCode?.value)
-                    .set(BankWorkerTable.isActive, bankWorker.isActive)
-                    .set(BankWorkerTable.metadata, bankWorker.metadata.toJsonb())
-                    .where(BankWorkerTable.tenantId.eq(tenantId.value))
-                    .and(BankWorkerTable.id.eq(bankWorker.id.value))
-                    .returning(BankWorkerTable.fields)
+                    .update(table)
+                    .set(table.EXTERNAL_REFERENCE, bankWorker.externalReference.value)
+                    .set(table.DISPLAY_NAME, bankWorker.displayName.value)
+                    .set(table.BRANCH_CODE, bankWorker.branchCode?.value)
+                    .set(table.IS_ACTIVE, bankWorker.isActive)
+                    .set(table.METADATA, bankWorker.metadata.toJsonb())
+                    .where(table.TENANT_ID.eq(tenantId.value))
+                    .and(table.ID.eq(bankWorker.id.value))
+                    .returning(table.fields().toList())
                     .fetchOne()
             ) { "bank worker not found: ${bankWorker.id.value}" }.toDomain()
         }
 
-    private fun selectWorkers() = context.dsl().select(BankWorkerTable.fields).from(BankWorkerTable.table)
+    private fun selectWorkers() = context.dsl().select(
+        table.ID,
+        table.TENANT_ID,
+        table.EXTERNAL_REFERENCE,
+        table.DISPLAY_NAME,
+        table.BRANCH_CODE,
+        table.IS_ACTIVE,
+        table.METADATA,
+        table.CREATED_AT,
+    ).from(table)
 
     private fun Record.toDomain(): BankWorker = BankWorker(
-        id = BankWorkerId.of(requireNotNull(get(BankWorkerTable.id))),
-        tenantId = TenantId.of(requireNotNull(get(BankWorkerTable.tenantId))),
-        externalReference = ExternalReference.of(requireNotNull(get(BankWorkerTable.externalReference))),
-        displayName = DisplayName.of(requireNotNull(get(BankWorkerTable.displayName))),
-        branchCode = get(BankWorkerTable.branchCode)?.let(BranchCode::of),
-        isActive = requireNotNull(get(BankWorkerTable.isActive)),
-        metadata = get(BankWorkerTable.metadata).toMetadata(),
-        createdAt = get(BankWorkerTable.createdAt),
+        id = BankWorkerId.of(requireNotNull(get(table.ID))),
+        tenantId = TenantId.of(requireNotNull(get(table.TENANT_ID))),
+        externalReference = ExternalReference.of(
+            requireNotNull(get(table.EXTERNAL_REFERENCE))
+        ),
+        displayName = DisplayName.of(requireNotNull(get(table.DISPLAY_NAME))),
+        branchCode = get(table.BRANCH_CODE)?.let(BranchCode::of),
+        isActive = requireNotNull(get(table.IS_ACTIVE)),
+        metadata = get(table.METADATA).toMetadata(),
+        createdAt = get(table.CREATED_AT)?.toInstant(),
     )
-}
 
-private object BankWorkerTable {
-    const val NAME = "bank_worker"
-    val table = jooqTable(NAME)
-    val id: Field<UUID> = jooqField(NAME, "id", UUID::class.java)
-    val tenantId: Field<UUID> = jooqField(NAME, "tenant_id", UUID::class.java)
-    val externalReference: Field<String> = jooqField(NAME, "external_reference", String::class.java)
-    val displayName: Field<String> = jooqField(NAME, "display_name", String::class.java)
-    val branchCode: Field<String> = jooqField(NAME, "branch_code", String::class.java)
-    val isActive: Field<Boolean> = jooqField(NAME, "is_active", Boolean::class.java)
-    val metadata: Field<JSONB> = jooqField(NAME, "metadata", JSONB::class.java)
-    val createdAt: Field<Instant> = jooqField(NAME, "created_at", Instant::class.java)
-    val fields: List<SelectFieldOrAsterisk> =
-        listOf(id, tenantId, externalReference, displayName, branchCode, isActive, metadata, createdAt)
+    private fun Instant.toOffsetDateTime(): OffsetDateTime = OffsetDateTime.ofInstant(this, ZoneOffset.UTC)
 }

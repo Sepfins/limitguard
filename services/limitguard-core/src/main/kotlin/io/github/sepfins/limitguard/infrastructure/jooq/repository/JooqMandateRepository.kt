@@ -12,21 +12,19 @@ import io.github.sepfins.limitguard.domain.funding.FundingSourceScope
 import io.github.sepfins.limitguard.domain.mandate.Mandate
 import io.github.sepfins.limitguard.domain.mandate.MandateName
 import io.github.sepfins.limitguard.infrastructure.jooq.JooqPersistenceContext
-import io.github.sepfins.limitguard.infrastructure.jooq.eqPostgresEnum
-import io.github.sepfins.limitguard.infrastructure.jooq.jooqField
 import io.github.sepfins.limitguard.infrastructure.jooq.jooqOperation
-import io.github.sepfins.limitguard.infrastructure.jooq.jooqTable
-import io.github.sepfins.limitguard.infrastructure.jooq.postgresEnum
 import io.github.sepfins.limitguard.infrastructure.jooq.toJsonb
 import io.github.sepfins.limitguard.infrastructure.jooq.toMetadata
+import io.github.sepfins.limitguard.infrastructure.jooq.generated.enums.LimitFundingScope as GeneratedLimitFundingScope
+import io.github.sepfins.limitguard.infrastructure.jooq.generated.tables.Mandate as GeneratedMandateTable
 import io.github.sepfins.limitguard.port.persistence.MandateRepository
 import org.jooq.Condition
-import org.jooq.Field
-import org.jooq.JSONB
 import org.jooq.Record
 import org.jooq.SelectFieldOrAsterisk
 import org.jooq.impl.DSL
 import java.time.Instant
+import java.time.OffsetDateTime
+import java.time.ZoneOffset
 import java.util.UUID
 
 class JooqMandateRepository(
@@ -85,16 +83,16 @@ class JooqMandateRepository(
             .set(MandateTable.authorityDelegationId, mandate.authorityDelegationId?.value)
             .set(MandateTable.name, mandate.name.value)
             .set(MandateTable.description, mandate.description)
-            .set(MandateTable.fundingScope, postgresEnum(mandate.fundingScope.name(), "limit_funding_scope"))
+            .set(MandateTable.fundingScope, GeneratedLimitFundingScope.valueOf(mandate.fundingScope.name()))
             .set(MandateTable.fundingSourceId, mandate.fundingScope.fundingSourceId())
             .set(MandateTable.fundingSourceGroupId, mandate.fundingScope.fundingSourceGroupId())
             .set(MandateTable.isActive, mandate.isActive)
             .set(MandateTable.version, mandate.version.value)
-            .set(MandateTable.startsAt, mandate.effectiveWindow.startsAt)
-            .set(MandateTable.endsAt, mandate.effectiveWindow.endsAt)
+            .set(MandateTable.startsAt, mandate.effectiveWindow.startsAt.toOffsetDateTime())
+            .set(MandateTable.endsAt, mandate.effectiveWindow.endsAt?.toOffsetDateTime())
             .set(MandateTable.metadata, mandate.metadata.toJsonb())
-        mandate.createdAt?.let { insert.set(MandateTable.createdAt, it) }
-        mandate.updatedAt?.let { insert.set(MandateTable.updatedAt, it) }
+        mandate.createdAt?.let { insert.set(MandateTable.createdAt, it.toOffsetDateTime()) }
+        mandate.updatedAt?.let { insert.set(MandateTable.updatedAt, it.toOffsetDateTime()) }
         requireNotNull(insert.returning(MandateTable.fields).fetchOne()).toDomain()
     }
 
@@ -107,15 +105,15 @@ class JooqMandateRepository(
             .set(MandateTable.authorityDelegationId, mandate.authorityDelegationId?.value)
             .set(MandateTable.name, mandate.name.value)
             .set(MandateTable.description, mandate.description)
-            .set(MandateTable.fundingScope, postgresEnum(mandate.fundingScope.name(), "limit_funding_scope"))
+            .set(MandateTable.fundingScope, GeneratedLimitFundingScope.valueOf(mandate.fundingScope.name()))
             .set(MandateTable.fundingSourceId, mandate.fundingScope.fundingSourceId())
             .set(MandateTable.fundingSourceGroupId, mandate.fundingScope.fundingSourceGroupId())
             .set(MandateTable.isActive, mandate.isActive)
             .set(MandateTable.version, mandate.version.value)
-            .set(MandateTable.startsAt, mandate.effectiveWindow.startsAt)
-            .set(MandateTable.endsAt, mandate.effectiveWindow.endsAt)
+            .set(MandateTable.startsAt, mandate.effectiveWindow.startsAt.toOffsetDateTime())
+            .set(MandateTable.endsAt, mandate.effectiveWindow.endsAt?.toOffsetDateTime())
             .set(MandateTable.metadata, mandate.metadata.toJsonb())
-        mandate.updatedAt?.let { update.set(MandateTable.updatedAt, it) }
+        mandate.updatedAt?.let { update.set(MandateTable.updatedAt, it.toOffsetDateTime()) }
         requireNotNull(
             update.where(MandateTable.tenantId.eq(tenantId.value))
                 .and(MandateTable.id.eq(mandate.id.value))
@@ -133,15 +131,15 @@ class JooqMandateRepository(
         selectMandates()
             .where(MandateTable.tenantId.eq(tenantId.value))
             .and(MandateTable.isActive.isTrue)
-            .and(MandateTable.startsAt.le(at))
-            .and(MandateTable.endsAt.isNull.or(MandateTable.endsAt.gt(at)))
+            .and(MandateTable.startsAt.le(at.toOffsetDateTime()))
+            .and(MandateTable.endsAt.isNull.or(MandateTable.endsAt.gt(at.toOffsetDateTime())))
             .and(condition)
             .orderBy(MandateTable.createdAt, MandateTable.id)
             .fetch { it.toDomain() }
     }
 
     private fun scopeCondition(scope: FundingSourceScope): Condition =
-        MandateTable.fundingScope.eqPostgresEnum(scope.name(), "limit_funding_scope")
+        MandateTable.fundingScope.eq(GeneratedLimitFundingScope.valueOf(scope.name()))
             .and(
                 when (scope) {
                     FundingSourceScope.AllOwnerSources -> DSL.trueCondition()
@@ -155,7 +153,7 @@ class JooqMandateRepository(
     private fun selectMandates() = context.dsl().select(MandateTable.fields).from(MandateTable.table)
 
     private fun Record.toDomain(): Mandate {
-        val fundingScope = when (val scope = requireNotNull(get(MandateTable.fundingScope))) {
+        val fundingScope = when (val scope = requireNotNull(get(MandateTable.fundingScope)).name) {
             "ALL_OWNER_SOURCES" -> FundingSourceScope.AllOwnerSources
             "FUNDING_SOURCE" -> FundingSourceScope.FundingSourceSpecific(
                 FundingSourceId.of(requireNotNull(get(MandateTable.fundingSourceId)))
@@ -180,12 +178,12 @@ class JooqMandateRepository(
             isActive = requireNotNull(get(MandateTable.isActive)),
             version = Version.of(requireNotNull(get(MandateTable.version))),
             effectiveWindow = EffectiveWindow(
-                startsAt = requireNotNull(get(MandateTable.startsAt)),
-                endsAt = get(MandateTable.endsAt),
+                startsAt = requireNotNull(get(MandateTable.startsAt)).toInstant(),
+                endsAt = get(MandateTable.endsAt)?.toInstant(),
             ),
             metadata = get(MandateTable.metadata).toMetadata(),
-            createdAt = get(MandateTable.createdAt),
-            updatedAt = get(MandateTable.updatedAt),
+            createdAt = get(MandateTable.createdAt)?.toInstant(),
+            updatedAt = get(MandateTable.updatedAt)?.toInstant(),
         )
     }
 
@@ -203,42 +201,25 @@ class JooqMandateRepository(
 }
 
 private object MandateTable {
-    const val NAME = "mandate"
-    val table = jooqTable(NAME)
-    val id: Field<UUID> = jooqField(NAME, "id", UUID::class.java)
-    val tenantId: Field<UUID> = jooqField(NAME, "tenant_id", UUID::class.java)
-    val ownerPartyProfileId: Field<UUID> = jooqField(NAME, "owner_party_profile_id", UUID::class.java)
-    val assigneePartyProfileId: Field<UUID> = jooqField(NAME, "assignee_party_profile_id", UUID::class.java)
-    val authorityDelegationId: Field<UUID> = jooqField(NAME, "authority_delegation_id", UUID::class.java)
-    val name: Field<String> = jooqField(NAME, "name", String::class.java)
-    val description: Field<String> = jooqField(NAME, "description", String::class.java)
-    val fundingScope: Field<String> = jooqField(NAME, "funding_scope", String::class.java)
-    val fundingSourceId: Field<UUID> = jooqField(NAME, "funding_source_id", UUID::class.java)
-    val fundingSourceGroupId: Field<UUID> = jooqField(NAME, "funding_source_group_id", UUID::class.java)
-    val isActive: Field<Boolean> = jooqField(NAME, "is_active", Boolean::class.java)
-    val version: Field<Int> = jooqField(NAME, "version", Int::class.java)
-    val startsAt: Field<Instant> = jooqField(NAME, "starts_at", Instant::class.java)
-    val endsAt: Field<Instant> = jooqField(NAME, "ends_at", Instant::class.java)
-    val metadata: Field<JSONB> = jooqField(NAME, "metadata", JSONB::class.java)
-    val createdAt: Field<Instant> = jooqField(NAME, "created_at", Instant::class.java)
-    val updatedAt: Field<Instant> = jooqField(NAME, "updated_at", Instant::class.java)
-    val fields: List<SelectFieldOrAsterisk> = listOf(
-        id,
-        tenantId,
-        ownerPartyProfileId,
-        assigneePartyProfileId,
-        authorityDelegationId,
-        name,
-        description,
-        fundingScope,
-        fundingSourceId,
-        fundingSourceGroupId,
-        isActive,
-        version,
-        startsAt,
-        endsAt,
-        metadata,
-        createdAt,
-        updatedAt,
-    )
+    val table = GeneratedMandateTable.MANDATE
+    val id = table.ID
+    val tenantId = table.TENANT_ID
+    val ownerPartyProfileId = table.OWNER_PARTY_PROFILE_ID
+    val assigneePartyProfileId = table.ASSIGNEE_PARTY_PROFILE_ID
+    val authorityDelegationId = table.AUTHORITY_DELEGATION_ID
+    val name = table.NAME
+    val description = table.DESCRIPTION
+    val fundingScope = table.FUNDING_SCOPE
+    val fundingSourceId = table.FUNDING_SOURCE_ID
+    val fundingSourceGroupId = table.FUNDING_SOURCE_GROUP_ID
+    val isActive = table.IS_ACTIVE
+    val version = table.VERSION
+    val startsAt = table.STARTS_AT
+    val endsAt = table.ENDS_AT
+    val metadata = table.METADATA
+    val createdAt = table.CREATED_AT
+    val updatedAt = table.UPDATED_AT
+    val fields: List<SelectFieldOrAsterisk> = table.fields().toList()
 }
+
+private fun Instant.toOffsetDateTime(): OffsetDateTime = OffsetDateTime.ofInstant(this, ZoneOffset.UTC)

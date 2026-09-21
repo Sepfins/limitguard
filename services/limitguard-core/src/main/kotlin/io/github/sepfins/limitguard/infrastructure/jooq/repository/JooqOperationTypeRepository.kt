@@ -7,16 +7,15 @@ import io.github.sepfins.limitguard.domain.operation.OperationTypeCode
 import io.github.sepfins.limitguard.domain.operation.OperationTypeName
 import io.github.sepfins.limitguard.domain.operation.OperationTypeScope
 import io.github.sepfins.limitguard.infrastructure.jooq.JooqPersistenceContext
-import io.github.sepfins.limitguard.infrastructure.jooq.jooqField
 import io.github.sepfins.limitguard.infrastructure.jooq.jooqOperation
-import io.github.sepfins.limitguard.infrastructure.jooq.jooqTable
+import io.github.sepfins.limitguard.infrastructure.jooq.generated.tables.OperationType as GeneratedOperationTypeTable
 import io.github.sepfins.limitguard.port.persistence.OperationTypeRepository
 import org.jooq.Condition
-import org.jooq.Field
 import org.jooq.Record
 import org.jooq.SelectFieldOrAsterisk
 import java.time.Instant
-import java.util.UUID
+import java.time.OffsetDateTime
+import java.time.ZoneOffset
 
 class JooqOperationTypeRepository(
     private val context: JooqPersistenceContext,
@@ -71,7 +70,7 @@ class JooqOperationTypeRepository(
                 .set(OperationTypeTable.name, operationType.name.value)
                 .set(OperationTypeTable.isLeaf, operationType.isLeaf)
                 .set(OperationTypeTable.isGlobal, operationType.scope == OperationTypeScope.Global)
-            operationType.createdAt?.let { insert.set(OperationTypeTable.createdAt, it) }
+            operationType.createdAt?.let { insert.set(OperationTypeTable.createdAt, it.toOffsetDateTime()) }
             requireNotNull(insert.returning(OperationTypeTable.fields).fetchOne()).toDomain()
         }
 
@@ -117,7 +116,7 @@ class JooqOperationTypeRepository(
             code = OperationTypeCode.of(requireNotNull(get(OperationTypeTable.code))),
             name = OperationTypeName.of(requireNotNull(get(OperationTypeTable.name))),
             isLeaf = requireNotNull(get(OperationTypeTable.isLeaf)),
-            createdAt = get(OperationTypeTable.createdAt),
+            createdAt = get(OperationTypeTable.createdAt)?.toInstant(),
         )
     }
 
@@ -132,16 +131,16 @@ class JooqOperationTypeRepository(
 }
 
 private object OperationTypeTable {
-    const val NAME = "operation_type"
-    val table = jooqTable(NAME)
-    val id: Field<UUID> = jooqField(NAME, "id", UUID::class.java)
-    val tenantId: Field<UUID> = jooqField(NAME, "tenant_id", UUID::class.java)
-    val parentId: Field<UUID> = jooqField(NAME, "parent_id", UUID::class.java)
-    val code: Field<String> = jooqField(NAME, "code", String::class.java)
-    val name: Field<String> = jooqField(NAME, "name", String::class.java)
-    val isLeaf: Field<Boolean> = jooqField(NAME, "is_leaf", Boolean::class.java)
-    val isGlobal: Field<Boolean> = jooqField(NAME, "is_global", Boolean::class.java)
-    val createdAt: Field<Instant> = jooqField(NAME, "created_at", Instant::class.java)
-    val fields: List<SelectFieldOrAsterisk> =
-        listOf(id, tenantId, parentId, code, name, isLeaf, isGlobal, createdAt)
+    val table = GeneratedOperationTypeTable.OPERATION_TYPE
+    val id = table.ID
+    val tenantId = table.TENANT_ID
+    val parentId = table.PARENT_ID
+    val code = table.CODE
+    val name = table.NAME
+    val isLeaf = table.IS_LEAF
+    val isGlobal = table.IS_GLOBAL
+    val createdAt = table.CREATED_AT
+    val fields: List<SelectFieldOrAsterisk> = table.fields().toList()
 }
+
+private fun Instant.toOffsetDateTime(): OffsetDateTime = OffsetDateTime.ofInstant(this, ZoneOffset.UTC)

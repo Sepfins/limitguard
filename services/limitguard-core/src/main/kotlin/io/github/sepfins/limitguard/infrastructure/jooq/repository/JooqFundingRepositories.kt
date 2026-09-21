@@ -21,26 +21,29 @@ import io.github.sepfins.limitguard.domain.funding.FundingSourceProductName
 import io.github.sepfins.limitguard.domain.funding.ProductNodeType
 import io.github.sepfins.limitguard.infrastructure.jooq.JooqPersistenceContext
 import io.github.sepfins.limitguard.infrastructure.jooq.containsIgnoreCaseLiteral
-import io.github.sepfins.limitguard.infrastructure.jooq.eqPostgresEnum
-import io.github.sepfins.limitguard.infrastructure.jooq.jooqField
 import io.github.sepfins.limitguard.infrastructure.jooq.jooqOperation
-import io.github.sepfins.limitguard.infrastructure.jooq.jooqTable
-import io.github.sepfins.limitguard.infrastructure.jooq.postgresEnum
 import io.github.sepfins.limitguard.infrastructure.jooq.toJsonb
 import io.github.sepfins.limitguard.infrastructure.jooq.toMetadata
+import io.github.sepfins.limitguard.infrastructure.jooq.generated.enums.FundingSourceCategory as GeneratedFundingSourceCategory
+import io.github.sepfins.limitguard.infrastructure.jooq.generated.enums.FundingSourceOwnerRole as GeneratedFundingSourceOwnerRole
+import io.github.sepfins.limitguard.infrastructure.jooq.generated.enums.ProductNodeType as GeneratedProductNodeType
+import io.github.sepfins.limitguard.infrastructure.jooq.generated.tables.FundingSource as GeneratedFundingSourceTable
+import io.github.sepfins.limitguard.infrastructure.jooq.generated.tables.FundingSourceGroup as GeneratedFundingSourceGroupTable
+import io.github.sepfins.limitguard.infrastructure.jooq.generated.tables.FundingSourceGroupMember as GeneratedFundingSourceGroupMemberTable
+import io.github.sepfins.limitguard.infrastructure.jooq.generated.tables.FundingSourceOwner as GeneratedFundingSourceOwnerTable
+import io.github.sepfins.limitguard.infrastructure.jooq.generated.tables.FundingSourceProduct as GeneratedFundingSourceProductTable
 import io.github.sepfins.limitguard.port.persistence.FundingSourceGroupMemberRepository
 import io.github.sepfins.limitguard.port.persistence.FundingSourceGroupRepository
 import io.github.sepfins.limitguard.port.persistence.FundingSourceOwnerRepository
 import io.github.sepfins.limitguard.port.persistence.FundingSourceProductRepository
 import io.github.sepfins.limitguard.port.persistence.FundingSourceRepository
-import org.jooq.Field
-import org.jooq.JSONB
+import org.jooq.Condition
 import org.jooq.Record
 import org.jooq.SelectFieldOrAsterisk
-import org.jooq.Condition
 import org.jooq.impl.DSL
 import java.time.Instant
-import java.util.UUID
+import java.time.OffsetDateTime
+import java.time.ZoneOffset
 
 class JooqFundingSourceProductRepository(
     private val context: JooqPersistenceContext,
@@ -72,9 +75,8 @@ class JooqFundingSourceProductRepository(
         selectProducts()
             .where(FundingSourceProductTable.tenantId.eq(tenantId.value))
             .and(
-                FundingSourceProductTable.accountCategory.eqPostgresEnum(
-                    accountCategory.name,
-                    "funding_source_category",
+                FundingSourceProductTable.accountCategory.eq(
+                    GeneratedFundingSourceCategory.valueOf(accountCategory.name),
                 )
             )
             .orderBy(FundingSourceProductTable.code, FundingSourceProductTable.id)
@@ -97,6 +99,31 @@ class JooqFundingSourceProductRepository(
                 .where(FundingSourceProductTable.tenantId.eq(tenantId.value))
                 .and(FundingSourceProductTable.id.eq(id.value))
                 .fetchOne { it.toProduct() }
+        }
+
+    override fun findPath(tenantId: TenantId, leafId: FundingSourceProductId): List<FundingSourceProduct> =
+        jooqOperation("find funding source product path") {
+            val dsl = context.dsl()
+            val ancestor = FundingSourceProductTable.table.`as`("ancestor")
+            val pathTable = DSL.table(DSL.name("product_path"))
+            val pathParent = DSL.field(DSL.name("product_path", "parent_id"), java.util.UUID::class.java)
+            // UNION ends a corrupt cycle here, and the caller reports it.
+            val path = DSL.name("product_path").fields("id", "parent_id").`as`(
+                dsl.select(FundingSourceProductTable.id, FundingSourceProductTable.parentId)
+                    .from(FundingSourceProductTable.table)
+                    .where(FundingSourceProductTable.tenantId.eq(tenantId.value))
+                    .and(FundingSourceProductTable.id.eq(leafId.value))
+                    .union(
+                        dsl.select(ancestor.ID, ancestor.PARENT_ID).from(ancestor)
+                            .join(pathTable).on(ancestor.ID.eq(pathParent))
+                            .where(ancestor.TENANT_ID.eq(tenantId.value)),
+                    ),
+            )
+            dsl.withRecursive(path)
+                .select(FundingSourceProductTable.fields)
+                .from(FundingSourceProductTable.table)
+                .where(FundingSourceProductTable.id.`in`(dsl.select(path.field("id", java.util.UUID::class.java)).from(path)))
+                .fetch { it.toProduct() }
         }
 
     override fun findPage(
@@ -147,15 +174,18 @@ class JooqFundingSourceProductRepository(
                 .set(FundingSourceProductTable.parentId, product.parentId?.value)
                 .set(
                     FundingSourceProductTable.accountCategory,
-                    postgresEnum(product.accountCategory.name, "funding_source_category"),
+                    GeneratedFundingSourceCategory.valueOf(product.accountCategory.name),
                 )
-                .set(FundingSourceProductTable.nodeType, postgresEnum(product.nodeType.name, "product_node_type"))
+                .set(
+                    FundingSourceProductTable.nodeType,
+                    GeneratedProductNodeType.valueOf(product.nodeType.name),
+                )
                 .set(FundingSourceProductTable.code, product.code.value)
                 .set(FundingSourceProductTable.name, product.name.value)
                 .set(FundingSourceProductTable.isLeaf, product.isLeaf)
                 .set(FundingSourceProductTable.isActive, product.isActive)
                 .set(FundingSourceProductTable.metadata, product.metadata.toJsonb())
-            product.createdAt?.let { insert.set(FundingSourceProductTable.createdAt, it) }
+            product.createdAt?.let { insert.set(FundingSourceProductTable.createdAt, it.toOffsetDateTime()) }
             requireNotNull(insert.returning(FundingSourceProductTable.fields).fetchOne()).toProduct()
         }
 
@@ -168,11 +198,11 @@ class JooqFundingSourceProductRepository(
                     .set(FundingSourceProductTable.parentId, product.parentId?.value)
                     .set(
                         FundingSourceProductTable.accountCategory,
-                        postgresEnum(product.accountCategory.name, "funding_source_category"),
+                        GeneratedFundingSourceCategory.valueOf(product.accountCategory.name),
                     )
                     .set(
                         FundingSourceProductTable.nodeType,
-                        postgresEnum(product.nodeType.name, "product_node_type"),
+                        GeneratedProductNodeType.valueOf(product.nodeType.name),
                     )
                     .set(FundingSourceProductTable.code, product.code.value)
                     .set(FundingSourceProductTable.name, product.name.value)
@@ -209,15 +239,15 @@ class JooqFundingSourceProductRepository(
         tenantId = TenantId.of(requireNotNull(get(FundingSourceProductTable.tenantId))),
         parentId = get(FundingSourceProductTable.parentId)?.let(FundingSourceProductId::of),
         accountCategory = FundingSourceCategory.valueOf(
-            requireNotNull(get(FundingSourceProductTable.accountCategory))
+            requireNotNull(get(FundingSourceProductTable.accountCategory)).name
         ),
-        nodeType = ProductNodeType.valueOf(requireNotNull(get(FundingSourceProductTable.nodeType))),
+        nodeType = ProductNodeType.valueOf(requireNotNull(get(FundingSourceProductTable.nodeType)).name),
         code = FundingSourceProductCode.of(requireNotNull(get(FundingSourceProductTable.code))),
         name = FundingSourceProductName.of(requireNotNull(get(FundingSourceProductTable.name))),
         isLeaf = requireNotNull(get(FundingSourceProductTable.isLeaf)),
         isActive = requireNotNull(get(FundingSourceProductTable.isActive)),
         metadata = get(FundingSourceProductTable.metadata).toMetadata(),
-        createdAt = get(FundingSourceProductTable.createdAt),
+        createdAt = get(FundingSourceProductTable.createdAt)?.toInstant(),
     )
 }
 
@@ -263,7 +293,7 @@ class JooqFundingSourceRepository(
                 .set(FundingSourceTable.externalReference, fundingSource.externalReference?.value)
                 .set(FundingSourceTable.isActive, fundingSource.isActive)
                 .set(FundingSourceTable.metadata, fundingSource.metadata.toJsonb())
-            fundingSource.createdAt?.let { insert.set(FundingSourceTable.createdAt, it) }
+            fundingSource.createdAt?.let { insert.set(FundingSourceTable.createdAt, it.toOffsetDateTime()) }
             requireNotNull(insert.returning(FundingSourceTable.fields).fetchOne()).toSource()
         }
 
@@ -293,7 +323,7 @@ class JooqFundingSourceRepository(
         externalReference = get(FundingSourceTable.externalReference)?.let(ExternalReference::of),
         isActive = requireNotNull(get(FundingSourceTable.isActive)),
         metadata = get(FundingSourceTable.metadata).toMetadata(),
-        createdAt = get(FundingSourceTable.createdAt),
+        createdAt = get(FundingSourceTable.createdAt)?.toInstant(),
     )
 }
 
@@ -306,15 +336,6 @@ class JooqFundingSourceOwnerRepository(
                 .where(FundingSourceOwnerTable.tenantId.eq(tenantId.value))
                 .and(FundingSourceOwnerTable.id.eq(id.value))
                 .fetchOne { it.toOwner() }
-        }
-
-    override fun findByOwner(tenantId: TenantId, owner: PartyProfileId): List<FundingSourceOwner> =
-        jooqOperation("find funding source ownerships by owner") {
-            selectOwners()
-                .where(FundingSourceOwnerTable.tenantId.eq(tenantId.value))
-                .and(FundingSourceOwnerTable.partyProfileId.eq(owner.value))
-                .orderBy(FundingSourceOwnerTable.createdAt, FundingSourceOwnerTable.id)
-                .fetch { it.toOwner() }
         }
 
     override fun findByFundingSource(
@@ -341,9 +362,11 @@ class JooqFundingSourceOwnerRepository(
                 .set(FundingSourceOwnerTable.fundingSourceId, fundingSourceOwner.fundingSourceId.value)
                 .set(
                     FundingSourceOwnerTable.ownerRole,
-                    postgresEnum(fundingSourceOwner.ownerRole.name, "funding_source_owner_role"),
+                    GeneratedFundingSourceOwnerRole.valueOf(fundingSourceOwner.ownerRole.name),
                 )
-            fundingSourceOwner.createdAt?.let { insert.set(FundingSourceOwnerTable.createdAt, it) }
+            fundingSourceOwner.createdAt?.let {
+                insert.set(FundingSourceOwnerTable.createdAt, it.toOffsetDateTime())
+            }
             requireNotNull(insert.returning(FundingSourceOwnerTable.fields).fetchOne()).toOwner()
         }
 
@@ -359,7 +382,7 @@ class JooqFundingSourceOwnerRepository(
                     .set(FundingSourceOwnerTable.fundingSourceId, fundingSourceOwner.fundingSourceId.value)
                     .set(
                         FundingSourceOwnerTable.ownerRole,
-                        postgresEnum(fundingSourceOwner.ownerRole.name, "funding_source_owner_role"),
+                        GeneratedFundingSourceOwnerRole.valueOf(fundingSourceOwner.ownerRole.name),
                     )
                     .where(FundingSourceOwnerTable.tenantId.eq(tenantId.value))
                     .and(FundingSourceOwnerTable.id.eq(fundingSourceOwner.id.value))
@@ -377,8 +400,8 @@ class JooqFundingSourceOwnerRepository(
         tenantId = TenantId.of(requireNotNull(get(FundingSourceOwnerTable.tenantId))),
         partyProfileId = PartyProfileId.of(requireNotNull(get(FundingSourceOwnerTable.partyProfileId))),
         fundingSourceId = FundingSourceId.of(requireNotNull(get(FundingSourceOwnerTable.fundingSourceId))),
-        ownerRole = FundingSourceOwnerRole.valueOf(requireNotNull(get(FundingSourceOwnerTable.ownerRole))),
-        createdAt = get(FundingSourceOwnerTable.createdAt),
+        ownerRole = FundingSourceOwnerRole.valueOf(requireNotNull(get(FundingSourceOwnerTable.ownerRole)).name),
+        createdAt = get(FundingSourceOwnerTable.createdAt)?.toInstant(),
     )
 }
 
@@ -418,7 +441,9 @@ class JooqFundingSourceGroupRepository(
                 .set(FundingSourceGroupTable.code, fundingSourceGroup.code.value)
                 .set(FundingSourceGroupTable.name, fundingSourceGroup.name.value)
                 .set(FundingSourceGroupTable.metadata, fundingSourceGroup.metadata.toJsonb())
-            fundingSourceGroup.createdAt?.let { insert.set(FundingSourceGroupTable.createdAt, it) }
+            fundingSourceGroup.createdAt?.let {
+                insert.set(FundingSourceGroupTable.createdAt, it.toOffsetDateTime())
+            }
             requireNotNull(insert.returning(FundingSourceGroupTable.fields).fetchOne()).toGroup()
         }
 
@@ -454,7 +479,7 @@ class JooqFundingSourceGroupRepository(
         code = FundingSourceGroupCode.of(requireNotNull(get(FundingSourceGroupTable.code))),
         name = FundingSourceGroupName.of(requireNotNull(get(FundingSourceGroupTable.name))),
         metadata = get(FundingSourceGroupTable.metadata).toMetadata(),
-        createdAt = get(FundingSourceGroupTable.createdAt),
+        createdAt = get(FundingSourceGroupTable.createdAt)?.toInstant(),
     )
 }
 
@@ -499,7 +524,9 @@ class JooqFundingSourceGroupMemberRepository(
                 .set(FundingSourceGroupMemberTable.groupId, member.groupId.value)
                 .set(FundingSourceGroupMemberTable.ownerPartyProfileId, member.ownerPartyProfileId.value)
                 .set(FundingSourceGroupMemberTable.fundingSourceId, member.fundingSourceId.value)
-            member.createdAt?.let { insert.set(FundingSourceGroupMemberTable.createdAt, it) }
+            member.createdAt?.let {
+                insert.set(FundingSourceGroupMemberTable.createdAt, it.toOffsetDateTime())
+            }
             requireNotNull(insert.returning(FundingSourceGroupMemberTable.fields).fetchOne()).toMember()
         }
 
@@ -514,77 +541,69 @@ class JooqFundingSourceGroupMemberRepository(
             requireNotNull(get(FundingSourceGroupMemberTable.ownerPartyProfileId))
         ),
         fundingSourceId = FundingSourceId.of(requireNotNull(get(FundingSourceGroupMemberTable.fundingSourceId))),
-        createdAt = get(FundingSourceGroupMemberTable.createdAt),
+        createdAt = get(FundingSourceGroupMemberTable.createdAt)?.toInstant(),
     )
 }
 
 private object FundingSourceProductTable {
-    const val NAME = "funding_source_product"
-    val table = jooqTable(NAME)
-    val id: Field<UUID> = jooqField(NAME, "id", UUID::class.java)
-    val tenantId: Field<UUID> = jooqField(NAME, "tenant_id", UUID::class.java)
-    val parentId: Field<UUID> = jooqField(NAME, "parent_id", UUID::class.java)
-    val accountCategory: Field<String> = jooqField(NAME, "account_category", String::class.java)
-    val nodeType: Field<String> = jooqField(NAME, "node_type", String::class.java)
-    val code: Field<String> = jooqField(NAME, "code", String::class.java)
-    val name: Field<String> = jooqField(NAME, "name", String::class.java)
-    val isLeaf: Field<Boolean> = jooqField(NAME, "is_leaf", Boolean::class.java)
-    val isActive: Field<Boolean> = jooqField(NAME, "is_active", Boolean::class.java)
-    val metadata: Field<JSONB> = jooqField(NAME, "metadata", JSONB::class.java)
-    val createdAt: Field<Instant> = jooqField(NAME, "created_at", Instant::class.java)
-    val fields: List<SelectFieldOrAsterisk> =
-        listOf(id, tenantId, parentId, accountCategory, nodeType, code, name, isLeaf, isActive, metadata, createdAt)
+    val table = GeneratedFundingSourceProductTable.FUNDING_SOURCE_PRODUCT
+    val id = table.ID
+    val tenantId = table.TENANT_ID
+    val parentId = table.PARENT_ID
+    val accountCategory = table.ACCOUNT_CATEGORY
+    val nodeType = table.NODE_TYPE
+    val code = table.CODE
+    val name = table.NAME
+    val isLeaf = table.IS_LEAF
+    val isActive = table.IS_ACTIVE
+    val metadata = table.METADATA
+    val createdAt = table.CREATED_AT
+    val fields: List<SelectFieldOrAsterisk> = table.fields().toList()
 }
 
 private object FundingSourceTable {
-    const val NAME = "funding_source"
-    val table = jooqTable(NAME)
-    val id: Field<UUID> = jooqField(NAME, "id", UUID::class.java)
-    val tenantId: Field<UUID> = jooqField(NAME, "tenant_id", UUID::class.java)
-    val productId: Field<UUID> = jooqField(NAME, "product_id", UUID::class.java)
-    val externalReference: Field<String> = jooqField(NAME, "external_reference", String::class.java)
-    val isActive: Field<Boolean> = jooqField(NAME, "is_active", Boolean::class.java)
-    val metadata: Field<JSONB> = jooqField(NAME, "metadata", JSONB::class.java)
-    val createdAt: Field<Instant> = jooqField(NAME, "created_at", Instant::class.java)
-    val fields: List<SelectFieldOrAsterisk> =
-        listOf(id, tenantId, productId, externalReference, isActive, metadata, createdAt)
+    val table = GeneratedFundingSourceTable.FUNDING_SOURCE
+    val id = table.ID
+    val tenantId = table.TENANT_ID
+    val productId = table.PRODUCT_ID
+    val externalReference = table.EXTERNAL_REFERENCE
+    val isActive = table.IS_ACTIVE
+    val metadata = table.METADATA
+    val createdAt = table.CREATED_AT
+    val fields: List<SelectFieldOrAsterisk> = table.fields().toList()
 }
 
 private object FundingSourceOwnerTable {
-    const val NAME = "funding_source_owner"
-    val table = jooqTable(NAME)
-    val id: Field<UUID> = jooqField(NAME, "id", UUID::class.java)
-    val tenantId: Field<UUID> = jooqField(NAME, "tenant_id", UUID::class.java)
-    val partyProfileId: Field<UUID> = jooqField(NAME, "party_profile_id", UUID::class.java)
-    val fundingSourceId: Field<UUID> = jooqField(NAME, "funding_source_id", UUID::class.java)
-    val ownerRole: Field<String> = jooqField(NAME, "owner_role", String::class.java)
-    val createdAt: Field<Instant> = jooqField(NAME, "created_at", Instant::class.java)
-    val fields: List<SelectFieldOrAsterisk> =
-        listOf(id, tenantId, partyProfileId, fundingSourceId, ownerRole, createdAt)
+    val table = GeneratedFundingSourceOwnerTable.FUNDING_SOURCE_OWNER
+    val id = table.ID
+    val tenantId = table.TENANT_ID
+    val partyProfileId = table.PARTY_PROFILE_ID
+    val fundingSourceId = table.FUNDING_SOURCE_ID
+    val ownerRole = table.OWNER_ROLE
+    val createdAt = table.CREATED_AT
+    val fields: List<SelectFieldOrAsterisk> = table.fields().toList()
 }
 
 private object FundingSourceGroupTable {
-    const val NAME = "funding_source_group"
-    val table = jooqTable(NAME)
-    val id: Field<UUID> = jooqField(NAME, "id", UUID::class.java)
-    val tenantId: Field<UUID> = jooqField(NAME, "tenant_id", UUID::class.java)
-    val ownerPartyProfileId: Field<UUID> = jooqField(NAME, "owner_party_profile_id", UUID::class.java)
-    val code: Field<String> = jooqField(NAME, "code", String::class.java)
-    val name: Field<String> = jooqField(NAME, "name", String::class.java)
-    val metadata: Field<JSONB> = jooqField(NAME, "metadata", JSONB::class.java)
-    val createdAt: Field<Instant> = jooqField(NAME, "created_at", Instant::class.java)
-    val fields: List<SelectFieldOrAsterisk> =
-        listOf(id, tenantId, ownerPartyProfileId, code, name, metadata, createdAt)
+    val table = GeneratedFundingSourceGroupTable.FUNDING_SOURCE_GROUP
+    val id = table.ID
+    val tenantId = table.TENANT_ID
+    val ownerPartyProfileId = table.OWNER_PARTY_PROFILE_ID
+    val code = table.CODE
+    val name = table.NAME
+    val metadata = table.METADATA
+    val createdAt = table.CREATED_AT
+    val fields: List<SelectFieldOrAsterisk> = table.fields().toList()
 }
 
 private object FundingSourceGroupMemberTable {
-    const val NAME = "funding_source_group_member"
-    val table = jooqTable(NAME)
-    val tenantId: Field<UUID> = jooqField(NAME, "tenant_id", UUID::class.java)
-    val groupId: Field<UUID> = jooqField(NAME, "group_id", UUID::class.java)
-    val ownerPartyProfileId: Field<UUID> = jooqField(NAME, "owner_party_profile_id", UUID::class.java)
-    val fundingSourceId: Field<UUID> = jooqField(NAME, "funding_source_id", UUID::class.java)
-    val createdAt: Field<Instant> = jooqField(NAME, "created_at", Instant::class.java)
-    val fields: List<SelectFieldOrAsterisk> =
-        listOf(tenantId, groupId, ownerPartyProfileId, fundingSourceId, createdAt)
+    val table = GeneratedFundingSourceGroupMemberTable.FUNDING_SOURCE_GROUP_MEMBER
+    val tenantId = table.TENANT_ID
+    val groupId = table.GROUP_ID
+    val ownerPartyProfileId = table.OWNER_PARTY_PROFILE_ID
+    val fundingSourceId = table.FUNDING_SOURCE_ID
+    val createdAt = table.CREATED_AT
+    val fields: List<SelectFieldOrAsterisk> = table.fields().toList()
 }
+
+private fun Instant.toOffsetDateTime(): OffsetDateTime = OffsetDateTime.ofInstant(this, ZoneOffset.UTC)

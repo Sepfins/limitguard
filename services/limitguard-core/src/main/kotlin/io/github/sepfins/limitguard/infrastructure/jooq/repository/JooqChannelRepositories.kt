@@ -11,20 +11,20 @@ import io.github.sepfins.limitguard.domain.common.ChannelGroupId
 import io.github.sepfins.limitguard.domain.common.ChannelId
 import io.github.sepfins.limitguard.domain.common.TenantId
 import io.github.sepfins.limitguard.infrastructure.jooq.JooqPersistenceContext
-import io.github.sepfins.limitguard.infrastructure.jooq.jooqField
 import io.github.sepfins.limitguard.infrastructure.jooq.jooqOperation
-import io.github.sepfins.limitguard.infrastructure.jooq.jooqTable
 import io.github.sepfins.limitguard.infrastructure.jooq.toJsonb
 import io.github.sepfins.limitguard.infrastructure.jooq.toMetadata
+import io.github.sepfins.limitguard.infrastructure.jooq.generated.tables.Channel as GeneratedChannelTable
+import io.github.sepfins.limitguard.infrastructure.jooq.generated.tables.ChannelGroup as GeneratedChannelGroupTable
+import io.github.sepfins.limitguard.infrastructure.jooq.generated.tables.ChannelGroupMember as GeneratedChannelGroupMemberTable
 import io.github.sepfins.limitguard.port.persistence.ChannelGroupMemberRepository
 import io.github.sepfins.limitguard.port.persistence.ChannelGroupRepository
 import io.github.sepfins.limitguard.port.persistence.ChannelRepository
-import org.jooq.Field
-import org.jooq.JSONB
 import org.jooq.Record
 import org.jooq.SelectFieldOrAsterisk
 import java.time.Instant
-import java.util.UUID
+import java.time.OffsetDateTime
+import java.time.ZoneOffset
 
 class JooqChannelRepository(
     private val context: JooqPersistenceContext,
@@ -73,7 +73,7 @@ class JooqChannelRepository(
             .set(ChannelTable.name, channel.name.value)
             .set(ChannelTable.isActive, channel.isActive)
             .set(ChannelTable.metadata, channel.metadata.toJsonb())
-        channel.createdAt?.let { insert.set(ChannelTable.createdAt, it) }
+        channel.createdAt?.let { insert.set(ChannelTable.createdAt, it.toOffsetDateTime()) }
         requireNotNull(insert.returning(ChannelTable.fields).fetchOne()).toChannel()
     }
 
@@ -102,7 +102,7 @@ class JooqChannelRepository(
         name = ChannelName.of(requireNotNull(get(ChannelTable.name))),
         isActive = requireNotNull(get(ChannelTable.isActive)),
         metadata = get(ChannelTable.metadata).toMetadata(),
-        createdAt = get(ChannelTable.createdAt),
+        createdAt = get(ChannelTable.createdAt)?.toInstant(),
     )
 }
 
@@ -135,7 +135,7 @@ class JooqChannelGroupRepository(
                 .set(ChannelGroupTable.code, channelGroup.code.value)
                 .set(ChannelGroupTable.name, channelGroup.name.value)
                 .set(ChannelGroupTable.metadata, channelGroup.metadata.toJsonb())
-            channelGroup.createdAt?.let { insert.set(ChannelGroupTable.createdAt, it) }
+            channelGroup.createdAt?.let { insert.set(ChannelGroupTable.createdAt, it.toOffsetDateTime()) }
             requireNotNull(insert.returning(ChannelGroupTable.fields).fetchOne()).toGroup()
         }
 
@@ -163,7 +163,7 @@ class JooqChannelGroupRepository(
         code = ChannelGroupCode.of(requireNotNull(get(ChannelGroupTable.code))),
         name = ChannelGroupName.of(requireNotNull(get(ChannelGroupTable.name))),
         metadata = get(ChannelGroupTable.metadata).toMetadata(),
-        createdAt = get(ChannelGroupTable.createdAt),
+        createdAt = get(ChannelGroupTable.createdAt)?.toInstant(),
     )
 }
 
@@ -198,7 +198,7 @@ class JooqChannelGroupMemberRepository(
                 .set(ChannelGroupMemberTable.tenantId, tenantId.value)
                 .set(ChannelGroupMemberTable.groupId, member.groupId.value)
                 .set(ChannelGroupMemberTable.channelId, member.channelId.value)
-            member.createdAt?.let { insert.set(ChannelGroupMemberTable.createdAt, it) }
+            member.createdAt?.let { insert.set(ChannelGroupMemberTable.createdAt, it.toOffsetDateTime()) }
             requireNotNull(insert.returning(ChannelGroupMemberTable.fields).fetchOne()).toMember()
         }
 
@@ -210,41 +210,40 @@ class JooqChannelGroupMemberRepository(
         tenantId = TenantId.of(requireNotNull(get(ChannelGroupMemberTable.tenantId))),
         groupId = ChannelGroupId.of(requireNotNull(get(ChannelGroupMemberTable.groupId))),
         channelId = ChannelId.of(requireNotNull(get(ChannelGroupMemberTable.channelId))),
-        createdAt = get(ChannelGroupMemberTable.createdAt),
+        createdAt = get(ChannelGroupMemberTable.createdAt)?.toInstant(),
     )
 }
 
 private object ChannelTable {
-    const val NAME = "channel"
-    val table = jooqTable(NAME)
-    val id: Field<UUID> = jooqField(NAME, "id", UUID::class.java)
-    val tenantId: Field<UUID> = jooqField(NAME, "tenant_id", UUID::class.java)
-    val code: Field<String> = jooqField(NAME, "code", String::class.java)
-    val name: Field<String> = jooqField(NAME, "name", String::class.java)
-    val isActive: Field<Boolean> = jooqField(NAME, "is_active", Boolean::class.java)
-    val metadata: Field<JSONB> = jooqField(NAME, "metadata", JSONB::class.java)
-    val createdAt: Field<Instant> = jooqField(NAME, "created_at", Instant::class.java)
-    val fields: List<SelectFieldOrAsterisk> = listOf(id, tenantId, code, name, isActive, metadata, createdAt)
+    val table = GeneratedChannelTable.CHANNEL
+    val id = table.ID
+    val tenantId = table.TENANT_ID
+    val code = table.CODE
+    val name = table.NAME
+    val isActive = table.IS_ACTIVE
+    val metadata = table.METADATA
+    val createdAt = table.CREATED_AT
+    val fields: List<SelectFieldOrAsterisk> = table.fields().toList()
 }
 
 private object ChannelGroupTable {
-    const val NAME = "channel_group"
-    val table = jooqTable(NAME)
-    val id: Field<UUID> = jooqField(NAME, "id", UUID::class.java)
-    val tenantId: Field<UUID> = jooqField(NAME, "tenant_id", UUID::class.java)
-    val code: Field<String> = jooqField(NAME, "code", String::class.java)
-    val name: Field<String> = jooqField(NAME, "name", String::class.java)
-    val metadata: Field<JSONB> = jooqField(NAME, "metadata", JSONB::class.java)
-    val createdAt: Field<Instant> = jooqField(NAME, "created_at", Instant::class.java)
-    val fields: List<SelectFieldOrAsterisk> = listOf(id, tenantId, code, name, metadata, createdAt)
+    val table = GeneratedChannelGroupTable.CHANNEL_GROUP
+    val id = table.ID
+    val tenantId = table.TENANT_ID
+    val code = table.CODE
+    val name = table.NAME
+    val metadata = table.METADATA
+    val createdAt = table.CREATED_AT
+    val fields: List<SelectFieldOrAsterisk> = table.fields().toList()
 }
 
 private object ChannelGroupMemberTable {
-    const val NAME = "channel_group_member"
-    val table = jooqTable(NAME)
-    val tenantId: Field<UUID> = jooqField(NAME, "tenant_id", UUID::class.java)
-    val groupId: Field<UUID> = jooqField(NAME, "group_id", UUID::class.java)
-    val channelId: Field<UUID> = jooqField(NAME, "channel_id", UUID::class.java)
-    val createdAt: Field<Instant> = jooqField(NAME, "created_at", Instant::class.java)
-    val fields: List<SelectFieldOrAsterisk> = listOf(tenantId, groupId, channelId, createdAt)
+    val table = GeneratedChannelGroupMemberTable.CHANNEL_GROUP_MEMBER
+    val tenantId = table.TENANT_ID
+    val groupId = table.GROUP_ID
+    val channelId = table.CHANNEL_ID
+    val createdAt = table.CREATED_AT
+    val fields: List<SelectFieldOrAsterisk> = table.fields().toList()
 }
+
+private fun Instant.toOffsetDateTime(): OffsetDateTime = OffsetDateTime.ofInstant(this, ZoneOffset.UTC)

@@ -6,20 +6,18 @@ import io.github.sepfins.limitguard.domain.tenant.Tenant
 import io.github.sepfins.limitguard.domain.tenant.TenantName
 import io.github.sepfins.limitguard.infrastructure.jooq.JooqPersistenceContext
 import io.github.sepfins.limitguard.infrastructure.jooq.containsIgnoreCaseLiteral
-import io.github.sepfins.limitguard.infrastructure.jooq.jooqField
 import io.github.sepfins.limitguard.infrastructure.jooq.jooqOperation
-import io.github.sepfins.limitguard.infrastructure.jooq.jooqTable
-import io.github.sepfins.limitguard.infrastructure.jooq.postgresEnum
 import io.github.sepfins.limitguard.infrastructure.jooq.toJsonb
 import io.github.sepfins.limitguard.infrastructure.jooq.toMetadata
+import io.github.sepfins.limitguard.infrastructure.jooq.generated.enums.NoMatchingRuleBehavior as GeneratedNoMatchingRuleBehavior
+import io.github.sepfins.limitguard.infrastructure.jooq.generated.tables.Tenant as GeneratedTenantTable
 import io.github.sepfins.limitguard.port.persistence.TenantRepository
-import org.jooq.Field
-import org.jooq.JSONB
 import org.jooq.Condition
 import org.jooq.Record
 import org.jooq.SelectFieldOrAsterisk
 import java.time.Instant
-import java.util.UUID
+import java.time.OffsetDateTime
+import java.time.ZoneOffset
 
 class JooqTenantRepository(
     private val context: JooqPersistenceContext,
@@ -68,9 +66,9 @@ class JooqTenantRepository(
             .set(TenantTable.config, tenant.config.toJsonb())
             .set(
                 TenantTable.noMatchingRuleBehavior,
-                postgresEnum(tenant.noMatchingRuleBehavior.name, "no_matching_rule_behavior"),
+                GeneratedNoMatchingRuleBehavior.valueOf(tenant.noMatchingRuleBehavior.name),
             )
-        tenant.createdAt?.let { insert.set(TenantTable.createdAt, it) }
+        tenant.createdAt?.let { insert.set(TenantTable.createdAt, it.toOffsetDateTime()) }
         requireNotNull(insert.returning(TenantTable.fields).fetchOne()).toDomain()
     }
 
@@ -82,7 +80,7 @@ class JooqTenantRepository(
                 .set(TenantTable.config, tenant.config.toJsonb())
                 .set(
                     TenantTable.noMatchingRuleBehavior,
-                    postgresEnum(tenant.noMatchingRuleBehavior.name, "no_matching_rule_behavior"),
+                    GeneratedNoMatchingRuleBehavior.valueOf(tenant.noMatchingRuleBehavior.name),
                 )
                 .where(TenantTable.id.eq(tenant.id.value))
                 .returning(TenantTable.fields)
@@ -100,20 +98,20 @@ class JooqTenantRepository(
         name = TenantName.of(requireNotNull(get(TenantTable.name))),
         config = get(TenantTable.config).toMetadata(),
         noMatchingRuleBehavior = NoMatchingRuleBehavior.valueOf(
-            requireNotNull(get(TenantTable.noMatchingRuleBehavior))
+            requireNotNull(get(TenantTable.noMatchingRuleBehavior)).name
         ),
-        createdAt = get(TenantTable.createdAt),
+        createdAt = get(TenantTable.createdAt)?.toInstant(),
     )
 }
 
 private object TenantTable {
-    const val NAME = "tenant"
-    val table = jooqTable(NAME)
-    val id: Field<UUID> = jooqField(NAME, "id", UUID::class.java)
-    val name: Field<String> = jooqField(NAME, "name", String::class.java)
-    val config: Field<JSONB> = jooqField(NAME, "config", JSONB::class.java)
-    val noMatchingRuleBehavior: Field<String> =
-        jooqField(NAME, "no_matching_rule_behavior", String::class.java)
-    val createdAt: Field<Instant> = jooqField(NAME, "created_at", Instant::class.java)
-    val fields: List<SelectFieldOrAsterisk> = listOf(id, name, config, noMatchingRuleBehavior, createdAt)
+    val table = GeneratedTenantTable.TENANT
+    val id = table.ID
+    val name = table.NAME
+    val config = table.CONFIG
+    val noMatchingRuleBehavior = table.NO_MATCHING_RULE_BEHAVIOR
+    val createdAt = table.CREATED_AT
+    val fields: List<SelectFieldOrAsterisk> = table.fields().toList()
 }
+
+private fun Instant.toOffsetDateTime(): OffsetDateTime = OffsetDateTime.ofInstant(this, ZoneOffset.UTC)

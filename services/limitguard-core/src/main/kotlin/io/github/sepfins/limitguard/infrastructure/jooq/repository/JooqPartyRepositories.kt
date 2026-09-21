@@ -1,7 +1,6 @@
 package io.github.sepfins.limitguard.infrastructure.jooq.repository
 
 import io.github.sepfins.limitguard.domain.common.EffectiveWindow
-import io.github.sepfins.limitguard.domain.common.Metadata
 import io.github.sepfins.limitguard.domain.common.PartyId
 import io.github.sepfins.limitguard.domain.common.PartyLegalIdentifierId
 import io.github.sepfins.limitguard.domain.common.PartyProfileDelegationId
@@ -23,25 +22,29 @@ import io.github.sepfins.limitguard.domain.party.PartyProfileDelegation
 import io.github.sepfins.limitguard.domain.party.PartyProfileDelegationType
 import io.github.sepfins.limitguard.domain.party.PartyType
 import io.github.sepfins.limitguard.infrastructure.jooq.JooqPersistenceContext
-import io.github.sepfins.limitguard.infrastructure.jooq.jooqField
 import io.github.sepfins.limitguard.infrastructure.jooq.jooqOperation
-import io.github.sepfins.limitguard.infrastructure.jooq.jooqTable
-import io.github.sepfins.limitguard.infrastructure.jooq.postgresEnum
 import io.github.sepfins.limitguard.infrastructure.jooq.toJsonb
 import io.github.sepfins.limitguard.infrastructure.jooq.toMetadata
+import io.github.sepfins.limitguard.infrastructure.jooq.generated.enums.PartyProfileDelegationType as GeneratedPartyProfileDelegationType
+import io.github.sepfins.limitguard.infrastructure.jooq.generated.enums.PartyType as GeneratedPartyType
+import io.github.sepfins.limitguard.infrastructure.jooq.generated.tables.Individual as GeneratedIndividualTable
+import io.github.sepfins.limitguard.infrastructure.jooq.generated.tables.LegalEntity as GeneratedLegalEntityTable
+import io.github.sepfins.limitguard.infrastructure.jooq.generated.tables.Party as GeneratedPartyTable
+import io.github.sepfins.limitguard.infrastructure.jooq.generated.tables.PartyLegalIdentifier as GeneratedPartyLegalIdentifierTable
+import io.github.sepfins.limitguard.infrastructure.jooq.generated.tables.PartyProfile as GeneratedPartyProfileTable
+import io.github.sepfins.limitguard.infrastructure.jooq.generated.tables.PartyProfileDelegation as GeneratedPartyProfileDelegationTable
 import io.github.sepfins.limitguard.port.persistence.IndividualRepository
 import io.github.sepfins.limitguard.port.persistence.LegalEntityRepository
 import io.github.sepfins.limitguard.port.persistence.PartyLegalIdentifierRepository
 import io.github.sepfins.limitguard.port.persistence.PartyProfileDelegationRepository
 import io.github.sepfins.limitguard.port.persistence.PartyProfileRepository
 import io.github.sepfins.limitguard.port.persistence.PartyRepository
-import org.jooq.Field
-import org.jooq.JSONB
 import org.jooq.Record
 import org.jooq.SelectFieldOrAsterisk
 import java.time.Instant
 import java.time.LocalDate
-import java.util.UUID
+import java.time.OffsetDateTime
+import java.time.ZoneOffset
 
 class JooqPartyRepository(
     private val context: JooqPersistenceContext,
@@ -54,8 +57,8 @@ class JooqPartyRepository(
         val insert = context.dsl()
             .insertInto(PartyTable.table)
             .set(PartyTable.id, party.id.value)
-            .set(PartyTable.partyType, postgresEnum(party.partyType.name, "party_type"))
-        party.createdAt?.let { insert.set(PartyTable.createdAt, it) }
+            .set(PartyTable.partyType, GeneratedPartyType.valueOf(party.partyType.name))
+        party.createdAt?.let { insert.set(PartyTable.createdAt, it.toOffsetDateTime()) }
         requireNotNull(insert.returning(PartyTable.fields).fetchOne()).toParty()
     }
 
@@ -63,7 +66,7 @@ class JooqPartyRepository(
         requireNotNull(
             context.dsl()
                 .update(PartyTable.table)
-                .set(PartyTable.partyType, postgresEnum(party.partyType.name, "party_type"))
+                .set(PartyTable.partyType, GeneratedPartyType.valueOf(party.partyType.name))
                 .where(PartyTable.id.eq(party.id.value))
                 .returning(PartyTable.fields)
                 .fetchOne()
@@ -74,8 +77,8 @@ class JooqPartyRepository(
 
     private fun Record.toParty(): Party = Party(
         id = PartyId.of(requireNotNull(get(PartyTable.id))),
-        partyType = PartyType.valueOf(requireNotNull(get(PartyTable.partyType))),
-        createdAt = get(PartyTable.createdAt),
+        partyType = PartyType.valueOf(requireNotNull(get(PartyTable.partyType)).name),
+        createdAt = get(PartyTable.createdAt)?.toInstant(),
     )
 }
 
@@ -200,7 +203,7 @@ class JooqPartyLegalIdentifierRepository(
                 .set(PartyLegalIdentifierTable.identifierType, identifier.identifierType.value)
                 .set(PartyLegalIdentifierTable.normalizedIdentifier, identifier.normalizedIdentifier.value)
                 .set(PartyLegalIdentifierTable.metadata, identifier.metadata.toJsonb())
-            identifier.createdAt?.let { insert.set(PartyLegalIdentifierTable.createdAt, it) }
+            identifier.createdAt?.let { insert.set(PartyLegalIdentifierTable.createdAt, it.toOffsetDateTime()) }
             requireNotNull(insert.returning(PartyLegalIdentifierTable.fields).fetchOne()).toIdentifier()
         }
 
@@ -235,7 +238,7 @@ class JooqPartyLegalIdentifierRepository(
             requireNotNull(get(PartyLegalIdentifierTable.normalizedIdentifier))
         ),
         metadata = get(PartyLegalIdentifierTable.metadata).toMetadata(),
-        createdAt = get(PartyLegalIdentifierTable.createdAt),
+        createdAt = get(PartyLegalIdentifierTable.createdAt)?.toInstant(),
     )
 }
 
@@ -268,7 +271,7 @@ class JooqPartyProfileRepository(
                 .set(PartyProfileTable.partyId, partyProfile.partyId.value)
                 .set(PartyProfileTable.tenantId, tenantId.value)
                 .set(PartyProfileTable.metadata, partyProfile.metadata.toJsonb())
-            partyProfile.createdAt?.let { insert.set(PartyProfileTable.createdAt, it) }
+            partyProfile.createdAt?.let { insert.set(PartyProfileTable.createdAt, it.toOffsetDateTime()) }
             requireNotNull(insert.returning(PartyProfileTable.fields).fetchOne()).toProfile()
         }
 
@@ -293,7 +296,7 @@ class JooqPartyProfileRepository(
         id = PartyProfileId.of(requireNotNull(get(PartyProfileTable.id))),
         partyId = PartyId.of(requireNotNull(get(PartyProfileTable.partyId))),
         tenantId = TenantId.of(requireNotNull(get(PartyProfileTable.tenantId))),
-        createdAt = get(PartyProfileTable.createdAt),
+        createdAt = get(PartyProfileTable.createdAt)?.toInstant(),
         metadata = get(PartyProfileTable.metadata).toMetadata(),
     )
 }
@@ -333,12 +336,20 @@ class JooqPartyProfileDelegationRepository(
                 .set(PartyProfileDelegationTable.delegatePartyProfileId, delegation.delegatePartyProfileId.value)
                 .set(
                     PartyProfileDelegationTable.delegationType,
-                    postgresEnum(delegation.delegationType.name, "party_profile_delegation_type"),
+                    GeneratedPartyProfileDelegationType.valueOf(delegation.delegationType.name),
                 )
-                .set(PartyProfileDelegationTable.startsAt, delegation.effectiveWindow.startsAt)
-                .set(PartyProfileDelegationTable.endsAt, delegation.effectiveWindow.endsAt)
+                .set(
+                    PartyProfileDelegationTable.startsAt,
+                    delegation.effectiveWindow.startsAt.toOffsetDateTime(),
+                )
+                .set(
+                    PartyProfileDelegationTable.endsAt,
+                    delegation.effectiveWindow.endsAt?.toOffsetDateTime(),
+                )
                 .set(PartyProfileDelegationTable.metadata, delegation.metadata.toJsonb())
-            delegation.createdAt?.let { insert.set(PartyProfileDelegationTable.createdAt, it) }
+            delegation.createdAt?.let {
+                insert.set(PartyProfileDelegationTable.createdAt, it.toOffsetDateTime())
+            }
             requireNotNull(insert.returning(PartyProfileDelegationTable.fields).fetchOne()).toDelegation()
         }
 
@@ -354,10 +365,16 @@ class JooqPartyProfileDelegationRepository(
                     .set(PartyProfileDelegationTable.delegatePartyProfileId, delegation.delegatePartyProfileId.value)
                     .set(
                         PartyProfileDelegationTable.delegationType,
-                        postgresEnum(delegation.delegationType.name, "party_profile_delegation_type"),
+                        GeneratedPartyProfileDelegationType.valueOf(delegation.delegationType.name),
                     )
-                    .set(PartyProfileDelegationTable.startsAt, delegation.effectiveWindow.startsAt)
-                    .set(PartyProfileDelegationTable.endsAt, delegation.effectiveWindow.endsAt)
+                    .set(
+                        PartyProfileDelegationTable.startsAt,
+                        delegation.effectiveWindow.startsAt.toOffsetDateTime(),
+                    )
+                    .set(
+                        PartyProfileDelegationTable.endsAt,
+                        delegation.effectiveWindow.endsAt?.toOffsetDateTime(),
+                    )
                     .set(PartyProfileDelegationTable.metadata, delegation.metadata.toJsonb())
                     .where(PartyProfileDelegationTable.tenantId.eq(tenantId.value))
                     .and(PartyProfileDelegationTable.id.eq(delegation.id.value))
@@ -380,91 +397,76 @@ class JooqPartyProfileDelegationRepository(
             requireNotNull(get(PartyProfileDelegationTable.delegatePartyProfileId))
         ),
         delegationType = PartyProfileDelegationType.valueOf(
-            requireNotNull(get(PartyProfileDelegationTable.delegationType))
+            requireNotNull(get(PartyProfileDelegationTable.delegationType)).name
         ),
         effectiveWindow = EffectiveWindow(
-            startsAt = requireNotNull(get(PartyProfileDelegationTable.startsAt)),
-            endsAt = get(PartyProfileDelegationTable.endsAt),
+            startsAt = requireNotNull(get(PartyProfileDelegationTable.startsAt)).toInstant(),
+            endsAt = get(PartyProfileDelegationTable.endsAt)?.toInstant(),
         ),
         metadata = get(PartyProfileDelegationTable.metadata).toMetadata(),
-        createdAt = get(PartyProfileDelegationTable.createdAt),
+        createdAt = get(PartyProfileDelegationTable.createdAt)?.toInstant(),
     )
 }
 
 private object PartyTable {
-    const val NAME = "party"
-    val table = jooqTable(NAME)
-    val id: Field<UUID> = jooqField(NAME, "id", UUID::class.java)
-    val partyType: Field<String> = jooqField(NAME, "party_type", String::class.java)
-    val createdAt: Field<Instant> = jooqField(NAME, "created_at", Instant::class.java)
-    val fields: List<SelectFieldOrAsterisk> = listOf(id, partyType, createdAt)
+    val table = GeneratedPartyTable.PARTY
+    val id = table.ID
+    val partyType = table.PARTY_TYPE
+    val createdAt = table.CREATED_AT
+    val fields: List<SelectFieldOrAsterisk> = table.fields().toList()
 }
 
 private object IndividualTable {
-    const val NAME = "individual"
-    val table = jooqTable(NAME)
-    val partyId: Field<UUID> = jooqField(NAME, "party_id", UUID::class.java)
-    val firstName: Field<String> = jooqField(NAME, "first_name", String::class.java)
-    val lastName: Field<String> = jooqField(NAME, "last_name", String::class.java)
-    val birthDate: Field<LocalDate> = jooqField(NAME, "birth_date", LocalDate::class.java)
-    val fields: List<SelectFieldOrAsterisk> = listOf(partyId, firstName, lastName, birthDate)
+    val table = GeneratedIndividualTable.INDIVIDUAL
+    val partyId = table.PARTY_ID
+    val firstName = table.FIRST_NAME
+    val lastName = table.LAST_NAME
+    val birthDate = table.BIRTH_DATE
+    val fields: List<SelectFieldOrAsterisk> = table.fields().toList()
 }
 
 private object LegalEntityTable {
-    const val NAME = "legal_entity"
-    val table = jooqTable(NAME)
-    val partyId: Field<UUID> = jooqField(NAME, "party_id", UUID::class.java)
-    val legalName: Field<String> = jooqField(NAME, "legal_name", String::class.java)
-    val legalForm: Field<String> = jooqField(NAME, "legal_form", String::class.java)
-    val fields: List<SelectFieldOrAsterisk> = listOf(partyId, legalName, legalForm)
+    val table = GeneratedLegalEntityTable.LEGAL_ENTITY
+    val partyId = table.PARTY_ID
+    val legalName = table.LEGAL_NAME
+    val legalForm = table.LEGAL_FORM
+    val fields: List<SelectFieldOrAsterisk> = table.fields().toList()
 }
 
 private object PartyLegalIdentifierTable {
-    const val NAME = "party_legal_identifier"
-    val table = jooqTable(NAME)
-    val id: Field<UUID> = jooqField(NAME, "id", UUID::class.java)
-    val partyId: Field<UUID> = jooqField(NAME, "party_id", UUID::class.java)
-    val jurisdictionCountry: Field<String> = jooqField(NAME, "jurisdiction_country", String::class.java)
-    val identifierType: Field<String> = jooqField(NAME, "identifier_type", String::class.java)
-    val normalizedIdentifier: Field<String> = jooqField(NAME, "normalized_identifier", String::class.java)
-    val metadata: Field<JSONB> = jooqField(NAME, "metadata", JSONB::class.java)
-    val createdAt: Field<Instant> = jooqField(NAME, "created_at", Instant::class.java)
-    val fields: List<SelectFieldOrAsterisk> =
-        listOf(id, partyId, jurisdictionCountry, identifierType, normalizedIdentifier, metadata, createdAt)
+    val table = GeneratedPartyLegalIdentifierTable.PARTY_LEGAL_IDENTIFIER
+    val id = table.ID
+    val partyId = table.PARTY_ID
+    val jurisdictionCountry = table.JURISDICTION_COUNTRY
+    val identifierType = table.IDENTIFIER_TYPE
+    val normalizedIdentifier = table.NORMALIZED_IDENTIFIER
+    val metadata = table.METADATA
+    val createdAt = table.CREATED_AT
+    val fields: List<SelectFieldOrAsterisk> = table.fields().toList()
 }
 
 private object PartyProfileTable {
-    const val NAME = "party_profile"
-    val table = jooqTable(NAME)
-    val id: Field<UUID> = jooqField(NAME, "id", UUID::class.java)
-    val partyId: Field<UUID> = jooqField(NAME, "party_id", UUID::class.java)
-    val tenantId: Field<UUID> = jooqField(NAME, "tenant_id", UUID::class.java)
-    val metadata: Field<JSONB> = jooqField(NAME, "metadata", JSONB::class.java)
-    val createdAt: Field<Instant> = jooqField(NAME, "created_at", Instant::class.java)
-    val fields: List<SelectFieldOrAsterisk> = listOf(id, partyId, tenantId, metadata, createdAt)
+    val table = GeneratedPartyProfileTable.PARTY_PROFILE
+    val id = table.ID
+    val partyId = table.PARTY_ID
+    val tenantId = table.TENANT_ID
+    val metadata = table.METADATA
+    val createdAt = table.CREATED_AT
+    val fields: List<SelectFieldOrAsterisk> = table.fields().toList()
 }
 
 private object PartyProfileDelegationTable {
-    const val NAME = "party_profile_delegation"
-    val table = jooqTable(NAME)
-    val id: Field<UUID> = jooqField(NAME, "id", UUID::class.java)
-    val tenantId: Field<UUID> = jooqField(NAME, "tenant_id", UUID::class.java)
-    val ownerPartyProfileId: Field<UUID> = jooqField(NAME, "owner_party_profile_id", UUID::class.java)
-    val delegatePartyProfileId: Field<UUID> = jooqField(NAME, "delegate_party_profile_id", UUID::class.java)
-    val delegationType: Field<String> = jooqField(NAME, "delegation_type", String::class.java)
-    val startsAt: Field<Instant> = jooqField(NAME, "starts_at", Instant::class.java)
-    val endsAt: Field<Instant> = jooqField(NAME, "ends_at", Instant::class.java)
-    val metadata: Field<JSONB> = jooqField(NAME, "metadata", JSONB::class.java)
-    val createdAt: Field<Instant> = jooqField(NAME, "created_at", Instant::class.java)
-    val fields: List<SelectFieldOrAsterisk> = listOf(
-        id,
-        tenantId,
-        ownerPartyProfileId,
-        delegatePartyProfileId,
-        delegationType,
-        startsAt,
-        endsAt,
-        metadata,
-        createdAt,
-    )
+    val table = GeneratedPartyProfileDelegationTable.PARTY_PROFILE_DELEGATION
+    val id = table.ID
+    val tenantId = table.TENANT_ID
+    val ownerPartyProfileId = table.OWNER_PARTY_PROFILE_ID
+    val delegatePartyProfileId = table.DELEGATE_PARTY_PROFILE_ID
+    val delegationType = table.DELEGATION_TYPE
+    val startsAt = table.STARTS_AT
+    val endsAt = table.ENDS_AT
+    val metadata = table.METADATA
+    val createdAt = table.CREATED_AT
+    val fields: List<SelectFieldOrAsterisk> = table.fields().toList()
 }
+
+private fun Instant.toOffsetDateTime(): OffsetDateTime = OffsetDateTime.ofInstant(this, ZoneOffset.UTC)

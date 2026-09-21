@@ -1,6 +1,6 @@
 package io.github.sepfins.limitguard.infrastructure.jooq
 
-import com.google.gson.Gson
+import com.google.gson.GsonBuilder
 import com.google.gson.JsonElement
 import com.google.gson.JsonParser
 import io.github.sepfins.limitguard.api.errors.ConflictException
@@ -10,14 +10,11 @@ import io.github.sepfins.limitguard.domain.common.Metadata
 import org.jooq.Condition
 import org.jooq.Field
 import org.jooq.JSONB
-import org.jooq.Record
-import org.jooq.Table
 import org.jooq.exception.DataAccessException
-import org.jooq.impl.DSL
 import org.postgresql.util.PSQLException
 import java.math.BigDecimal
 
-private val gson = Gson()
+private val gson = GsonBuilder().serializeNulls().create()
 
 internal fun Metadata.toJsonb(): JSONB = JSONB.valueOf(gson.toJson(value))
 
@@ -80,27 +77,6 @@ private fun numberValue(value: String): Number {
         runCatching { return decimal.longValueExact() }
     }
     return decimal
-}
-
-internal fun postgresEnum(value: String, typeName: String): Field<String> =
-    DSL.field("{0}::$typeName", String::class.java, DSL.`val`(value))
-
-internal fun nullablePostgresEnum(value: String?, typeName: String): Field<String> =
-    DSL.field("{0}::$typeName", String::class.java, DSL.`val`(value, String::class.java))
-
-internal fun jooqTable(name: String): Table<Record> = DSL.table(DSL.name(name))
-
-internal fun <T> jooqField(table: String, name: String, type: Class<T>): Field<T> =
-    DSL.field(DSL.name(table, name), type)
-
-internal fun Field<String>.eqPostgresEnum(value: String, typeName: String): Condition =
-    eq(postgresEnum(value, typeName))
-
-internal fun Field<String>.inPostgresEnums(values: Collection<String>, typeName: String): Condition {
-    require(values.isNotEmpty()) { "PostgreSQL enum values cannot be empty" }
-    return values
-        .map { eqPostgresEnum(it, typeName) }
-        .reduce(Condition::or)
 }
 
 internal fun Field<String>.containsIgnoreCaseLiteral(search: String): Condition {

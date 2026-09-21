@@ -10,39 +10,36 @@ import io.github.sepfins.limitguard.domain.common.UsageEventId
 import io.github.sepfins.limitguard.domain.usage.LimitUsageEvent
 import io.github.sepfins.limitguard.domain.usage.LimitUsageEventType
 import io.github.sepfins.limitguard.infrastructure.jooq.JooqPersistenceContext
-import io.github.sepfins.limitguard.infrastructure.jooq.eqPostgresEnum
-import io.github.sepfins.limitguard.infrastructure.jooq.jooqField
+import io.github.sepfins.limitguard.infrastructure.jooq.generated.enums.LimitUsageEventType as GeneratedLimitUsageEventType
+import io.github.sepfins.limitguard.infrastructure.jooq.generated.tables.LimitUsageEvent as GeneratedLimitUsageEventTable
 import io.github.sepfins.limitguard.infrastructure.jooq.jooqOperation
-import io.github.sepfins.limitguard.infrastructure.jooq.jooqTable
-import io.github.sepfins.limitguard.infrastructure.jooq.postgresEnum
 import io.github.sepfins.limitguard.infrastructure.jooq.toJsonb
 import io.github.sepfins.limitguard.infrastructure.jooq.toMetadata
 import io.github.sepfins.limitguard.port.persistence.UsageEventRepository
-import org.jooq.Field
-import org.jooq.JSONB
 import org.jooq.Record
-import org.jooq.SelectFieldOrAsterisk
-import java.math.BigDecimal
 import java.time.Instant
-import java.util.UUID
+import java.time.OffsetDateTime
+import java.time.ZoneOffset
 
 class JooqUsageEventRepository(
     private val context: JooqPersistenceContext,
 ) : UsageEventRepository {
+    private val table = GeneratedLimitUsageEventTable.LIMIT_USAGE_EVENT
+
     override fun findById(tenantId: TenantId, id: UsageEventId): LimitUsageEvent? =
         jooqOperation("find usage event by id") {
             selectEvents()
-                .where(UsageEventTable.tenantId.eq(tenantId.value))
-                .and(UsageEventTable.id.eq(id.value))
+                .where(table.TENANT_ID.eq(tenantId.value))
+                .and(table.ID.eq(id.value))
                 .fetchOne { it.toDomain() }
         }
 
     override fun findByBucket(tenantId: TenantId, bucketId: UsageBucketId): List<LimitUsageEvent> =
         jooqOperation("find usage events by bucket") {
             selectEvents()
-                .where(UsageEventTable.tenantId.eq(tenantId.value))
-                .and(UsageEventTable.usageBucketId.eq(bucketId.value))
-                .orderBy(UsageEventTable.createdAt, UsageEventTable.id)
+                .where(table.TENANT_ID.eq(tenantId.value))
+                .and(table.USAGE_BUCKET_ID.eq(bucketId.value))
+                .orderBy(table.CREATED_AT, table.ID)
                 .fetch { it.toDomain() }
         }
 
@@ -51,9 +48,9 @@ class JooqUsageEventRepository(
         transactionEventId: TransactionEventId,
     ): List<LimitUsageEvent> = jooqOperation("find usage events by transaction event") {
         selectEvents()
-            .where(UsageEventTable.tenantId.eq(tenantId.value))
-            .and(UsageEventTable.transactionEventId.eq(transactionEventId.value))
-            .orderBy(UsageEventTable.createdAt, UsageEventTable.id)
+            .where(table.TENANT_ID.eq(tenantId.value))
+            .and(table.TRANSACTION_EVENT_ID.eq(transactionEventId.value))
+            .orderBy(table.CREATED_AT, table.ID)
             .fetch { it.toDomain() }
     }
 
@@ -63,10 +60,10 @@ class JooqUsageEventRepository(
         type: LimitUsageEventType,
     ): List<LimitUsageEvent> = jooqOperation("find usage events by transaction event and type") {
         selectEvents()
-            .where(UsageEventTable.tenantId.eq(tenantId.value))
-            .and(UsageEventTable.transactionEventId.eq(transactionEventId.value))
-            .and(UsageEventTable.eventType.eqPostgresEnum(type.name, "limit_usage_event_type"))
-            .orderBy(UsageEventTable.createdAt, UsageEventTable.id)
+            .where(table.TENANT_ID.eq(tenantId.value))
+            .and(table.TRANSACTION_EVENT_ID.eq(transactionEventId.value))
+            .and(table.EVENT_TYPE.eq(GeneratedLimitUsageEventType.valueOf(type.name)))
+            .orderBy(table.CREATED_AT, table.ID)
             .fetch { it.toDomain() }
     }
 
@@ -76,10 +73,10 @@ class JooqUsageEventRepository(
         transactionEventId: TransactionEventId,
     ): List<LimitUsageEvent> = jooqOperation("find usage events by rule and transaction event") {
         selectEvents()
-            .where(UsageEventTable.tenantId.eq(tenantId.value))
-            .and(UsageEventTable.limitRuleId.eq(limitRuleId.value))
-            .and(UsageEventTable.transactionEventId.eq(transactionEventId.value))
-            .orderBy(UsageEventTable.createdAt, UsageEventTable.id)
+            .where(table.TENANT_ID.eq(tenantId.value))
+            .and(table.LIMIT_RULE_ID.eq(limitRuleId.value))
+            .and(table.TRANSACTION_EVENT_ID.eq(transactionEventId.value))
+            .orderBy(table.CREATED_AT, table.ID)
             .fetch { it.toDomain() }
     }
 
@@ -90,10 +87,10 @@ class JooqUsageEventRepository(
         type: LimitUsageEventType,
     ): LimitUsageEvent? = jooqOperation("find usage event by rule, transaction event, and type") {
         selectEvents()
-            .where(UsageEventTable.tenantId.eq(tenantId.value))
-            .and(UsageEventTable.limitRuleId.eq(limitRuleId.value))
-            .and(UsageEventTable.transactionEventId.eq(transactionEventId.value))
-            .and(UsageEventTable.eventType.eqPostgresEnum(type.name, "limit_usage_event_type"))
+            .where(table.TENANT_ID.eq(tenantId.value))
+            .and(table.LIMIT_RULE_ID.eq(limitRuleId.value))
+            .and(table.TRANSACTION_EVENT_ID.eq(transactionEventId.value))
+            .and(table.EVENT_TYPE.eq(GeneratedLimitUsageEventType.valueOf(type.name)))
             .fetchOne { it.toDomain() }
     }
 
@@ -101,65 +98,50 @@ class JooqUsageEventRepository(
         jooqOperation("insert usage event") {
             require(event.tenantId == tenantId) { "usage event tenant does not match repository tenant" }
             val insert = context.dsl()
-                .insertInto(UsageEventTable.table)
-                .set(UsageEventTable.id, event.id.value)
-                .set(UsageEventTable.tenantId, tenantId.value)
-                .set(UsageEventTable.limitRuleId, event.limitRuleId.value)
-                .set(UsageEventTable.usageBucketId, event.usageBucketId?.value)
-                .set(UsageEventTable.transactionEventId, event.transactionEventId.value)
-                .set(UsageEventTable.assigneePartyProfileId, event.assigneePartyProfileId.value)
-                .set(UsageEventTable.eventType, postgresEnum(event.eventType.name, "limit_usage_event_type"))
-                .set(UsageEventTable.amountDelta, event.amountDelta)
-                .set(UsageEventTable.currency, event.currency.value)
-                .set(UsageEventTable.metadata, event.metadata.toJsonb())
-            event.createdAt?.let { insert.set(UsageEventTable.createdAt, it) }
-            requireNotNull(insert.returning(UsageEventTable.fields).fetchOne()).toDomain()
+                .insertInto(table)
+                .set(table.ID, event.id.value)
+                .set(table.TENANT_ID, tenantId.value)
+                .set(table.LIMIT_RULE_ID, event.limitRuleId.value)
+                .set(table.USAGE_BUCKET_ID, event.usageBucketId?.value)
+                .set(table.TRANSACTION_EVENT_ID, event.transactionEventId.value)
+                .set(table.ASSIGNEE_PARTY_PROFILE_ID, event.assigneePartyProfileId.value)
+                .set(table.EVENT_TYPE, GeneratedLimitUsageEventType.valueOf(event.eventType.name))
+                .set(table.AMOUNT_DELTA, event.amountDelta)
+                .set(table.CURRENCY, event.currency.value)
+                .set(table.METADATA, event.metadata.toJsonb())
+            event.createdAt?.let { insert.set(table.CREATED_AT, it.toOffsetDateTime()) }
+            requireNotNull(insert.returning(table.fields().toList()).fetchOne()).toDomain()
         }
 
-    private fun selectEvents() = context.dsl().select(UsageEventTable.fields).from(UsageEventTable.table)
+    private fun selectEvents() = context.dsl().select(
+        table.ID,
+        table.TENANT_ID,
+        table.LIMIT_RULE_ID,
+        table.USAGE_BUCKET_ID,
+        table.TRANSACTION_EVENT_ID,
+        table.ASSIGNEE_PARTY_PROFILE_ID,
+        table.EVENT_TYPE,
+        table.AMOUNT_DELTA,
+        table.CURRENCY,
+        table.METADATA,
+        table.CREATED_AT,
+    ).from(table)
 
     private fun Record.toDomain(): LimitUsageEvent = LimitUsageEvent(
-        id = UsageEventId.of(requireNotNull(get(UsageEventTable.id))),
-        tenantId = TenantId.of(requireNotNull(get(UsageEventTable.tenantId))),
-        limitRuleId = LimitRuleId.of(requireNotNull(get(UsageEventTable.limitRuleId))),
-        usageBucketId = get(UsageEventTable.usageBucketId)?.let(UsageBucketId::of),
-        transactionEventId = TransactionEventId.of(requireNotNull(get(UsageEventTable.transactionEventId))),
+        id = UsageEventId.of(requireNotNull(get(table.ID))),
+        tenantId = TenantId.of(requireNotNull(get(table.TENANT_ID))),
+        limitRuleId = LimitRuleId.of(requireNotNull(get(table.LIMIT_RULE_ID))),
+        usageBucketId = get(table.USAGE_BUCKET_ID)?.let(UsageBucketId::of),
+        transactionEventId = TransactionEventId.of(requireNotNull(get(table.TRANSACTION_EVENT_ID))),
         assigneePartyProfileId = PartyProfileId.of(
-            requireNotNull(get(UsageEventTable.assigneePartyProfileId))
+            requireNotNull(get(table.ASSIGNEE_PARTY_PROFILE_ID))
         ),
-        eventType = LimitUsageEventType.valueOf(requireNotNull(get(UsageEventTable.eventType))),
-        amountDelta = requireNotNull(get(UsageEventTable.amountDelta)),
-        currency = CurrencyCode.of(requireNotNull(get(UsageEventTable.currency))),
-        metadata = get(UsageEventTable.metadata).toMetadata(),
-        createdAt = get(UsageEventTable.createdAt),
+        eventType = LimitUsageEventType.valueOf(requireNotNull(get(table.EVENT_TYPE)).name),
+        amountDelta = requireNotNull(get(table.AMOUNT_DELTA)),
+        currency = CurrencyCode.of(requireNotNull(get(table.CURRENCY))),
+        metadata = get(table.METADATA).toMetadata(),
+        createdAt = get(table.CREATED_AT)?.toInstant(),
     )
-}
 
-private object UsageEventTable {
-    const val NAME = "limit_usage_event"
-    val table = jooqTable(NAME)
-    val id: Field<UUID> = jooqField(NAME, "id", UUID::class.java)
-    val tenantId: Field<UUID> = jooqField(NAME, "tenant_id", UUID::class.java)
-    val limitRuleId: Field<UUID> = jooqField(NAME, "limit_rule_id", UUID::class.java)
-    val usageBucketId: Field<UUID> = jooqField(NAME, "usage_bucket_id", UUID::class.java)
-    val transactionEventId: Field<UUID> = jooqField(NAME, "transaction_event_id", UUID::class.java)
-    val assigneePartyProfileId: Field<UUID> = jooqField(NAME, "assignee_party_profile_id", UUID::class.java)
-    val eventType: Field<String> = jooqField(NAME, "event_type", String::class.java)
-    val amountDelta: Field<BigDecimal> = jooqField(NAME, "amount_delta", BigDecimal::class.java)
-    val currency: Field<String> = jooqField(NAME, "currency", String::class.java)
-    val metadata: Field<JSONB> = jooqField(NAME, "metadata", JSONB::class.java)
-    val createdAt: Field<Instant> = jooqField(NAME, "created_at", Instant::class.java)
-    val fields: List<SelectFieldOrAsterisk> = listOf(
-        id,
-        tenantId,
-        limitRuleId,
-        usageBucketId,
-        transactionEventId,
-        assigneePartyProfileId,
-        eventType,
-        amountDelta,
-        currency,
-        metadata,
-        createdAt,
-    )
+    private fun Instant.toOffsetDateTime(): OffsetDateTime = OffsetDateTime.ofInstant(this, ZoneOffset.UTC)
 }

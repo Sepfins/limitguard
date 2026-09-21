@@ -23,24 +23,25 @@ import io.github.sepfins.limitguard.domain.limit.LimitUsageConsumptionMode
 import io.github.sepfins.limitguard.domain.mandate.MandateScope
 import io.github.sepfins.limitguard.infrastructure.jooq.JooqPersistenceContext
 import io.github.sepfins.limitguard.infrastructure.jooq.jooqOperation
-import io.github.sepfins.limitguard.infrastructure.jooq.nullablePostgresEnum
-import io.github.sepfins.limitguard.infrastructure.jooq.postgresEnum
 import io.github.sepfins.limitguard.infrastructure.jooq.toJsonb
 import io.github.sepfins.limitguard.infrastructure.jooq.toMetadata
+import io.github.sepfins.limitguard.infrastructure.jooq.generated.enums.LimitChannelScope as GeneratedLimitChannelScope
+import io.github.sepfins.limitguard.infrastructure.jooq.generated.enums.LimitKind as GeneratedLimitKind
+import io.github.sepfins.limitguard.infrastructure.jooq.generated.enums.LimitMandateScope as GeneratedLimitMandateScope
+import io.github.sepfins.limitguard.infrastructure.jooq.generated.enums.LimitPeriod as GeneratedLimitPeriod
+import io.github.sepfins.limitguard.infrastructure.jooq.generated.enums.LimitUsageConsumptionMode as GeneratedLimitUsageConsumptionMode
+import io.github.sepfins.limitguard.infrastructure.jooq.generated.tables.LimitRule as GeneratedLimitRuleTable
 import io.github.sepfins.limitguard.port.persistence.LimitRuleRepository
-import org.jooq.Field
-import org.jooq.JSONB
 import org.jooq.Record
-import org.jooq.SelectFieldOrAsterisk
-import org.jooq.Table
-import org.jooq.impl.DSL
-import java.math.BigDecimal
 import java.time.Instant
-import java.util.UUID
+import java.time.OffsetDateTime
+import java.time.ZoneOffset
 
 class JooqLimitRuleRepository(
     private val context: JooqPersistenceContext,
 ) : LimitRuleRepository {
+    private val table = GeneratedLimitRuleTable.LIMIT_RULE
+
     override fun findById(tenantId: TenantId, id: LimitRuleId): LimitRule? =
         findById(tenantId, id, forUpdate = false)
 
@@ -49,17 +50,29 @@ class JooqLimitRuleRepository(
         return findById(tenantId, id, forUpdate = true)
     }
 
+    override fun findByOwner(
+        tenantId: TenantId,
+        owner: PartyProfileId,
+    ): List<LimitRule> = jooqOperation("find limit rules for owner") {
+        selectRules()
+            .where(table.TENANT_ID.eq(tenantId.value))
+            .and(table.OWNER_PARTY_PROFILE_ID.eq(owner.value))
+            .orderBy(table.STARTS_AT, table.ID)
+            .fetch { it.toDomain() }
+    }
+
     override fun findActiveForOwner(
         tenantId: TenantId,
         owner: PartyProfileId,
         at: Instant,
     ): List<LimitRule> = jooqOperation("find active limit rules for owner") {
+        val timestamp = at.toOffsetDateTime()
         selectRules()
-            .where(LimitRuleTable.tenantId.eq(tenantId.value))
-            .and(LimitRuleTable.ownerPartyProfileId.eq(owner.value))
-            .and(LimitRuleTable.isActive.isTrue)
-            .and(LimitRuleTable.startsAt.le(at))
-            .and(LimitRuleTable.endsAt.isNull.or(LimitRuleTable.endsAt.gt(at)))
+            .where(table.TENANT_ID.eq(tenantId.value))
+            .and(table.OWNER_PARTY_PROFILE_ID.eq(owner.value))
+            .and(table.IS_ACTIVE.isTrue)
+            .and(table.STARTS_AT.le(timestamp))
+            .and(table.ENDS_AT.isNull.or(table.ENDS_AT.gt(timestamp)))
             .fetch { it.toDomain() }
     }
 
@@ -67,36 +80,33 @@ class JooqLimitRuleRepository(
         jooqOperation("insert limit rule") {
             require(limitRule.tenantId == tenantId) { "limit rule tenant does not match repository tenant" }
             val insert = context.dsl()
-                .insertInto(LimitRuleTable.table)
-                .set(LimitRuleTable.id, limitRule.id.value)
-                .set(LimitRuleTable.tenantId, tenantId.value)
-                .set(LimitRuleTable.ownerPartyProfileId, limitRule.ownerPartyProfileId.value)
-                .set(LimitRuleTable.name, limitRule.name.value)
-                .set(LimitRuleTable.description, limitRule.description)
-                .set(LimitRuleTable.limitKind, postgresEnum(limitRule.kindName(), "limit_kind"))
-                .set(LimitRuleTable.period, nullablePostgresEnum(limitRule.periodName(), "limit_period"))
-                .set(LimitRuleTable.amount, limitRule.amount.amount)
-                .set(LimitRuleTable.currency, limitRule.amount.currency.value)
-                .set(LimitRuleTable.mandateScope, postgresEnum(limitRule.mandateScopeName(), "limit_mandate_scope"))
-                .set(LimitRuleTable.mandateId, limitRule.mandateId())
-                .set(LimitRuleTable.configurationId, limitRule.configurationId?.value)
-                .set(LimitRuleTable.channelScope, postgresEnum(limitRule.channelScopeName(), "limit_channel_scope"))
-                .set(LimitRuleTable.channelId, limitRule.channelId())
-                .set(LimitRuleTable.channelGroupId, limitRule.channelGroupId())
-                .set(LimitRuleTable.operationTypeId, limitRule.operationTypeId())
-                .set(
-                    LimitRuleTable.usageConsumptionMode,
-                    postgresEnum(limitRule.usageConsumptionMode.name, "limit_usage_consumption_mode"),
-                )
-                .set(LimitRuleTable.priority, limitRule.priority.value)
-                .set(LimitRuleTable.isActive, limitRule.isActive)
-                .set(LimitRuleTable.version, limitRule.version.value)
-                .set(LimitRuleTable.startsAt, limitRule.effectiveWindow.startsAt)
-                .set(LimitRuleTable.endsAt, limitRule.effectiveWindow.endsAt)
-                .set(LimitRuleTable.metadata, limitRule.metadata.toJsonb())
-            limitRule.createdAt?.let { insert.set(LimitRuleTable.createdAt, it) }
-            limitRule.updatedAt?.let { insert.set(LimitRuleTable.updatedAt, it) }
-            requireNotNull(insert.returning(LimitRuleTable.fields).fetchOne()).toDomain()
+                .insertInto(table)
+                .set(table.ID, limitRule.id.value)
+                .set(table.TENANT_ID, tenantId.value)
+                .set(table.OWNER_PARTY_PROFILE_ID, limitRule.ownerPartyProfileId.value)
+                .set(table.NAME, limitRule.name.value)
+                .set(table.DESCRIPTION, limitRule.description)
+                .set(table.LIMIT_KIND, limitRule.limitKind.toGenerated())
+                .set(table.PERIOD, limitRule.limitKind.period()?.toGenerated())
+                .set(table.AMOUNT, limitRule.amount.amount)
+                .set(table.CURRENCY, limitRule.amount.currency.value)
+                .set(table.MANDATE_SCOPE, limitRule.mandateScope.toGenerated())
+                .set(table.MANDATE_ID, limitRule.mandateId())
+                .set(table.CONFIGURATION_ID, limitRule.configurationId?.value)
+                .set(table.CHANNEL_SCOPE, limitRule.channelScope.toGenerated())
+                .set(table.CHANNEL_ID, limitRule.channelId())
+                .set(table.CHANNEL_GROUP_ID, limitRule.channelGroupId())
+                .set(table.OPERATION_TYPE_ID, limitRule.operationTypeId())
+                .set(table.USAGE_CONSUMPTION_MODE, limitRule.usageConsumptionMode.toGenerated())
+                .set(table.PRIORITY, limitRule.priority.value)
+                .set(table.IS_ACTIVE, limitRule.isActive)
+                .set(table.VERSION, limitRule.version.value)
+                .set(table.STARTS_AT, limitRule.effectiveWindow.startsAt.toOffsetDateTime())
+                .set(table.ENDS_AT, limitRule.effectiveWindow.endsAt?.toOffsetDateTime())
+                .set(table.METADATA, limitRule.metadata.toJsonb())
+            limitRule.createdAt?.let { insert.set(table.CREATED_AT, it.toOffsetDateTime()) }
+            limitRule.updatedAt?.let { insert.set(table.UPDATED_AT, it.toOffsetDateTime()) }
+            requireNotNull(insert.returning(table.fields().toList()).fetchOne()).toDomain()
         }
 
     override fun updateIfVersion(
@@ -106,36 +116,33 @@ class JooqLimitRuleRepository(
     ): LimitRule? = jooqOperation("conditionally update limit rule") {
         require(limitRule.tenantId == tenantId) { "limit rule tenant does not match repository tenant" }
         val update = context.dsl()
-            .update(LimitRuleTable.table)
-            .set(LimitRuleTable.ownerPartyProfileId, limitRule.ownerPartyProfileId.value)
-            .set(LimitRuleTable.name, limitRule.name.value)
-            .set(LimitRuleTable.description, limitRule.description)
-            .set(LimitRuleTable.limitKind, postgresEnum(limitRule.kindName(), "limit_kind"))
-            .set(LimitRuleTable.period, nullablePostgresEnum(limitRule.periodName(), "limit_period"))
-            .set(LimitRuleTable.amount, limitRule.amount.amount)
-            .set(LimitRuleTable.currency, limitRule.amount.currency.value)
-            .set(LimitRuleTable.mandateScope, postgresEnum(limitRule.mandateScopeName(), "limit_mandate_scope"))
-            .set(LimitRuleTable.mandateId, limitRule.mandateId())
-            .set(LimitRuleTable.configurationId, limitRule.configurationId?.value)
-            .set(LimitRuleTable.channelScope, postgresEnum(limitRule.channelScopeName(), "limit_channel_scope"))
-            .set(LimitRuleTable.channelId, limitRule.channelId())
-            .set(LimitRuleTable.channelGroupId, limitRule.channelGroupId())
-            .set(LimitRuleTable.operationTypeId, limitRule.operationTypeId())
-            .set(
-                LimitRuleTable.usageConsumptionMode,
-                postgresEnum(limitRule.usageConsumptionMode.name, "limit_usage_consumption_mode"),
-            )
-            .set(LimitRuleTable.priority, limitRule.priority.value)
-            .set(LimitRuleTable.isActive, limitRule.isActive)
-            .set(LimitRuleTable.version, limitRule.version.value)
-            .set(LimitRuleTable.startsAt, limitRule.effectiveWindow.startsAt)
-            .set(LimitRuleTable.endsAt, limitRule.effectiveWindow.endsAt)
-            .set(LimitRuleTable.metadata, limitRule.metadata.toJsonb())
-        limitRule.updatedAt?.let { update.set(LimitRuleTable.updatedAt, it) }
-        update.where(LimitRuleTable.tenantId.eq(tenantId.value))
-            .and(LimitRuleTable.id.eq(limitRule.id.value))
-            .and(LimitRuleTable.version.eq(expectedVersion.value))
-            .returning(LimitRuleTable.fields)
+            .update(table)
+            .set(table.OWNER_PARTY_PROFILE_ID, limitRule.ownerPartyProfileId.value)
+            .set(table.NAME, limitRule.name.value)
+            .set(table.DESCRIPTION, limitRule.description)
+            .set(table.LIMIT_KIND, limitRule.limitKind.toGenerated())
+            .set(table.PERIOD, limitRule.limitKind.period()?.toGenerated())
+            .set(table.AMOUNT, limitRule.amount.amount)
+            .set(table.CURRENCY, limitRule.amount.currency.value)
+            .set(table.MANDATE_SCOPE, limitRule.mandateScope.toGenerated())
+            .set(table.MANDATE_ID, limitRule.mandateId())
+            .set(table.CONFIGURATION_ID, limitRule.configurationId?.value)
+            .set(table.CHANNEL_SCOPE, limitRule.channelScope.toGenerated())
+            .set(table.CHANNEL_ID, limitRule.channelId())
+            .set(table.CHANNEL_GROUP_ID, limitRule.channelGroupId())
+            .set(table.OPERATION_TYPE_ID, limitRule.operationTypeId())
+            .set(table.USAGE_CONSUMPTION_MODE, limitRule.usageConsumptionMode.toGenerated())
+            .set(table.PRIORITY, limitRule.priority.value)
+            .set(table.IS_ACTIVE, limitRule.isActive)
+            .set(table.VERSION, limitRule.version.value)
+            .set(table.STARTS_AT, limitRule.effectiveWindow.startsAt.toOffsetDateTime())
+            .set(table.ENDS_AT, limitRule.effectiveWindow.endsAt?.toOffsetDateTime())
+            .set(table.METADATA, limitRule.metadata.toJsonb())
+        limitRule.updatedAt?.let { update.set(table.UPDATED_AT, it.toOffsetDateTime()) }
+        update.where(table.TENANT_ID.eq(tenantId.value))
+            .and(table.ID.eq(limitRule.id.value))
+            .and(table.VERSION.eq(expectedVersion.value))
+            .returning(table.fields().toList())
             .fetchOne()
             ?.toDomain()
     }
@@ -146,154 +153,104 @@ class JooqLimitRuleRepository(
         forUpdate: Boolean,
     ): LimitRule? = jooqOperation("find limit rule by id") {
         val query = selectRules()
-            .where(LimitRuleTable.tenantId.eq(tenantId.value))
-            .and(LimitRuleTable.id.eq(id.value))
+            .where(table.TENANT_ID.eq(tenantId.value))
+            .and(table.ID.eq(id.value))
         if (forUpdate) query.forUpdate().fetchOne { it.toDomain() } else query.fetchOne { it.toDomain() }
     }
 
     private fun selectRules() = context.dsl()
-        .select(LimitRuleTable.fields)
-        .from(LimitRuleTable.table)
+        .select(table.fields().toList())
+        .from(table)
 
     private fun Record.toDomain(): LimitRule {
-        val mandateScope = when (val value = requireNotNull(get(LimitRuleTable.mandateScope))) {
-            "ALL_OWNER_MANDATES" -> MandateScope.AllOwnerMandates
-            "MANDATE" -> MandateScope.MandateSpecific(MandateId.of(requireNotNull(get(LimitRuleTable.mandateId))))
-            else -> error("unsupported limit mandate scope: $value")
-        }
-        val channelScope = when (val value = requireNotNull(get(LimitRuleTable.channelScope))) {
-            "ALL_CHANNELS" -> LimitChannelScope.AllChannels
-            "CHANNEL" -> LimitChannelScope.ChannelSpecific(ChannelId.of(requireNotNull(get(LimitRuleTable.channelId))))
-            "CHANNEL_GROUP" -> LimitChannelScope.ChannelGroupSpecific(
-                ChannelGroupId.of(requireNotNull(get(LimitRuleTable.channelGroupId)))
+        val mandateScope = when (requireNotNull(get(table.MANDATE_SCOPE))) {
+            GeneratedLimitMandateScope.ALL_OWNER_MANDATES -> MandateScope.AllOwnerMandates
+            GeneratedLimitMandateScope.MANDATE -> MandateScope.MandateSpecific(
+                MandateId.of(requireNotNull(get(table.MANDATE_ID)))
             )
-            else -> error("unsupported limit channel scope: $value")
         }
-        val operationScope = get(LimitRuleTable.operationTypeId)?.let {
+        val channelScope = when (requireNotNull(get(table.CHANNEL_SCOPE))) {
+            GeneratedLimitChannelScope.ALL_CHANNELS -> LimitChannelScope.AllChannels
+            GeneratedLimitChannelScope.CHANNEL -> LimitChannelScope.ChannelSpecific(
+                ChannelId.of(requireNotNull(get(table.CHANNEL_ID)))
+            )
+            GeneratedLimitChannelScope.CHANNEL_GROUP -> LimitChannelScope.ChannelGroupSpecific(
+                ChannelGroupId.of(requireNotNull(get(table.CHANNEL_GROUP_ID)))
+            )
+        }
+        val operationScope = get(table.OPERATION_TYPE_ID)?.let {
             LimitOperationScope.OperationTypeSpecific(OperationTypeId.of(it))
         } ?: LimitOperationScope.AllOperations
-        val limitKind = when (val value = requireNotNull(get(LimitRuleTable.limitKind))) {
-            "PER_TRANSACTION" -> LimitKind.PerTransaction
-            "PERIODIC" -> LimitKind.Periodic(
-                LimitPeriod.valueOf(requireNotNull(get(LimitRuleTable.period)))
+        val limitKind = when (requireNotNull(get(table.LIMIT_KIND))) {
+            GeneratedLimitKind.PER_TRANSACTION -> LimitKind.PerTransaction
+            GeneratedLimitKind.PERIODIC -> LimitKind.Periodic(
+                LimitPeriod.valueOf(requireNotNull(get(table.PERIOD)).name)
             )
-            else -> error("unsupported limit kind: $value")
         }
-        val currency = CurrencyCode.of(requireNotNull(get(LimitRuleTable.currency)))
+        val currency = CurrencyCode.of(requireNotNull(get(table.CURRENCY)))
 
         return LimitRule(
-            id = LimitRuleId.of(requireNotNull(get(LimitRuleTable.id))),
-            tenantId = TenantId.of(requireNotNull(get(LimitRuleTable.tenantId))),
-            ownerPartyProfileId = PartyProfileId.of(requireNotNull(get(LimitRuleTable.ownerPartyProfileId))),
-            name = LimitRuleName.of(requireNotNull(get(LimitRuleTable.name))),
-            description = get(LimitRuleTable.description),
+            id = LimitRuleId.of(requireNotNull(get(table.ID))),
+            tenantId = TenantId.of(requireNotNull(get(table.TENANT_ID))),
+            ownerPartyProfileId = PartyProfileId.of(requireNotNull(get(table.OWNER_PARTY_PROFILE_ID))),
+            name = LimitRuleName.of(requireNotNull(get(table.NAME))),
+            description = get(table.DESCRIPTION),
             limitKind = limitKind,
-            amount = Money.positive(requireNotNull(get(LimitRuleTable.amount)), currency),
+            amount = Money.positive(requireNotNull(get(table.AMOUNT)), currency),
             mandateScope = mandateScope,
-            configurationId = get(LimitRuleTable.configurationId)?.let(LimitConfigurationId::of),
+            configurationId = get(table.CONFIGURATION_ID)?.let(LimitConfigurationId::of),
             channelScope = channelScope,
             operationScope = operationScope,
             usageConsumptionMode = LimitUsageConsumptionMode.valueOf(
-                requireNotNull(get(LimitRuleTable.usageConsumptionMode))
+                requireNotNull(get(table.USAGE_CONSUMPTION_MODE)).name
             ),
-            priority = LimitPriority.of(requireNotNull(get(LimitRuleTable.priority))),
-            isActive = requireNotNull(get(LimitRuleTable.isActive)),
-            version = Version.of(requireNotNull(get(LimitRuleTable.version))),
+            priority = LimitPriority.of(requireNotNull(get(table.PRIORITY))),
+            isActive = requireNotNull(get(table.IS_ACTIVE)),
+            version = Version.of(requireNotNull(get(table.VERSION))),
             effectiveWindow = EffectiveWindow(
-                startsAt = requireNotNull(get(LimitRuleTable.startsAt)),
-                endsAt = get(LimitRuleTable.endsAt),
+                startsAt = requireNotNull(get(table.STARTS_AT)).toInstant(),
+                endsAt = get(table.ENDS_AT)?.toInstant(),
             ),
-            metadata = get(LimitRuleTable.metadata).toMetadata(),
-            createdAt = get(LimitRuleTable.createdAt),
-            updatedAt = get(LimitRuleTable.updatedAt),
+            metadata = get(table.METADATA).toMetadata(),
+            createdAt = get(table.CREATED_AT)?.toInstant(),
+            updatedAt = get(table.UPDATED_AT)?.toInstant(),
         )
     }
 
-    private fun LimitRule.kindName(): String = when (limitKind) {
-        LimitKind.PerTransaction -> "PER_TRANSACTION"
-        is LimitKind.Periodic -> "PERIODIC"
+    private fun LimitKind.toGenerated(): GeneratedLimitKind = when (this) {
+        LimitKind.PerTransaction -> GeneratedLimitKind.PER_TRANSACTION
+        is LimitKind.Periodic -> GeneratedLimitKind.PERIODIC
     }
 
-    private fun LimitRule.periodName(): String? = (limitKind as? LimitKind.Periodic)?.period?.name
+    private fun LimitKind.period(): LimitPeriod? = (this as? LimitKind.Periodic)?.period
 
-    private fun LimitRule.mandateScopeName(): String = when (mandateScope) {
-        MandateScope.AllOwnerMandates -> "ALL_OWNER_MANDATES"
-        is MandateScope.MandateSpecific -> "MANDATE"
+    private fun LimitPeriod.toGenerated(): GeneratedLimitPeriod = GeneratedLimitPeriod.valueOf(name)
+
+    private fun MandateScope.toGenerated(): GeneratedLimitMandateScope = when (this) {
+        MandateScope.AllOwnerMandates -> GeneratedLimitMandateScope.ALL_OWNER_MANDATES
+        is MandateScope.MandateSpecific -> GeneratedLimitMandateScope.MANDATE
     }
 
-    private fun LimitRule.mandateId(): UUID? = (mandateScope as? MandateScope.MandateSpecific)?.mandateId?.value
+    private fun LimitRule.mandateId() =
+        (mandateScope as? MandateScope.MandateSpecific)?.mandateId?.value
 
-    private fun LimitRule.channelScopeName(): String = when (channelScope) {
-        LimitChannelScope.AllChannels -> "ALL_CHANNELS"
-        is LimitChannelScope.ChannelSpecific -> "CHANNEL"
-        is LimitChannelScope.ChannelGroupSpecific -> "CHANNEL_GROUP"
+    private fun LimitChannelScope.toGenerated(): GeneratedLimitChannelScope = when (this) {
+        LimitChannelScope.AllChannels -> GeneratedLimitChannelScope.ALL_CHANNELS
+        is LimitChannelScope.ChannelSpecific -> GeneratedLimitChannelScope.CHANNEL
+        is LimitChannelScope.ChannelGroupSpecific -> GeneratedLimitChannelScope.CHANNEL_GROUP
     }
 
-    private fun LimitRule.channelId(): UUID? =
+    private fun LimitRule.channelId() =
         (channelScope as? LimitChannelScope.ChannelSpecific)?.channelId?.value
 
-    private fun LimitRule.channelGroupId(): UUID? =
+    private fun LimitRule.channelGroupId() =
         (channelScope as? LimitChannelScope.ChannelGroupSpecific)?.channelGroupId?.value
 
-    private fun LimitRule.operationTypeId(): UUID? =
+    private fun LimitRule.operationTypeId() =
         (operationScope as? LimitOperationScope.OperationTypeSpecific)?.operationTypeId?.value
+
+    private fun LimitUsageConsumptionMode.toGenerated(): GeneratedLimitUsageConsumptionMode =
+        GeneratedLimitUsageConsumptionMode.valueOf(name)
 }
 
-private object LimitRuleTable {
-    val table: Table<Record> = DSL.table(DSL.name("limit_rule"))
-    val id: Field<UUID> = field("id", UUID::class.java)
-    val tenantId: Field<UUID> = field("tenant_id", UUID::class.java)
-    val ownerPartyProfileId: Field<UUID> = field("owner_party_profile_id", UUID::class.java)
-    val name: Field<String> = field("name", String::class.java)
-    val description: Field<String> = field("description", String::class.java)
-    val limitKind: Field<String> = field("limit_kind", String::class.java)
-    val period: Field<String> = field("period", String::class.java)
-    val amount: Field<BigDecimal> = field("amount", BigDecimal::class.java)
-    val currency: Field<String> = field("currency", String::class.java)
-    val mandateScope: Field<String> = field("mandate_scope", String::class.java)
-    val mandateId: Field<UUID> = field("mandate_id", UUID::class.java)
-    val configurationId: Field<UUID> = field("configuration_id", UUID::class.java)
-    val channelScope: Field<String> = field("channel_scope", String::class.java)
-    val channelId: Field<UUID> = field("channel_id", UUID::class.java)
-    val channelGroupId: Field<UUID> = field("channel_group_id", UUID::class.java)
-    val operationTypeId: Field<UUID> = field("operation_type_id", UUID::class.java)
-    val usageConsumptionMode: Field<String> = field("usage_consumption_mode", String::class.java)
-    val priority: Field<Int> = field("priority", Int::class.java)
-    val isActive: Field<Boolean> = field("is_active", Boolean::class.java)
-    val version: Field<Int> = field("version", Int::class.java)
-    val startsAt: Field<Instant> = field("starts_at", Instant::class.java)
-    val endsAt: Field<Instant> = field("ends_at", Instant::class.java)
-    val metadata: Field<JSONB> = field("metadata", JSONB::class.java)
-    val createdAt: Field<Instant> = field("created_at", Instant::class.java)
-    val updatedAt: Field<Instant> = field("updated_at", Instant::class.java)
-    val fields: List<SelectFieldOrAsterisk> = listOf(
-        id,
-        tenantId,
-        ownerPartyProfileId,
-        name,
-        description,
-        limitKind,
-        period,
-        amount,
-        currency,
-        mandateScope,
-        mandateId,
-        configurationId,
-        channelScope,
-        channelId,
-        channelGroupId,
-        operationTypeId,
-        usageConsumptionMode,
-        priority,
-        isActive,
-        version,
-        startsAt,
-        endsAt,
-        metadata,
-        createdAt,
-        updatedAt,
-    )
-
-    private fun <T> field(name: String, type: Class<T>): Field<T> =
-        DSL.field(DSL.name("limit_rule", name), type)
-}
+private fun Instant.toOffsetDateTime(): OffsetDateTime = OffsetDateTime.ofInstant(this, ZoneOffset.UTC)

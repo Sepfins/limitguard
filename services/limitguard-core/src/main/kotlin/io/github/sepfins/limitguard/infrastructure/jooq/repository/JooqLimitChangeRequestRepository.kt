@@ -16,25 +16,24 @@ import io.github.sepfins.limitguard.domain.common.PartyProfileDelegationId
 import io.github.sepfins.limitguard.domain.common.PartyProfileId
 import io.github.sepfins.limitguard.domain.common.TenantId
 import io.github.sepfins.limitguard.infrastructure.jooq.JooqPersistenceContext
-import io.github.sepfins.limitguard.infrastructure.jooq.eqPostgresEnum
-import io.github.sepfins.limitguard.infrastructure.jooq.inPostgresEnums
 import io.github.sepfins.limitguard.infrastructure.jooq.jooqOperation
-import io.github.sepfins.limitguard.infrastructure.jooq.postgresEnum
 import io.github.sepfins.limitguard.infrastructure.jooq.toJsonb
 import io.github.sepfins.limitguard.infrastructure.jooq.toMetadata
+import io.github.sepfins.limitguard.infrastructure.jooq.generated.enums.LimitChangeActorType as GeneratedLimitChangeActorType
+import io.github.sepfins.limitguard.infrastructure.jooq.generated.enums.LimitRuleChangeStatus as GeneratedLimitRuleChangeStatus
+import io.github.sepfins.limitguard.infrastructure.jooq.generated.enums.LimitRuleChangeType as GeneratedLimitRuleChangeType
+import io.github.sepfins.limitguard.infrastructure.jooq.generated.tables.LimitRuleChangeRequest as GeneratedLimitRuleChangeRequestTable
 import io.github.sepfins.limitguard.port.persistence.LimitChangeRequestRepository
-import org.jooq.Field
-import org.jooq.JSONB
 import org.jooq.Record
-import org.jooq.SelectFieldOrAsterisk
-import org.jooq.Table
-import org.jooq.impl.DSL
 import java.time.Instant
-import java.util.UUID
+import java.time.OffsetDateTime
+import java.time.ZoneOffset
 
 class JooqLimitChangeRequestRepository(
     private val context: JooqPersistenceContext,
 ) : LimitChangeRequestRepository {
+    private val table = GeneratedLimitRuleChangeRequestTable.LIMIT_RULE_CHANGE_REQUEST
+
     override fun findById(tenantId: TenantId, id: LimitChangeRequestId): LimitRuleChangeRequest? =
         findById(tenantId, id, forUpdate = false)
 
@@ -51,8 +50,8 @@ class JooqLimitChangeRequestRepository(
         key: IdempotencyKey,
     ): LimitRuleChangeRequest? = jooqOperation("find limit change request by idempotency key") {
         selectRequests()
-            .where(LimitChangeRequestTable.tenantId.eq(tenantId.value))
-            .and(LimitChangeRequestTable.idempotencyKey.eq(key.value))
+            .where(table.TENANT_ID.eq(tenantId.value))
+            .and(table.IDEMPOTENCY_KEY.eq(key.value))
             .fetchOne { it.toDomain() }
     }
 
@@ -61,9 +60,9 @@ class JooqLimitChangeRequestRepository(
         limitRuleId: LimitRuleId,
     ): List<LimitRuleChangeRequest> = jooqOperation("find limit change requests by rule") {
         selectRequests()
-            .where(LimitChangeRequestTable.tenantId.eq(tenantId.value))
-            .and(LimitChangeRequestTable.limitRuleId.eq(limitRuleId.value))
-            .orderBy(LimitChangeRequestTable.createdAt, LimitChangeRequestTable.id)
+            .where(table.TENANT_ID.eq(tenantId.value))
+            .and(table.LIMIT_RULE_ID.eq(limitRuleId.value))
+            .orderBy(table.CREATED_AT, table.ID)
             .fetch { it.toDomain() }
     }
 
@@ -72,12 +71,13 @@ class JooqLimitChangeRequestRepository(
         targetScopeHash: ScopeHash,
         at: Instant,
     ): List<LimitRuleChangeRequest> = jooqOperation("find pending limit changes for target") {
+        val timestamp = at.toOffsetDateTime()
         selectRequests()
-            .where(LimitChangeRequestTable.tenantId.eq(tenantId.value))
-            .and(LimitChangeRequestTable.targetScopeHash.eq(targetScopeHash.value))
-            .and(LimitChangeRequestTable.status.inPostgresEnums(PENDING_STATUSES, "limit_rule_change_status"))
-            .and(LimitChangeRequestTable.expiresAt.isNull.or(LimitChangeRequestTable.expiresAt.gt(at)))
-            .orderBy(LimitChangeRequestTable.createdAt, LimitChangeRequestTable.id)
+            .where(table.TENANT_ID.eq(tenantId.value))
+            .and(table.TARGET_SCOPE_HASH.eq(targetScopeHash.value))
+            .and(table.STATUS.`in`(PENDING_STATUSES))
+            .and(table.EXPIRES_AT.isNull.or(table.EXPIRES_AT.gt(timestamp)))
+            .orderBy(table.CREATED_AT, table.ID)
             .fetch { it.toDomain() }
     }
 
@@ -96,12 +96,13 @@ class JooqLimitChangeRequestRepository(
     ): List<LimitRuleChangeRequest> = jooqOperation("claim due limit change requests") {
         context.requireTransaction("claiming due limit change requests")
         require(limit > 0) { "limit must be greater than zero" }
+        val timestamp = dueAt.toOffsetDateTime()
         selectRequests()
-            .where(LimitChangeRequestTable.tenantId.eq(tenantId.value))
-            .and(LimitChangeRequestTable.status.inPostgresEnums(DUE_STATUSES, "limit_rule_change_status"))
-            .and(LimitChangeRequestTable.effectiveAt.isNull.or(LimitChangeRequestTable.effectiveAt.le(dueAt)))
-            .and(LimitChangeRequestTable.expiresAt.isNull.or(LimitChangeRequestTable.expiresAt.gt(dueAt)))
-            .orderBy(LimitChangeRequestTable.createdAt, LimitChangeRequestTable.id)
+            .where(table.TENANT_ID.eq(tenantId.value))
+            .and(table.STATUS.`in`(DUE_STATUSES))
+            .and(table.EFFECTIVE_AT.isNull.or(table.EFFECTIVE_AT.le(timestamp)))
+            .and(table.EXPIRES_AT.isNull.or(table.EXPIRES_AT.gt(timestamp)))
+            .orderBy(table.CREATED_AT, table.ID)
             .limit(limit)
             .forUpdate()
             .skipLocked()
@@ -113,32 +114,21 @@ class JooqLimitChangeRequestRepository(
         requestActorContext: RequestActorContext,
     ): List<LimitRuleChangeRequest> = jooqOperation("find limit changes by requester context") {
         val condition = when (requestActorContext) {
-            RequestActorContext.System ->
-                LimitChangeRequestTable.requestedByActorType.eqPostgresEnum("SYSTEM", "limit_change_actor_type")
-            is RequestActorContext.PartyProfile ->
-                LimitChangeRequestTable.requestedByActorType.eqPostgresEnum(
-                    "PARTY_PROFILE",
-                    "limit_change_actor_type",
-                )
-                    .and(
-                        LimitChangeRequestTable.requestedByPartyProfileId.eq(
-                            requestActorContext.requesterPartyProfileId.value
-                        )
-                    )
-                    .and(LimitChangeRequestTable.requestChannelId.eq(requestActorContext.requesterChannelId.value))
-            is RequestActorContext.BankWorker ->
-                LimitChangeRequestTable.requestedByActorType.eqPostgresEnum(
-                    "BANK_WORKER",
-                    "limit_change_actor_type",
-                )
-                    .and(LimitChangeRequestTable.requestedByBankWorkerId.eq(requestActorContext.bankWorkerId.value))
-                    .and(LimitChangeRequestTable.requestChannelId.eq(requestActorContext.requesterChannelId.value))
+            RequestActorContext.System -> table.REQUESTED_BY_ACTOR_TYPE.eq(GeneratedLimitChangeActorType.SYSTEM)
+            is RequestActorContext.PartyProfile -> table.REQUESTED_BY_ACTOR_TYPE
+                .eq(GeneratedLimitChangeActorType.PARTY_PROFILE)
+                .and(table.REQUESTED_BY_PARTY_PROFILE_ID.eq(requestActorContext.requesterPartyProfileId.value))
+                .and(table.REQUEST_CHANNEL_ID.eq(requestActorContext.requesterChannelId.value))
+            is RequestActorContext.BankWorker -> table.REQUESTED_BY_ACTOR_TYPE
+                .eq(GeneratedLimitChangeActorType.BANK_WORKER)
+                .and(table.REQUESTED_BY_BANK_WORKER_ID.eq(requestActorContext.bankWorkerId.value))
+                .and(table.REQUEST_CHANNEL_ID.eq(requestActorContext.requesterChannelId.value))
             else -> error("unsupported request actor context: ${requestActorContext::class.qualifiedName}")
         }
         selectRequests()
-            .where(LimitChangeRequestTable.tenantId.eq(tenantId.value))
+            .where(table.TENANT_ID.eq(tenantId.value))
             .and(condition)
-            .orderBy(LimitChangeRequestTable.createdAt, LimitChangeRequestTable.id)
+            .orderBy(table.CREATED_AT, table.ID)
             .fetch { it.toDomain() }
     }
 
@@ -147,9 +137,9 @@ class JooqLimitChangeRequestRepository(
         requester: PartyProfileId,
     ): List<LimitRuleChangeRequest> = jooqOperation("find limit changes by represented requester") {
         selectRequests()
-            .where(LimitChangeRequestTable.tenantId.eq(tenantId.value))
-            .and(LimitChangeRequestTable.requesterPartyProfileId.eq(requester.value))
-            .orderBy(LimitChangeRequestTable.createdAt, LimitChangeRequestTable.id)
+            .where(table.TENANT_ID.eq(tenantId.value))
+            .and(table.REQUESTER_PARTY_PROFILE_ID.eq(requester.value))
+            .orderBy(table.CREATED_AT, table.ID)
             .fetch { it.toDomain() }
     }
 
@@ -162,44 +152,38 @@ class JooqLimitChangeRequestRepository(
     ) {
         require(request.tenantId == tenantId) { "limit change request tenant does not match repository tenant" }
         val insert = context.dsl()
-            .insertInto(LimitChangeRequestTable.table)
-            .set(LimitChangeRequestTable.id, request.id.value)
-            .set(LimitChangeRequestTable.tenantId, tenantId.value)
-            .set(LimitChangeRequestTable.limitRuleId, request.limitRuleId?.value)
-            .set(LimitChangeRequestTable.changeType, postgresEnum(request.changeType.name, "limit_rule_change_type"))
-            .set(LimitChangeRequestTable.status, postgresEnum(request.status.name, "limit_rule_change_status"))
-            .set(
-                LimitChangeRequestTable.requestedByActorType,
-                postgresEnum(request.actorTypeName(), "limit_change_actor_type"),
-            )
-            .set(LimitChangeRequestTable.requestedByPartyProfileId, request.actorPartyProfileId())
-            .set(LimitChangeRequestTable.requestedByBankWorkerId, request.actorBankWorkerId())
-            .set(LimitChangeRequestTable.requesterPartyProfileId, request.requesterPartyProfileId?.value)
-            .set(LimitChangeRequestTable.authorityDelegationId, request.authorityDelegationId?.value)
-            .set(LimitChangeRequestTable.requestChannelId, request.requestChannelId())
-            .set(LimitChangeRequestTable.targetOwnerPartyProfileId, request.targetOwnerPartyProfileId.value)
-            .set(LimitChangeRequestTable.targetMandateId, request.targetMandateId?.value)
-            .set(LimitChangeRequestTable.targetScope, request.targetScope.toJsonb())
-            .set(LimitChangeRequestTable.targetScopeHash, request.targetScopeHash.value)
-            .set(LimitChangeRequestTable.beforeRule, request.beforeRule?.toJsonb())
-            .set(LimitChangeRequestTable.requestedRule, request.requestedRule.toJsonb())
-            .set(LimitChangeRequestTable.approvedRule, request.approvedRule?.toJsonb())
-            .set(LimitChangeRequestTable.policyContext, request.policyContext.toJsonb())
-            .set(LimitChangeRequestTable.effectiveAt, request.effectiveAt)
-            .set(LimitChangeRequestTable.expiresAt, request.expiresAt)
-            .set(LimitChangeRequestTable.decidedAt, request.decidedAt)
-            .set(LimitChangeRequestTable.appliedAt, request.appliedAt)
-            .set(LimitChangeRequestTable.cancelledAt, request.cancelledAt)
-            .set(
-                LimitChangeRequestTable.supersededByChangeRequestId,
-                request.supersededByChangeRequestId?.value,
-            )
-            .set(LimitChangeRequestTable.decisionReason, request.decisionReason)
-            .set(LimitChangeRequestTable.idempotencyKey, request.idempotencyKey?.value)
-            .set(LimitChangeRequestTable.metadata, request.metadata.toJsonb())
-        request.createdAt?.let { insert.set(LimitChangeRequestTable.createdAt, it) }
-        request.updatedAt?.let { insert.set(LimitChangeRequestTable.updatedAt, it) }
-        requireNotNull(insert.returning(LimitChangeRequestTable.fields).fetchOne()).toDomain()
+            .insertInto(table)
+            .set(table.ID, request.id.value)
+            .set(table.TENANT_ID, tenantId.value)
+            .set(table.LIMIT_RULE_ID, request.limitRuleId?.value)
+            .set(table.CHANGE_TYPE, request.changeType.toGenerated())
+            .set(table.STATUS, request.status.toGenerated())
+            .set(table.REQUESTED_BY_ACTOR_TYPE, request.requestedBy.toGenerated())
+            .set(table.REQUESTED_BY_PARTY_PROFILE_ID, request.actorPartyProfileId())
+            .set(table.REQUESTED_BY_BANK_WORKER_ID, request.actorBankWorkerId())
+            .set(table.REQUESTER_PARTY_PROFILE_ID, request.requesterPartyProfileId?.value)
+            .set(table.AUTHORITY_DELEGATION_ID, request.authorityDelegationId?.value)
+            .set(table.REQUEST_CHANNEL_ID, request.requestChannelId())
+            .set(table.TARGET_OWNER_PARTY_PROFILE_ID, request.targetOwnerPartyProfileId.value)
+            .set(table.TARGET_MANDATE_ID, request.targetMandateId?.value)
+            .set(table.TARGET_SCOPE, request.targetScope.toJsonb())
+            .set(table.TARGET_SCOPE_HASH, request.targetScopeHash.value)
+            .set(table.BEFORE_RULE, request.beforeRule?.toJsonb())
+            .set(table.REQUESTED_RULE, request.requestedRule.toJsonb())
+            .set(table.APPROVED_RULE, request.approvedRule?.toJsonb())
+            .set(table.POLICY_CONTEXT, request.policyContext.toJsonb())
+            .set(table.EFFECTIVE_AT, request.effectiveAt?.toOffsetDateTime())
+            .set(table.EXPIRES_AT, request.expiresAt?.toOffsetDateTime())
+            .set(table.DECIDED_AT, request.decidedAt?.toOffsetDateTime())
+            .set(table.APPLIED_AT, request.appliedAt?.toOffsetDateTime())
+            .set(table.CANCELLED_AT, request.cancelledAt?.toOffsetDateTime())
+            .set(table.SUPERSEDED_BY_CHANGE_REQUEST_ID, request.supersededByChangeRequestId?.value)
+            .set(table.DECISION_REASON, request.decisionReason)
+            .set(table.IDEMPOTENCY_KEY, request.idempotencyKey?.value)
+            .set(table.METADATA, request.metadata.toJsonb())
+        request.createdAt?.let { insert.set(table.CREATED_AT, it.toOffsetDateTime()) }
+        request.updatedAt?.let { insert.set(table.UPDATED_AT, it.toOffsetDateTime()) }
+        requireNotNull(insert.returning(table.fields().toList()).fetchOne()).toDomain()
     }
 
     override fun update(
@@ -208,32 +192,29 @@ class JooqLimitChangeRequestRepository(
     ): LimitRuleChangeRequest = jooqOperation("update limit change request") {
         require(request.tenantId == tenantId) { "limit change request tenant does not match repository tenant" }
         val update = context.dsl()
-            .update(LimitChangeRequestTable.table)
-            .set(LimitChangeRequestTable.limitRuleId, request.limitRuleId?.value)
-            .set(LimitChangeRequestTable.status, postgresEnum(request.status.name, "limit_rule_change_status"))
-            .set(LimitChangeRequestTable.targetMandateId, request.targetMandateId?.value)
-            .set(LimitChangeRequestTable.targetScope, request.targetScope.toJsonb())
-            .set(LimitChangeRequestTable.targetScopeHash, request.targetScopeHash.value)
-            .set(LimitChangeRequestTable.beforeRule, request.beforeRule?.toJsonb())
-            .set(LimitChangeRequestTable.requestedRule, request.requestedRule.toJsonb())
-            .set(LimitChangeRequestTable.approvedRule, request.approvedRule?.toJsonb())
-            .set(LimitChangeRequestTable.policyContext, request.policyContext.toJsonb())
-            .set(LimitChangeRequestTable.effectiveAt, request.effectiveAt)
-            .set(LimitChangeRequestTable.expiresAt, request.expiresAt)
-            .set(LimitChangeRequestTable.decidedAt, request.decidedAt)
-            .set(LimitChangeRequestTable.appliedAt, request.appliedAt)
-            .set(LimitChangeRequestTable.cancelledAt, request.cancelledAt)
-            .set(
-                LimitChangeRequestTable.supersededByChangeRequestId,
-                request.supersededByChangeRequestId?.value,
-            )
-            .set(LimitChangeRequestTable.decisionReason, request.decisionReason)
-            .set(LimitChangeRequestTable.metadata, request.metadata.toJsonb())
-        request.updatedAt?.let { update.set(LimitChangeRequestTable.updatedAt, it) }
+            .update(table)
+            .set(table.LIMIT_RULE_ID, request.limitRuleId?.value)
+            .set(table.STATUS, request.status.toGenerated())
+            .set(table.TARGET_MANDATE_ID, request.targetMandateId?.value)
+            .set(table.TARGET_SCOPE, request.targetScope.toJsonb())
+            .set(table.TARGET_SCOPE_HASH, request.targetScopeHash.value)
+            .set(table.BEFORE_RULE, request.beforeRule?.toJsonb())
+            .set(table.REQUESTED_RULE, request.requestedRule.toJsonb())
+            .set(table.APPROVED_RULE, request.approvedRule?.toJsonb())
+            .set(table.POLICY_CONTEXT, request.policyContext.toJsonb())
+            .set(table.EFFECTIVE_AT, request.effectiveAt?.toOffsetDateTime())
+            .set(table.EXPIRES_AT, request.expiresAt?.toOffsetDateTime())
+            .set(table.DECIDED_AT, request.decidedAt?.toOffsetDateTime())
+            .set(table.APPLIED_AT, request.appliedAt?.toOffsetDateTime())
+            .set(table.CANCELLED_AT, request.cancelledAt?.toOffsetDateTime())
+            .set(table.SUPERSEDED_BY_CHANGE_REQUEST_ID, request.supersededByChangeRequestId?.value)
+            .set(table.DECISION_REASON, request.decisionReason)
+            .set(table.METADATA, request.metadata.toJsonb())
+        request.updatedAt?.let { update.set(table.UPDATED_AT, it.toOffsetDateTime()) }
         requireNotNull(
-            update.where(LimitChangeRequestTable.tenantId.eq(tenantId.value))
-                .and(LimitChangeRequestTable.id.eq(request.id.value))
-                .returning(LimitChangeRequestTable.fields)
+            update.where(table.TENANT_ID.eq(tenantId.value))
+                .and(table.ID.eq(request.id.value))
+                .returning(table.fields().toList())
                 .fetchOne()
         ) { "limit change request not found: ${request.id.value}" }.toDomain()
     }
@@ -244,87 +225,86 @@ class JooqLimitChangeRequestRepository(
         forUpdate: Boolean,
     ): LimitRuleChangeRequest? = jooqOperation("find limit change request by id") {
         val query = selectRequests()
-            .where(LimitChangeRequestTable.tenantId.eq(tenantId.value))
-            .and(LimitChangeRequestTable.id.eq(id.value))
+            .where(table.TENANT_ID.eq(tenantId.value))
+            .and(table.ID.eq(id.value))
         if (forUpdate) query.forUpdate().fetchOne { it.toDomain() } else query.fetchOne { it.toDomain() }
     }
 
     private fun selectRequests() = context.dsl()
-        .select(LimitChangeRequestTable.fields)
-        .from(LimitChangeRequestTable.table)
+        .select(table.fields().toList())
+        .from(table)
 
     private fun Record.toDomain(): LimitRuleChangeRequest {
-        val requestedBy = when (val actorType = requireNotNull(get(LimitChangeRequestTable.requestedByActorType))) {
-            "SYSTEM" -> ChangeActor.System
-            "PARTY_PROFILE" -> ChangeActor.PartyProfileActor(
-                PartyProfileId.of(requireNotNull(get(LimitChangeRequestTable.requestedByPartyProfileId)))
+        val requestedBy = when (requireNotNull(get(table.REQUESTED_BY_ACTOR_TYPE))) {
+            GeneratedLimitChangeActorType.SYSTEM -> ChangeActor.System
+            GeneratedLimitChangeActorType.PARTY_PROFILE -> ChangeActor.PartyProfileActor(
+                PartyProfileId.of(requireNotNull(get(table.REQUESTED_BY_PARTY_PROFILE_ID)))
             )
-            "BANK_WORKER" -> ChangeActor.BankWorkerActor(
-                BankWorkerId.of(requireNotNull(get(LimitChangeRequestTable.requestedByBankWorkerId)))
+            GeneratedLimitChangeActorType.BANK_WORKER -> ChangeActor.BankWorkerActor(
+                BankWorkerId.of(requireNotNull(get(table.REQUESTED_BY_BANK_WORKER_ID)))
             )
-            else -> error("unsupported limit change actor type: $actorType")
         }
         val requestActorContext = when (requestedBy) {
             ChangeActor.System -> RequestActorContext.System
             is ChangeActor.PartyProfileActor -> RequestActorContext.PartyProfile(
                 requesterPartyProfileId = requestedBy.partyProfileId,
-                requesterChannelId = ChannelId.of(requireNotNull(get(LimitChangeRequestTable.requestChannelId))),
+                requesterChannelId = ChannelId.of(requireNotNull(get(table.REQUEST_CHANNEL_ID))),
             )
             is ChangeActor.BankWorkerActor -> RequestActorContext.BankWorker(
                 bankWorkerId = requestedBy.bankWorkerId,
-                requesterChannelId = ChannelId.of(requireNotNull(get(LimitChangeRequestTable.requestChannelId))),
+                requesterChannelId = ChannelId.of(requireNotNull(get(table.REQUEST_CHANNEL_ID))),
             )
         }
 
         return LimitRuleChangeRequest(
-            id = LimitChangeRequestId.of(requireNotNull(get(LimitChangeRequestTable.id))),
-            tenantId = TenantId.of(requireNotNull(get(LimitChangeRequestTable.tenantId))),
-            changeType = LimitRuleChangeType.valueOf(requireNotNull(get(LimitChangeRequestTable.changeType))),
+            id = LimitChangeRequestId.of(requireNotNull(get(table.ID))),
+            tenantId = TenantId.of(requireNotNull(get(table.TENANT_ID))),
+            changeType = LimitRuleChangeType.valueOf(requireNotNull(get(table.CHANGE_TYPE)).name),
             requestedBy = requestedBy,
-            targetOwnerPartyProfileId = PartyProfileId.of(
-                requireNotNull(get(LimitChangeRequestTable.targetOwnerPartyProfileId))
-            ),
-            targetScope = get(LimitChangeRequestTable.targetScope).toMetadata(),
-            targetScopeHash = ScopeHash.of(requireNotNull(get(LimitChangeRequestTable.targetScopeHash))),
-            requestedRule = get(LimitChangeRequestTable.requestedRule).toMetadata(),
-            status = LimitRuleChangeStatus.valueOf(requireNotNull(get(LimitChangeRequestTable.status))),
-            limitRuleId = get(LimitChangeRequestTable.limitRuleId)?.let(LimitRuleId::of),
-            authorityDelegationId = get(LimitChangeRequestTable.authorityDelegationId)
-                ?.let(PartyProfileDelegationId::of),
+            targetOwnerPartyProfileId = PartyProfileId.of(requireNotNull(get(table.TARGET_OWNER_PARTY_PROFILE_ID))),
+            targetScope = get(table.TARGET_SCOPE).toMetadata(),
+            targetScopeHash = ScopeHash.of(requireNotNull(get(table.TARGET_SCOPE_HASH))),
+            requestedRule = get(table.REQUESTED_RULE).toMetadata(),
+            status = LimitRuleChangeStatus.valueOf(requireNotNull(get(table.STATUS)).name),
+            limitRuleId = get(table.LIMIT_RULE_ID)?.let(LimitRuleId::of),
+            authorityDelegationId = get(table.AUTHORITY_DELEGATION_ID)?.let(PartyProfileDelegationId::of),
             requestActorContext = requestActorContext,
-            requesterPartyProfileId = get(LimitChangeRequestTable.requesterPartyProfileId)?.let(PartyProfileId::of),
-            targetMandateId = get(LimitChangeRequestTable.targetMandateId)?.let(MandateId::of),
-            beforeRule = get(LimitChangeRequestTable.beforeRule)?.toMetadata(),
-            approvedRule = get(LimitChangeRequestTable.approvedRule)?.toMetadata(),
-            policyContext = get(LimitChangeRequestTable.policyContext).toMetadata(),
-            effectiveAt = get(LimitChangeRequestTable.effectiveAt),
-            expiresAt = get(LimitChangeRequestTable.expiresAt),
-            decidedAt = get(LimitChangeRequestTable.decidedAt),
-            appliedAt = get(LimitChangeRequestTable.appliedAt),
-            cancelledAt = get(LimitChangeRequestTable.cancelledAt),
-            supersededByChangeRequestId = get(LimitChangeRequestTable.supersededByChangeRequestId)
-                ?.let(LimitChangeRequestId::of),
-            decisionReason = get(LimitChangeRequestTable.decisionReason),
-            idempotencyKey = get(LimitChangeRequestTable.idempotencyKey)?.let(IdempotencyKey::of),
-            metadata = get(LimitChangeRequestTable.metadata).toMetadata(),
-            createdAt = get(LimitChangeRequestTable.createdAt),
-            updatedAt = get(LimitChangeRequestTable.updatedAt),
+            requesterPartyProfileId = get(table.REQUESTER_PARTY_PROFILE_ID)?.let(PartyProfileId::of),
+            targetMandateId = get(table.TARGET_MANDATE_ID)?.let(MandateId::of),
+            beforeRule = get(table.BEFORE_RULE)?.toMetadata(),
+            approvedRule = get(table.APPROVED_RULE)?.toMetadata(),
+            policyContext = get(table.POLICY_CONTEXT).toMetadata(),
+            effectiveAt = get(table.EFFECTIVE_AT)?.toInstant(),
+            expiresAt = get(table.EXPIRES_AT)?.toInstant(),
+            decidedAt = get(table.DECIDED_AT)?.toInstant(),
+            appliedAt = get(table.APPLIED_AT)?.toInstant(),
+            cancelledAt = get(table.CANCELLED_AT)?.toInstant(),
+            supersededByChangeRequestId = get(table.SUPERSEDED_BY_CHANGE_REQUEST_ID)?.let(LimitChangeRequestId::of),
+            decisionReason = get(table.DECISION_REASON),
+            idempotencyKey = get(table.IDEMPOTENCY_KEY)?.let(IdempotencyKey::of),
+            metadata = get(table.METADATA).toMetadata(),
+            createdAt = get(table.CREATED_AT)?.toInstant(),
+            updatedAt = get(table.UPDATED_AT)?.toInstant(),
         )
     }
 
-    private fun LimitRuleChangeRequest.actorTypeName(): String = when (requestedBy) {
-        ChangeActor.System -> "SYSTEM"
-        is ChangeActor.PartyProfileActor -> "PARTY_PROFILE"
-        is ChangeActor.BankWorkerActor -> "BANK_WORKER"
+    private fun LimitRuleChangeType.toGenerated() = GeneratedLimitRuleChangeType.valueOf(name)
+
+    private fun LimitRuleChangeStatus.toGenerated() = GeneratedLimitRuleChangeStatus.valueOf(name)
+
+    private fun ChangeActor.toGenerated(): GeneratedLimitChangeActorType = when (this) {
+        ChangeActor.System -> GeneratedLimitChangeActorType.SYSTEM
+        is ChangeActor.PartyProfileActor -> GeneratedLimitChangeActorType.PARTY_PROFILE
+        is ChangeActor.BankWorkerActor -> GeneratedLimitChangeActorType.BANK_WORKER
     }
 
-    private fun LimitRuleChangeRequest.actorPartyProfileId(): UUID? =
+    private fun LimitRuleChangeRequest.actorPartyProfileId(): java.util.UUID? =
         (requestedBy as? ChangeActor.PartyProfileActor)?.partyProfileId?.value
 
-    private fun LimitRuleChangeRequest.actorBankWorkerId(): UUID? =
+    private fun LimitRuleChangeRequest.actorBankWorkerId(): java.util.UUID? =
         (requestedBy as? ChangeActor.BankWorkerActor)?.bankWorkerId?.value
 
-    private fun LimitRuleChangeRequest.requestChannelId(): UUID? = when (val context = requestActorContext) {
+    private fun LimitRuleChangeRequest.requestChannelId(): java.util.UUID? = when (val context = requestActorContext) {
         RequestActorContext.System -> null
         is RequestActorContext.PartyProfile -> context.requesterChannelId.value
         is RequestActorContext.BankWorker -> context.requesterChannelId.value
@@ -332,76 +312,16 @@ class JooqLimitChangeRequestRepository(
     }
 
     private companion object {
-        val PENDING_STATUSES = listOf("REQUESTED", "APPROVED", "PENDING_EFFECTIVE_DATE")
-        val DUE_STATUSES = listOf("APPROVED", "PENDING_EFFECTIVE_DATE")
+        val PENDING_STATUSES = listOf(
+            GeneratedLimitRuleChangeStatus.REQUESTED,
+            GeneratedLimitRuleChangeStatus.APPROVED,
+            GeneratedLimitRuleChangeStatus.PENDING_EFFECTIVE_DATE,
+        )
+        val DUE_STATUSES = listOf(
+            GeneratedLimitRuleChangeStatus.APPROVED,
+            GeneratedLimitRuleChangeStatus.PENDING_EFFECTIVE_DATE,
+        )
     }
 }
 
-private object LimitChangeRequestTable {
-    val table: Table<Record> = DSL.table(DSL.name("limit_rule_change_request"))
-    val id: Field<UUID> = field("id", UUID::class.java)
-    val tenantId: Field<UUID> = field("tenant_id", UUID::class.java)
-    val limitRuleId: Field<UUID> = field("limit_rule_id", UUID::class.java)
-    val changeType: Field<String> = field("change_type", String::class.java)
-    val status: Field<String> = field("status", String::class.java)
-    val requestedByActorType: Field<String> = field("requested_by_actor_type", String::class.java)
-    val requestedByPartyProfileId: Field<UUID> = field("requested_by_party_profile_id", UUID::class.java)
-    val requestedByBankWorkerId: Field<UUID> = field("requested_by_bank_worker_id", UUID::class.java)
-    val requesterPartyProfileId: Field<UUID> = field("requester_party_profile_id", UUID::class.java)
-    val authorityDelegationId: Field<UUID> = field("authority_delegation_id", UUID::class.java)
-    val requestChannelId: Field<UUID> = field("request_channel_id", UUID::class.java)
-    val targetOwnerPartyProfileId: Field<UUID> = field("target_owner_party_profile_id", UUID::class.java)
-    val targetMandateId: Field<UUID> = field("target_mandate_id", UUID::class.java)
-    val targetScope: Field<JSONB> = field("target_scope", JSONB::class.java)
-    val targetScopeHash: Field<String> = field("target_scope_hash", String::class.java)
-    val beforeRule: Field<JSONB> = field("before_rule", JSONB::class.java)
-    val requestedRule: Field<JSONB> = field("requested_rule", JSONB::class.java)
-    val approvedRule: Field<JSONB> = field("approved_rule", JSONB::class.java)
-    val policyContext: Field<JSONB> = field("policy_context", JSONB::class.java)
-    val effectiveAt: Field<Instant> = field("effective_at", Instant::class.java)
-    val expiresAt: Field<Instant> = field("expires_at", Instant::class.java)
-    val decidedAt: Field<Instant> = field("decided_at", Instant::class.java)
-    val appliedAt: Field<Instant> = field("applied_at", Instant::class.java)
-    val cancelledAt: Field<Instant> = field("cancelled_at", Instant::class.java)
-    val supersededByChangeRequestId: Field<UUID> = field("superseded_by_change_request_id", UUID::class.java)
-    val decisionReason: Field<String> = field("decision_reason", String::class.java)
-    val idempotencyKey: Field<String> = field("idempotency_key", String::class.java)
-    val metadata: Field<JSONB> = field("metadata", JSONB::class.java)
-    val createdAt: Field<Instant> = field("created_at", Instant::class.java)
-    val updatedAt: Field<Instant> = field("updated_at", Instant::class.java)
-    val fields: List<SelectFieldOrAsterisk> = listOf(
-        id,
-        tenantId,
-        limitRuleId,
-        changeType,
-        status,
-        requestedByActorType,
-        requestedByPartyProfileId,
-        requestedByBankWorkerId,
-        requesterPartyProfileId,
-        authorityDelegationId,
-        requestChannelId,
-        targetOwnerPartyProfileId,
-        targetMandateId,
-        targetScope,
-        targetScopeHash,
-        beforeRule,
-        requestedRule,
-        approvedRule,
-        policyContext,
-        effectiveAt,
-        expiresAt,
-        decidedAt,
-        appliedAt,
-        cancelledAt,
-        supersededByChangeRequestId,
-        decisionReason,
-        idempotencyKey,
-        metadata,
-        createdAt,
-        updatedAt,
-    )
-
-    private fun <T> field(name: String, type: Class<T>): Field<T> =
-        DSL.field(DSL.name("limit_rule_change_request", name), type)
-}
+private fun Instant.toOffsetDateTime(): OffsetDateTime = OffsetDateTime.ofInstant(this, ZoneOffset.UTC)
