@@ -20,9 +20,9 @@ import io.github.sepfins.limitguard.domain.limit.LimitPeriod
 import io.github.sepfins.limitguard.domain.limit.LimitPriority
 import io.github.sepfins.limitguard.domain.limit.LimitRule
 import io.github.sepfins.limitguard.domain.limit.LimitRuleName
-import io.github.sepfins.limitguard.domain.limit.LimitRuleTargetScope
 import io.github.sepfins.limitguard.domain.limit.LimitUsageConsumptionMode
 import io.github.sepfins.limitguard.domain.mandate.MandateScope
+import java.math.BigDecimal
 import java.time.Instant
 
 internal object LimitRuleSnapshotter {
@@ -58,8 +58,8 @@ internal object LimitRuleSnapshotter {
 
     fun restoreRule(
         snapshot: Metadata,
-        createdAt: Instant?,
-        updatedAt: Instant,
+        createdAt: Instant? = null,
+        updatedAt: Instant? = null,
     ): LimitRule {
         val values = snapshot.value
         return LimitRule(
@@ -109,7 +109,7 @@ internal object LimitRuleSnapshotter {
             ),
             priority = LimitPriority.of(values.requiredInt("priority")),
             isActive = values.requiredBoolean("isActive"),
-            version = Version.of(values.requiredInt("version")),
+            version = version(snapshot),
             effectiveWindow = EffectiveWindow(
                 startsAt = values.requiredInstant("startsAt"),
                 endsAt = values.optionalInstant("endsAt"),
@@ -120,22 +120,7 @@ internal object LimitRuleSnapshotter {
         )
     }
 
-    fun targetScopeSnapshot(targetScope: LimitRuleTargetScope): Metadata =
-        Metadata(
-            mapOf(
-                "owner" to targetScope.owner.value.toString(),
-                "currency" to targetScope.currency.value,
-                "mandateScope" to targetScope.mandateScope.snapshotScope(),
-                "mandateId" to targetScope.mandateScope.snapshotMandateId(),
-                "channelScope" to targetScope.channelScope.snapshotScope(),
-                "channelId" to targetScope.channelScope.snapshotChannelId(),
-                "channelGroupId" to targetScope.channelScope.snapshotChannelGroupId(),
-                "operationScope" to targetScope.operationScope.snapshotScope(),
-                "operationTypeId" to targetScope.operationScope.snapshotOperationTypeId(),
-                "kind" to targetScope.kind.snapshotKind(),
-                "period" to targetScope.kind.snapshotPeriod(),
-            ).filterValues { it != null }
-        )
+    fun version(snapshot: Metadata): Version = Version.of(snapshot.value.requiredInt("version"))
 
     private fun LimitKind.snapshotKind(): String =
         when (this) {
@@ -204,9 +189,17 @@ internal object LimitRuleSnapshotter {
             ?: throw IllegalArgumentException("$key must be a string in rule snapshot")
     }
 
-    private fun Map<String, Any?>.requiredInt(key: String): Int =
-        (this[key] as? Number)?.toInt()
+    private fun Map<String, Any?>.requiredInt(key: String): Int {
+        val value = this[key] as? Number
             ?: throw IllegalArgumentException("$key is required in rule snapshot")
+        return try {
+            BigDecimal(value.toString()).intValueExact()
+        } catch (exception: NumberFormatException) {
+            throw IllegalArgumentException("$key must be an integer in rule snapshot", exception)
+        } catch (exception: ArithmeticException) {
+            throw IllegalArgumentException("$key must be an integer in rule snapshot", exception)
+        }
+    }
 
     private fun Map<String, Any?>.requiredBoolean(key: String): Boolean =
         this[key] as? Boolean

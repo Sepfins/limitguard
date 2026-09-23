@@ -1,0 +1,29 @@
+{
+  "id": "00000000-0000-0000-0000-000000000001",
+  "tenantId": "00000000-0000-0000-0000-000000000002",
+  "ownerPartyProfileId": "00000000-0000-0000-0000-000000000003",
+  "name": "Daily transfer limit",
+  "description": "Daily transfer cap",
+  "limitKind": "PERIODIC",
+  "period": "DAILY",
+  "amount": "500.0000",
+  "currency": "EUR",
+  "mandateScope": "MANDATE",
+  "mandateId": "00000000-0000-0000-0000-000000000004",
+  "configurationId": "00000000-0000-0000-0000-000000000005",
+  "channelScope": "CHANNEL_GROUP",
+  "channelId": null,
+  "channelGroupId": "00000000-0000-0000-0000-000000000006",
+  "operationScope": "OPERATION_TYPE",
+  "operationTypeId": "00000000-0000-0000-0000-000000000007",
+  "usageConsumptionMode": "ISOLATED",
+  "priority": 10,
+  "isActive": true,
+  "version": 1,
+  "startsAt": "2026-06-01T00:00:00Z",
+  "endsAt": "2026-07-01T00:00:00Z",
+  "metadata": {
+    "attempts": 1,
+    "nested": [null, true, {"precise": 9007199254740993.1234}]
+  }
+}
