@@ -359,6 +359,108 @@ class TenantCatalogCoverageTest {
                 )
             }
         }
+        assertNull(
+            fixture.repositories.limitChangePolicies.findByCode(
+                TenantId.of(tenant.id),
+                LimitChangePolicyCode.of("INVALID_POLICY"),
+            )
+        )
+    }
+
+    @Test
+    fun `catalog accepts every supported authorization policy decision`() {
+        val fixture = fixture()
+        val tenant = fixture.service.registerTenant(RegisterTenantCommand(name = "Supported Policy Bank"))
+
+        LimitChangePolicyDecision.values()
+            .filter {
+                it in setOf(
+                    LimitChangePolicyDecision.ALLOW,
+                    LimitChangePolicyDecision.DENY,
+                    LimitChangePolicyDecision.REQUIRE_APPROVAL,
+                    LimitChangePolicyDecision.NO_OP,
+                )
+            }
+            .forEach { decision ->
+                val code = "SUPPORTED_${decision.name}"
+                val policy = fixture.service.createLimitChangePolicy(
+                    CreateLimitChangePolicyCommand(
+                        tenantId = tenant.id,
+                        code = code,
+                        name = code,
+                        phase = LimitChangePolicyPhase.AUTHORIZATION,
+                        decision = decision,
+                        conditionExpression = mapOf("==" to listOf(1, 1)),
+                    )
+                )
+
+                assertEquals(code, policy.code)
+                assertNotNull(
+                    fixture.repositories.limitChangePolicies.findByCode(
+                        TenantId.of(tenant.id),
+                        LimitChangePolicyCode.of(code),
+                    )
+                )
+            }
+    }
+
+    @Test
+    fun `catalog rejects unsupported policy phases and decisions before persistence`() {
+        val fixture = fixture()
+        val tenant = fixture.service.registerTenant(RegisterTenantCommand(name = "Unsupported Policy Bank"))
+
+        LimitChangePolicyPhase.values()
+            .filter { it != LimitChangePolicyPhase.AUTHORIZATION }
+            .forEach { phase ->
+                val code = "UNSUPPORTED_PHASE_${phase.name}"
+                assertFailsWith<ValidationException> {
+                    fixture.service.createLimitChangePolicy(
+                        CreateLimitChangePolicyCommand(
+                            tenantId = tenant.id,
+                            code = code,
+                            name = code,
+                            phase = phase,
+                            decision = LimitChangePolicyDecision.DENY,
+                        )
+                    )
+                }
+                assertNull(
+                    fixture.repositories.limitChangePolicies.findByCode(
+                        TenantId.of(tenant.id),
+                        LimitChangePolicyCode.of(code),
+                    )
+                )
+            }
+
+        LimitChangePolicyDecision.values()
+            .filter {
+                it !in setOf(
+                    LimitChangePolicyDecision.ALLOW,
+                    LimitChangePolicyDecision.DENY,
+                    LimitChangePolicyDecision.REQUIRE_APPROVAL,
+                    LimitChangePolicyDecision.NO_OP,
+                )
+            }
+            .forEach { decision ->
+                val code = "UNSUPPORTED_DECISION_${decision.name}"
+                assertFailsWith<ValidationException> {
+                    fixture.service.createLimitChangePolicy(
+                        CreateLimitChangePolicyCommand(
+                            tenantId = tenant.id,
+                            code = code,
+                            name = code,
+                            phase = LimitChangePolicyPhase.AUTHORIZATION,
+                            decision = decision,
+                        )
+                    )
+                }
+                assertNull(
+                    fixture.repositories.limitChangePolicies.findByCode(
+                        TenantId.of(tenant.id),
+                        LimitChangePolicyCode.of(code),
+                    )
+                )
+            }
     }
 
     private fun individualProfileCommand(

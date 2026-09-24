@@ -4,15 +4,14 @@ import io.github.sepfins.limitguard.api.commands.RequestLimitRuleChangeCommand
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeRequest
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeStatus
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeType
-import io.github.sepfins.limitguard.domain.change.ScopeHash
 import io.github.sepfins.limitguard.domain.common.IdempotencyKey
 import io.github.sepfins.limitguard.domain.common.LimitChangeRequestId
 import io.github.sepfins.limitguard.domain.common.MandateId
 import io.github.sepfins.limitguard.domain.common.Metadata
 import io.github.sepfins.limitguard.domain.common.PartyProfileDelegationId
 import io.github.sepfins.limitguard.domain.limit.LimitRule
+import io.github.sepfins.limitguard.domain.limit.LimitRuleTargetScope
 import io.github.sepfins.limitguard.domain.mandate.MandateScope
-import io.github.sepfins.limitguard.internal.hashing.StableJsonHasher
 import io.github.sepfins.limitguard.internal.hashing.TargetScopeCanonicalizer
 import java.time.Instant
 
@@ -22,15 +21,12 @@ internal class LimitChangeRequestFactory {
         command: RequestLimitRuleChangeCommand,
         requestedRule: LimitRule,
         currentRule: LimitRule?,
+        targetScope: LimitRuleTargetScope,
         now: Instant
     ): LimitRuleChangeRequest {
 
-        val targetScope = requestedRule.toTargetScope()
-        val targetScopeSnapshot = LimitRuleSnapshotter.targetScopeSnapshot(targetScope)
         val requestedRuleSnapshot = LimitRuleSnapshotter.ruleSnapshot(requestedRule)
 
-        val targetScopeCanonical = TargetScopeCanonicalizer.canonicalize(targetScope)
-        val targetScopeHash = StableJsonHasher.sha256Hex(targetScopeCanonical)
         val actor = command.toChangeActor()
 
         return LimitRuleChangeRequest(
@@ -42,8 +38,8 @@ internal class LimitChangeRequestFactory {
             limitRuleId = currentRule?.id,
             targetOwnerPartyProfileId = requestedRule.ownerPartyProfileId,
             targetMandateId = requestedRule.targetMandateId(),
-            targetScope = targetScopeSnapshot,
-            targetScopeHash = ScopeHash.of(targetScopeHash),
+            targetScope = TargetScopeCanonicalizer.snapshot(targetScope),
+            targetScopeHash = TargetScopeCanonicalizer.hash(targetScope),
             requestedRule = requestedRuleSnapshot,
             beforeRule = currentRule?.let { LimitRuleSnapshotter.ruleSnapshot(it) },
             authorityDelegationId = command.authorityDelegationId?.let { PartyProfileDelegationId.of(it) },

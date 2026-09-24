@@ -54,15 +54,17 @@ class JooqLimitChangePolicyRepository(
                 .fetchOne { it.toPolicy() }
         }
 
-    override fun findActiveByPhase(
+    override fun findActiveForConfiguration(
         tenantId: TenantId,
         phase: LimitChangePolicyPhase,
+        configurationId: LimitConfigurationId,
         at: Instant,
-    ): List<LimitChangePolicy> = jooqOperation("find active limit change policies by phase") {
+    ): List<LimitChangePolicy> = jooqOperation("find active limit change policies for configuration") {
         val timestamp = at.toOffsetDateTime()
         selectPolicies()
             .where(table.TENANT_ID.eq(tenantId.value))
             .and(table.PHASE.eq(phase.toGenerated()))
+            .and(table.LIMIT_CONFIGURATION_ID.isNull.or(table.LIMIT_CONFIGURATION_ID.eq(configurationId.value)))
             .and(table.IS_ACTIVE.isTrue)
             .and(table.STARTS_AT.le(timestamp))
             .and(table.ENDS_AT.isNull.or(table.ENDS_AT.gt(timestamp)))

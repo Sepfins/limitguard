@@ -9,6 +9,10 @@ import io.github.sepfins.limitguard.domain.change.LimitRuleChangeType
 import io.github.sepfins.limitguard.domain.change.LimitRuleRevision
 import io.github.sepfins.limitguard.domain.change.LimitRuleRevisionEventType
 import io.github.sepfins.limitguard.domain.change.RevisionNumber
+import io.github.sepfins.limitguard.domain.common.LimitChangePolicyId
+import io.github.sepfins.limitguard.domain.common.Metadata
+import io.github.sepfins.limitguard.domain.mandate.MandateScope
+import io.github.sepfins.limitguard.internal.hashing.TargetScopeCanonicalizer
 import io.github.sepfins.limitguard.domain.common.LimitRuleRevisionId
 import io.github.sepfins.limitguard.domain.limit.LimitRule
 import io.github.sepfins.limitguard.port.ids.IdGenerator
@@ -24,8 +28,41 @@ internal class LimitChangeApplicationWorkflow(
     private val limitRuleRepository: LimitRuleRepository,
     private val limitRuleRevisionRepository: LimitRuleRevisionRepository,
     private val changeEventFactory: LimitChangeEventFactory,
+    private val targets: LimitChangeTargets,
     private val idGenerator: IdGenerator,
 ) {
+    fun approveAndApply(
+        request: LimitRuleChangeRequest,
+        candidate: LimitRule,
+        actor: ChangeActor,
+        reason: String?,
+        at: Instant,
+        eventPayload: Metadata = Metadata.EMPTY,
+        policyId: LimitChangePolicyId? = null,
+    ): LimitRuleChangeRequest {
+        val target = targets.requireAvailable(candidate, request.id, at)
+        val approved = changeRequestRepository.update(request.tenantId, request.approve(
+            approvedRule = LimitRuleSnapshotter.ruleSnapshot(candidate),
+            reason = reason,
+            at = at,
+            approvedTargetScope = TargetScopeCanonicalizer.snapshot(target),
+            approvedTargetScopeHash = TargetScopeCanonicalizer.hash(target),
+            approvedTargetMandateId = (candidate.mandateScope as? MandateScope.MandateSpecific)?.mandateId,
+        ))
+        changeEventRepository.insert(request.tenantId, changeEventFactory.approved(
+            before = request, after = approved, now = at, actor = actor,
+            eventPayload = eventPayload, policyId = policyId,
+        ))
+
+        val effectiveAt = approved.effectiveAt
+        if (effectiveAt != null && effectiveAt > at) {
+            val scheduled = changeRequestRepository.update(request.tenantId, approved.schedule(effectiveAt, at))
+            changeEventRepository.insert(request.tenantId, changeEventFactory.scheduled(approved, scheduled, at, actor))
+            return scheduled
+        }
+        return applyInCurrentTransaction(approved, candidate, actor, at)
+    }
+
     fun applyInCurrentTransaction(
         request: LimitRuleChangeRequest,
         candidate: LimitRule,
@@ -41,8 +78,7 @@ internal class LimitChangeApplicationWorkflow(
         if (request.expiresAt != null && request.expiresAt <= applicationTime) {
             throw ConflictException("limit change request has expired: ${request.id.value}")
         }
-        requireCandidateMatchesRequest(request, candidate)
-        changeRequestRepository.lockTarget(request.tenantId, request.targetScopeHash)
+        targets.requireApplicable(request, candidate)
 
         val candidateAtApplication = candidate.copy(updatedAt = applicationTime)
         val persistedRule = when (request.changeType) {
@@ -52,7 +88,7 @@ internal class LimitChangeApplicationWorkflow(
                     request.tenantId,
                     requireNotNull(request.limitRuleId),
                 ) ?: throw NotFoundException("limit rule not found: ${request.limitRuleId.value}")
-                val expectedVersion = (request.beforeRule?.value?.get("version") as? Number)?.toInt()
+                val expectedVersion = request.beforeRule?.let { LimitRuleSnapshotter.version(it).value }
                     ?: throw ConflictException("limit change request is missing its expected rule version")
                 if (currentRule.version.value != expectedVersion) {
                     throw ConflictException(
@@ -99,21 +135,6 @@ internal class LimitChangeApplicationWorkflow(
             changeEventFactory.applied(request, persistedApplied, applicationTime, actor),
         )
         return persistedApplied
-    }
-
-    private fun requireCandidateMatchesRequest(
-        request: LimitRuleChangeRequest,
-        candidate: LimitRule,
-    ) {
-        if (candidate.tenantId != request.tenantId ||
-            candidate.ownerPartyProfileId != request.targetOwnerPartyProfileId ||
-            (request.limitRuleId != null && candidate.id != request.limitRuleId)
-        ) {
-            throw ConflictException("approved rule identity does not match change request: ${request.id.value}")
-        }
-        if (LimitRuleSnapshotter.targetScopeSnapshot(candidate.toTargetScope()) != request.targetScope) {
-            throw ConflictException("approved rule scope does not match change request: ${request.id.value}")
-        }
     }
 
     private fun LimitRuleChangeType.toRevisionEventType(): LimitRuleRevisionEventType =

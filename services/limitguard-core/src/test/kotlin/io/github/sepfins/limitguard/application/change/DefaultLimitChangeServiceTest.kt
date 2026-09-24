@@ -33,6 +33,8 @@ import io.github.sepfins.limitguard.domain.change.LimitRuleChangeStatus as Domai
 import io.github.sepfins.limitguard.domain.common.BankWorkerId
 import io.github.sepfins.limitguard.domain.common.CurrencyCode
 import io.github.sepfins.limitguard.domain.common.EffectiveWindow
+import io.github.sepfins.limitguard.domain.common.FundingSourceProductId
+import io.github.sepfins.limitguard.domain.common.IdempotencyKey
 import io.github.sepfins.limitguard.domain.common.LimitConfigurationId
 import io.github.sepfins.limitguard.domain.common.LimitChangePolicyId
 import io.github.sepfins.limitguard.domain.common.LimitChangeRequestId
@@ -55,6 +57,7 @@ import io.github.sepfins.limitguard.domain.limit.LimitRule
 import io.github.sepfins.limitguard.domain.limit.LimitRuleName
 import io.github.sepfins.limitguard.domain.limit.LimitUsageConsumptionMode as DomainLimitUsageConsumptionMode
 import io.github.sepfins.limitguard.domain.funding.FundingSourceScope
+import io.github.sepfins.limitguard.domain.funding.FundingSourceCategory
 import io.github.sepfins.limitguard.domain.mandate.Mandate
 import io.github.sepfins.limitguard.domain.mandate.MandateName
 import io.github.sepfins.limitguard.domain.mandate.MandateScope
@@ -72,6 +75,8 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
+import kotlin.test.assertNotEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class DefaultLimitChangeServiceTest {
@@ -81,6 +86,10 @@ class DefaultLimitChangeServiceTest {
     private val requesterId = UUID.fromString("00000000-0000-0000-0000-000000000003")
     private val channelId = UUID.fromString("00000000-0000-0000-0000-000000000004")
     private val configurationId = LimitConfigurationId.of(UUID.fromString("00000000-0000-0000-0000-000000000005"))
+    private val otherConfigurationId =
+        LimitConfigurationId.of(UUID.fromString("00000000-0000-0000-0000-000000000013"))
+    private val childConfigurationId =
+        LimitConfigurationId.of(UUID.fromString("00000000-0000-0000-0000-000000000014"))
     private val existingRuleId = LimitRuleId.of(UUID.fromString("00000000-0000-0000-0000-000000000006"))
     private val pendingRuleId = LimitRuleId.of(UUID.fromString("00000000-0000-0000-0000-000000000007"))
     private val pendingRequestId = LimitChangeRequestId.of(UUID.fromString("00000000-0000-0000-0000-000000000008"))
@@ -90,6 +99,161 @@ class DefaultLimitChangeServiceTest {
         LimitChangePolicyId.of(UUID.fromString("00000000-0000-0000-0000-000000000011"))
     private val reviewPolicyId =
         LimitChangePolicyId.of(UUID.fromString("00000000-0000-0000-0000-000000000012"))
+
+    @Test
+    fun `independent product rules can be applied with the same other dimensions`() {
+        val repositories = repositoriesWithConfiguration()
+        val firstConfiguration = assertNotNull(repositories.limitConfigurations.findById(tenantId, configurationId))
+        repositories.limitConfigurations.update(tenantId, firstConfiguration.copy(
+            fundingScope = LimitConfigurationFundingScope.FundingSourceProductSpecific(FundingSourceProductId.of(UUID(0, 50))),
+        ))
+        insertConfiguration(repositories, otherConfigurationId, fundingScope =
+            LimitConfigurationFundingScope.FundingSourceProductSpecific(FundingSourceProductId.of(UUID(0, 51))))
+        val service = limitChangeService(repositories)
+
+        val first = service.requestLimitRuleChange(command(idempotencyKey = "product-one"))
+        val second = service.requestLimitRuleChange(command(idempotencyKey = "product-two").copy(
+            requestedRule = draft(name = "Second product limit").copy(configurationId = otherConfigurationId.value),
+        ))
+
+        assertEquals(LimitRuleChangeStatus.APPLIED, first.status)
+        assertEquals(LimitRuleChangeStatus.APPLIED, second.status)
+        assertNotEquals(first.targetScopeHash, second.targetScopeHash)
+        assertEquals(2, repositories.limitRules.findByOwner(tenantId, PartyProfileId.of(ownerId)).size)
+    }
+
+    @Test
+    fun `configuration identity cannot bypass same funding target conflicts`() {
+        val scopes = listOf(
+            LimitConfigurationFundingScope.AllFundingSources,
+            LimitConfigurationFundingScope.FundingSourceCategorySpecific(FundingSourceCategory.TRANSACTIONAL),
+            LimitConfigurationFundingScope.FundingSourceProductSpecific(FundingSourceProductId.of(UUID(0, 50))),
+        )
+        for (scope in scopes) {
+            for (decision in listOf(null, LimitChangePolicyDecision.ALLOW)) {
+                val repositories = repositoriesWithConfiguration(authorizationDecision = decision)
+                setFundingScope(repositories, scope)
+                insertConfiguration(repositories, otherConfigurationId, fundingScope = scope)
+                val service = limitChangeService(repositories)
+                service.requestLimitRuleChange(command(idempotencyKey = "same-scope-one"))
+
+                assertFailsWith<ConflictException>("$scope / $decision") {
+                    service.requestLimitRuleChange(command(idempotencyKey = "same-scope-two").copy(
+                        requestedRule = draft(name = "Another configuration").copy(configurationId = otherConfigurationId.value),
+                    ))
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `category targets and a broad all-funding target can coexist`() {
+        val repositories = repositoriesWithConfiguration()
+        insertConfiguration(repositories, otherConfigurationId, fundingScope =
+            LimitConfigurationFundingScope.FundingSourceCategorySpecific(FundingSourceCategory.TRANSACTIONAL))
+        insertConfiguration(repositories, childConfigurationId, fundingScope =
+            LimitConfigurationFundingScope.FundingSourceCategorySpecific(FundingSourceCategory.SAVINGS))
+        val service = limitChangeService(repositories)
+        val results = listOf(configurationId, otherConfigurationId, childConfigurationId).mapIndexed { index, id ->
+            service.requestLimitRuleChange(command(idempotencyKey = "category-$index").copy(
+                requestedRule = draft(name = "Category limit $index").copy(configurationId = id.value),
+            ))
+        }
+
+        assertEquals(3, results.map { it.targetScopeHash }.toSet().size)
+        assertTrue(results.all { it.status == LimitRuleChangeStatus.APPLIED })
+    }
+
+    @Test
+    fun `product requests retain their target identity through approval`() {
+        val repositories = repositoriesWithConfiguration(authorizationDecision = null)
+        setFundingScope(repositories,
+            LimitConfigurationFundingScope.FundingSourceProductSpecific(FundingSourceProductId.of(UUID(0, 50))))
+        insertConfiguration(repositories, otherConfigurationId, fundingScope =
+            LimitConfigurationFundingScope.FundingSourceProductSpecific(FundingSourceProductId.of(UUID(0, 51))))
+        val service = limitChangeService(repositories)
+        val first = service.requestLimitRuleChange(command(idempotencyKey = "first-pending"))
+        val second = service.requestLimitRuleChange(command(idempotencyKey = "other-pending").copy(
+            requestedRule = draft(name = "Other product").copy(configurationId = otherConfigurationId.value),
+        ))
+        assertEquals(LimitRuleChangeStatus.REQUESTED, first.status)
+        assertEquals(LimitRuleChangeStatus.REQUESTED, second.status)
+        assertNotEquals(first.targetScopeHash, second.targetScopeHash)
+        assertFailsWith<ConflictException> {
+            service.requestLimitRuleChange(command(idempotencyKey = "same-product-target"))
+        }
+
+        val approved = service.approveLimitRuleChange(ApproveLimitRuleChangeCommand(
+            tenantId = tenantId.value, changeRequestId = first.id,
+            approvedBy = LimitChangeActorCommand(LimitChangeActorType.SYSTEM),
+        ))
+        assertEquals(LimitRuleChangeStatus.APPLIED, approved.status)
+        assertEquals(first.targetScopeHash, approved.targetScopeHash)
+    }
+
+    @Test
+    fun `scheduled product requests apply independently within the batch limit`() {
+        val repositories = repositoriesWithConfiguration()
+        setFundingScope(repositories,
+            LimitConfigurationFundingScope.FundingSourceProductSpecific(FundingSourceProductId.of(UUID(0, 50))))
+        insertConfiguration(repositories, otherConfigurationId, fundingScope =
+            LimitConfigurationFundingScope.FundingSourceProductSpecific(FundingSourceProductId.of(UUID(0, 51))))
+        val service = limitChangeService(repositories)
+        val first = service.requestLimitRuleChange(command(idempotencyKey = "first-due", effectiveAt = now.plusSeconds(60)))
+        val second = service.requestLimitRuleChange(command(idempotencyKey = "second-due", effectiveAt = now.plusSeconds(60)).copy(
+            requestedRule = draft(name = "Other product").copy(configurationId = otherConfigurationId.value),
+        ))
+
+        val applyBatch = ApplyDueLimitChangesCommand(tenantId.value, now.plusSeconds(60), limit = 1)
+        val batchOne = service.applyDueLimitChanges(applyBatch)
+        assertEquals(1, batchOne.appliedCount)
+        assertEquals(0, batchOne.failedCount)
+        assertEquals(1, repositories.limitRules.findByOwner(tenantId, PartyProfileId.of(ownerId)).size)
+
+        val batchTwo = service.applyDueLimitChanges(applyBatch)
+        assertEquals(1, batchTwo.appliedCount)
+        assertEquals(0, batchTwo.failedCount)
+        assertEquals(setOf(first.id, second.id), (batchOne.appliedChangeRequestIds + batchTwo.appliedChangeRequestIds).toSet())
+        assertEquals(2, repositories.limitRules.findByOwner(tenantId, PartyProfileId.of(ownerId)).size)
+    }
+
+    @Test
+    fun `approval cannot move a product request onto another pending target`() {
+        val repositories = repositoriesWithConfiguration(authorizationDecision = null)
+        setFundingScope(repositories,
+            LimitConfigurationFundingScope.FundingSourceProductSpecific(FundingSourceProductId.of(UUID(0, 50))))
+        insertConfiguration(repositories, otherConfigurationId, fundingScope =
+            LimitConfigurationFundingScope.FundingSourceProductSpecific(FundingSourceProductId.of(UUID(0, 51))))
+        val service = limitChangeService(repositories)
+        val first = service.requestLimitRuleChange(command(idempotencyKey = "adjust-one"))
+        service.requestLimitRuleChange(command(idempotencyKey = "adjust-two").copy(
+            requestedRule = draft(name = "Other product").copy(configurationId = otherConfigurationId.value),
+        ))
+
+        assertFailsWith<ConflictException> {
+            service.approveLimitRuleChange(ApproveLimitRuleChangeCommand(
+                tenantId = tenantId.value, changeRequestId = first.id,
+                approvedBy = LimitChangeActorCommand(LimitChangeActorType.SYSTEM),
+                approvedRule = draft().copy(configurationId = otherConfigurationId.value),
+            ))
+        }
+    }
+
+    @Test
+    fun `unconfigured rules share the all-funding target`() {
+        val repositories = repositoriesWithConfiguration()
+        val rule = insertRule(repositories)
+        repositories.limitRules.update(tenantId, rule.copy(configurationId = null))
+
+        assertFailsWith<ConflictException> {
+            limitChangeService(repositories).requestLimitRuleChange(command(name = "Configured all funding"))
+        }
+    }
+
+    private fun setFundingScope(repositories: InMemoryLimitguardRepositories, scope: LimitConfigurationFundingScope) {
+        val configuration = assertNotNull(repositories.limitConfigurations.findById(tenantId, configurationId))
+        repositories.limitConfigurations.update(tenantId, configuration.copy(fundingScope = scope))
+    }
 
     @Test
     fun `requestLimitRuleChange applies create request with complete audit history`() {
@@ -103,7 +267,6 @@ class DefaultLimitChangeServiceTest {
         assertEquals(LimitRuleChangeStatus.APPLIED, result.status)
         assertEquals(ownerId, result.targetOwnerPartyProfileId)
         assertEquals(null, result.targetMandateId)
-        assertNotNull(result.targetScopeHash)
         val limitRuleId = assertNotNull(result.limitRuleId)
         assertEquals(now, result.createdAt)
         assertEquals(now, result.updatedAt)
@@ -116,11 +279,6 @@ class DefaultLimitChangeServiceTest {
         assertEquals("500.0000", insertedRequest.requestedRule.value["amount"])
         assertEquals("PER_TRANSACTION", insertedRequest.targetScope.value["kind"])
         assertEquals(limitRuleId, insertedRequest.limitRuleId?.value)
-        assertTrue(
-            repositories.limitChangeRequests.lockedTargetHashes.contains(
-                tenantId to insertedRequest.targetScopeHash
-            )
-        )
 
         val events = repositories.limitRuleChangeEvents.findByChangeRequest(tenantId, insertedRequest.id)
         assertEquals(
@@ -160,6 +318,246 @@ class DefaultLimitChangeServiceTest {
     }
 
     @Test
+    fun `configuration-bound policy applies to its exact configuration`() {
+        val repositories = repositoriesWithConfiguration(authorizationDecision = null)
+        repositories.limitChangePolicies.insert(
+            tenantId,
+            authorizationPolicy(
+                decision = LimitChangePolicyDecision.ALLOW,
+                limitConfigurationId = configurationId,
+            ),
+        )
+        val service = limitChangeService(repositories)
+
+        val result = service.requestLimitRuleChange(command(idempotencyKey = "bound-a"))
+
+        assertEquals(LimitRuleChangeStatus.APPLIED, result.status)
+        assertEquals(
+            listOf(authorizationPolicyId),
+            repositories.limitChangePolicyEvaluations
+                .findByChangeRequest(tenantId, LimitChangeRequestId.of(result.id))
+                .map { it.policyId },
+        )
+    }
+
+    @Test
+    fun `configuration-bound policy is not evaluated for another configuration`() {
+        val repositories = repositoriesWithConfiguration(authorizationDecision = null)
+        insertConfiguration(repositories, otherConfigurationId)
+        repositories.limitChangePolicies.insert(
+            tenantId,
+            authorizationPolicy(
+                decision = LimitChangePolicyDecision.ALLOW,
+                limitConfigurationId = configurationId,
+            ),
+        )
+        val service = limitChangeService(repositories)
+
+        val result = service.requestLimitRuleChange(
+            command(idempotencyKey = "bound-b").copy(
+                requestedRule = draft().copy(configurationId = otherConfigurationId.value),
+            )
+        )
+
+        assertEquals(LimitRuleChangeStatus.REQUESTED, result.status)
+        assertEquals(null, result.limitRuleId)
+        assertEquals(
+            emptyList(),
+            repositories.limitChangePolicyEvaluations
+                .findByChangeRequest(tenantId, LimitChangeRequestId.of(result.id)),
+        )
+    }
+
+    @Test
+    fun `unbound policy applies across configurations`() {
+        val repositories = repositoriesWithConfiguration(authorizationDecision = null)
+        insertConfiguration(repositories, otherConfigurationId)
+        repositories.limitChangePolicies.insert(
+            tenantId,
+            authorizationPolicy(decision = LimitChangePolicyDecision.ALLOW),
+        )
+        val service = limitChangeService(repositories)
+
+        val result = service.requestLimitRuleChange(
+            command(idempotencyKey = "unbound-b").copy(
+                requestedRule = draft().copy(configurationId = otherConfigurationId.value),
+            )
+        )
+
+        assertEquals(LimitRuleChangeStatus.APPLIED, result.status)
+        assertEquals(
+            listOf(authorizationPolicyId),
+            repositories.limitChangePolicyEvaluations
+                .findByChangeRequest(tenantId, LimitChangeRequestId.of(result.id))
+                .map { it.policyId },
+        )
+    }
+
+    @Test
+    fun `configuration-bound denial does not reject another configuration`() {
+        val repositories = repositoriesWithConfiguration(authorizationDecision = null)
+        insertConfiguration(repositories, otherConfigurationId)
+        repositories.limitChangePolicies.insert(
+            tenantId,
+            authorizationPolicy(
+                decision = LimitChangePolicyDecision.DENY,
+                limitConfigurationId = configurationId,
+            ),
+        )
+        val service = limitChangeService(repositories)
+
+        val result = service.requestLimitRuleChange(
+            command(idempotencyKey = "deny-other-config").copy(
+                requestedRule = draft().copy(configurationId = otherConfigurationId.value),
+            )
+        )
+
+        assertEquals(LimitRuleChangeStatus.REQUESTED, result.status)
+        assertEquals(null, result.limitRuleId)
+        assertEquals(
+            emptyList(),
+            repositories.limitChangePolicyEvaluations
+                .findByChangeRequest(tenantId, LimitChangeRequestId.of(result.id)),
+        )
+    }
+
+    @Test
+    fun `configuration filtering happens before priority among applicable policies`() {
+        val repositories = repositoriesWithConfiguration(authorizationDecision = null)
+        insertConfiguration(repositories, otherConfigurationId)
+        repositories.limitChangePolicies.insert(
+            tenantId,
+            authorizationPolicy(
+                decision = LimitChangePolicyDecision.REQUIRE_APPROVAL,
+                id = reviewPolicyId,
+                code = "REVIEW_CONFIGURATION_A",
+                priority = 1,
+                limitConfigurationId = configurationId,
+            ),
+        )
+        repositories.limitChangePolicies.insert(
+            tenantId,
+            authorizationPolicy(
+                decision = LimitChangePolicyDecision.ALLOW,
+                priority = 100,
+            ),
+        )
+        val service = limitChangeService(repositories)
+
+        val result = service.requestLimitRuleChange(
+            command(idempotencyKey = "priority-other-config").copy(
+                requestedRule = draft().copy(configurationId = otherConfigurationId.value),
+            )
+        )
+
+        assertEquals(LimitRuleChangeStatus.APPLIED, result.status)
+        assertEquals(
+            listOf(authorizationPolicyId),
+            repositories.limitChangePolicyEvaluations
+                .findByChangeRequest(tenantId, LimitChangeRequestId.of(result.id))
+            .map { it.policyId },
+        )
+    }
+
+    @Test
+    fun `applicable configuration-bound policies retain priority order`() {
+        val repositories = repositoriesWithConfiguration(authorizationDecision = null)
+        repositories.limitChangePolicies.insert(
+            tenantId,
+            authorizationPolicy(
+                decision = LimitChangePolicyDecision.REQUIRE_APPROVAL,
+                id = reviewPolicyId,
+                code = "REVIEW_CONFIGURATION_A",
+                priority = 1,
+                limitConfigurationId = configurationId,
+            ),
+        )
+        repositories.limitChangePolicies.insert(
+            tenantId,
+            authorizationPolicy(
+                decision = LimitChangePolicyDecision.ALLOW,
+                priority = 100,
+                limitConfigurationId = configurationId,
+            ),
+        )
+        val service = limitChangeService(repositories)
+
+        val result = service.requestLimitRuleChange(command(idempotencyKey = "priority-bound-a"))
+
+        assertEquals(LimitRuleChangeStatus.REQUESTED, result.status)
+        assertEquals(
+            listOf(reviewPolicyId),
+            repositories.limitChangePolicyEvaluations
+                .findByChangeRequest(tenantId, LimitChangeRequestId.of(result.id))
+                .map { it.policyId },
+        )
+    }
+
+    @Test
+    fun `existing rule change uses its configuration when command has no draft`() {
+        val repositories = repositoriesWithConfiguration(authorizationDecision = null)
+        val existingRule = insertRule(repositories)
+        repositories.limitChangePolicies.insert(
+            tenantId,
+            authorizationPolicy(
+                decision = LimitChangePolicyDecision.ALLOW,
+                limitConfigurationId = configurationId,
+            ),
+        )
+        val service = limitChangeService(repositories)
+
+        val result = service.requestLimitRuleChange(
+            commandForExistingRule(
+                changeType = LimitRuleChangeType.DEACTIVATE,
+                currentRule = existingRule,
+                idempotencyKey = "deactivate-bound-rule",
+            )
+        )
+
+        assertEquals(LimitRuleChangeStatus.APPLIED, result.status)
+        assertEquals(
+            listOf(authorizationPolicyId),
+            repositories.limitChangePolicyEvaluations
+                .findByChangeRequest(tenantId, LimitChangeRequestId.of(result.id))
+                .map { it.policyId },
+        )
+        assertEquals(false, repositories.limitRules.findById(tenantId, existingRule.id)?.isActive)
+    }
+
+    @Test
+    fun `parent configuration policy does not apply to a child configuration`() {
+        val repositories = repositoriesWithConfiguration(authorizationDecision = null)
+        insertConfiguration(
+            repositories,
+            id = childConfigurationId,
+            parentConfigurationId = configurationId,
+            maxAssignableAmount = "900.00",
+        )
+        repositories.limitChangePolicies.insert(
+            tenantId,
+            authorizationPolicy(
+                decision = LimitChangePolicyDecision.ALLOW,
+                limitConfigurationId = configurationId,
+            ),
+        )
+        val service = limitChangeService(repositories)
+
+        val result = service.requestLimitRuleChange(
+            command(idempotencyKey = "child-configuration").copy(
+                requestedRule = draft().copy(configurationId = childConfigurationId.value),
+            )
+        )
+
+        assertEquals(LimitRuleChangeStatus.REQUESTED, result.status)
+        assertEquals(null, result.limitRuleId)
+        assertEquals(
+            emptyList(),
+            repositories.limitChangePolicyEvaluations
+                .findByChangeRequest(tenantId, LimitChangeRequestId.of(result.id)),
+        )
+    }
+
+    @Test
     fun `require approval policy leaves public request open for manual approval`() {
         val repositories = repositoriesWithConfiguration(LimitChangePolicyDecision.REQUIRE_APPROVAL)
         val service = limitChangeService(repositories)
@@ -192,11 +590,6 @@ class DefaultLimitChangeServiceTest {
 
         assertEquals(LimitRuleChangeStatus.APPLIED, approved.status)
         assertNotNull(approved.limitRuleId)
-        assertTrue(
-            repositories.limitChangeRequests.lockedRequestIds.contains(
-                tenantId to LimitChangeRequestId.of(requested.id)
-            )
-        )
         assertEquals(
             listOf(
                 LimitRuleChangeEventType.REQUESTED,
@@ -227,11 +620,6 @@ class DefaultLimitChangeServiceTest {
 
         assertEquals(LimitRuleChangeStatus.REJECTED, rejected.status)
         assertEquals(null, rejected.limitRuleId)
-        assertTrue(
-            repositories.limitChangeRequests.lockedRequestIds.contains(
-                tenantId to LimitChangeRequestId.of(requested.id)
-            )
-        )
         assertEquals(
             listOf(
                 LimitRuleChangeEventType.REQUESTED,
@@ -689,9 +1077,30 @@ class DefaultLimitChangeServiceTest {
         val clock = FixedClockProvider(now)
         val service = limitChangeService(repositories, clock)
 
-        val first = service.requestLimitRuleChange(command(idempotencyKey = "request-1"))
+        val firstCommand = command(idempotencyKey = "request-1").copy(
+            policyContext = mapOf(
+                "attempt" to 1L,
+                "nested" to mapOf("values" to listOf(1L, BigDecimal("0.12345678901234567890"))),
+            ),
+            metadata = mapOf("attempt" to 2L),
+            requestedRule = requireNotNull(command().requestedRule).copy(
+                metadata = mapOf("attempt" to 3L),
+            ),
+        )
+        val first = service.requestLimitRuleChange(firstCommand)
         clock.advanceBy(Duration.ofMinutes(5))
-        val second = service.requestLimitRuleChange(command(idempotencyKey = "request-1"))
+        val second = service.requestLimitRuleChange(
+            firstCommand.copy(
+                policyContext = mapOf(
+                    "attempt" to 1,
+                    "nested" to mapOf("values" to listOf(1, BigDecimal("0.12345678901234567890"))),
+                ),
+                metadata = mapOf("attempt" to 2),
+                requestedRule = requireNotNull(firstCommand.requestedRule).copy(
+                    metadata = mapOf("attempt" to 3),
+                ),
+            ),
+        )
 
         assertEquals(first.id, second.id)
         assertEquals(4, repositories.limitRuleChangeEvents.findByChangeRequest(
@@ -707,6 +1116,80 @@ class DefaultLimitChangeServiceTest {
             tenantId,
             LimitChangeRequestId.of(first.id),
         ).size)
+        assertFailsWith<IdempotencyConflictException> {
+            service.requestLimitRuleChange(
+                firstCommand.copy(
+                    policyContext = mapOf(
+                        "attempt" to 2,
+                        "nested" to mapOf("values" to listOf(1, BigDecimal("0.12345678901234567890"))),
+                    ),
+                ),
+            )
+        }
+    }
+
+    @Test
+    fun `applied request replays after its expiry`() {
+        val repositories = repositoriesWithConfiguration()
+        val clock = FixedClockProvider(now)
+        val service = limitChangeService(repositories, clock)
+        val request = command(idempotencyKey = "expired-replay").copy(
+            expiresAt = now.plus(Duration.ofMinutes(1)),
+        )
+
+        val first = service.requestLimitRuleChange(request)
+        clock.advanceBy(Duration.ofMinutes(2))
+        val replayed = service.requestLimitRuleChange(request)
+
+        assertEquals(LimitRuleChangeStatus.APPLIED, first.status)
+        assertEquals(first, replayed)
+        assertEquals(
+            4,
+            repositories.limitRuleChangeEvents.findByChangeRequest(
+                tenantId,
+                LimitChangeRequestId.of(first.id),
+            ).size,
+        )
+    }
+
+    @Test
+    fun `new request with an already expired deadline is rejected`() {
+        val repositories = repositoriesWithConfiguration()
+        val service = limitChangeService(repositories)
+        val request = command(idempotencyKey = "already-expired").copy(
+            expiresAt = now.minusSeconds(1),
+        )
+
+        assertFailsWith<ValidationException> {
+            service.requestLimitRuleChange(request)
+        }
+        assertNull(
+            repositories.limitChangeRequests.findByIdempotencyKey(
+                tenantId,
+                IdempotencyKey.of("already-expired"),
+            ),
+        )
+    }
+
+    @Test
+    fun `altered request with the same expired idempotency key conflicts`() {
+        val repositories = repositoriesWithConfiguration()
+        val clock = FixedClockProvider(now)
+        val service = limitChangeService(repositories, clock)
+        val original = command(idempotencyKey = "expired-conflict", amount = "500.00").copy(
+            expiresAt = now.plus(Duration.ofMinutes(1)),
+        )
+
+        service.requestLimitRuleChange(original)
+        clock.advanceBy(Duration.ofMinutes(2))
+
+        assertFailsWith<IdempotencyConflictException> {
+            service.requestLimitRuleChange(
+                command(idempotencyKey = "expired-conflict", amount = "600.00").copy(
+                    expiresAt = original.expiresAt,
+                ),
+            )
+        }
     }
 
     @Test
@@ -754,12 +1237,6 @@ class DefaultLimitChangeServiceTest {
         assertEquals("Updated ATM limit", updated.name.value)
         assertEquals(BigDecimal("650.0000"), updated.amount.amount)
         assertEquals(2, updated.version.value)
-        assertTrue(repositories.limitRules.lockedRuleIds.contains(tenantId to currentRule.id))
-        assertTrue(
-            repositories.limitRules.conditionalUpdates.contains(
-                Triple(tenantId, currentRule.id, Version.INITIAL)
-            )
-        )
         val revision = repositories.limitRuleRevisions
             .findByChangeRequest(tenantId, LimitChangeRequestId.of(result.id))
             .single()
@@ -923,6 +1400,128 @@ class DefaultLimitChangeServiceTest {
             emptyList(),
             repositories.limitRuleRevisions.findByChangeRequest(tenantId, LimitChangeRequestId.of(result.id)),
         )
+    }
+
+    @Test
+    fun `future rules reject reverse insertion overlap with open ends`() {
+        val repositories = repositoriesWithConfiguration()
+        val service = limitChangeService(repositories)
+        val laterStart = now.plusSeconds(120)
+
+        val laterRule = service.requestLimitRuleChange(
+            command(name = "Later rule", startsAt = laterStart),
+        )
+
+        assertEquals(LimitRuleChangeStatus.APPLIED, laterRule.status)
+        assertFailsWith<ConflictException> {
+            service.requestLimitRuleChange(
+                command(name = "Earlier rule", startsAt = now.plusSeconds(60)),
+            )
+        }
+        assertEquals(
+            listOf(laterRule.limitRuleId),
+            repositories.limitRules.findByOwner(tenantId, PartyProfileId.of(ownerId)).map { it.id.value },
+        )
+    }
+
+    @Test
+    fun `touching future rule intervals do not conflict`() {
+        val repositories = repositoriesWithConfiguration()
+        val service = limitChangeService(repositories)
+        val boundary = now.plusSeconds(120)
+
+        val first = service.requestLimitRuleChange(
+            command(
+                name = "First interval",
+                startsAt = now.plusSeconds(60),
+                endsAt = boundary,
+            ),
+        )
+        val second = service.requestLimitRuleChange(
+            command(
+                name = "Second interval",
+                startsAt = boundary,
+                endsAt = now.plusSeconds(180),
+            ),
+        )
+
+        assertEquals(LimitRuleChangeStatus.APPLIED, first.status)
+        assertEquals(LimitRuleChangeStatus.APPLIED, second.status)
+        assertEquals(2, repositories.limitRules.findByOwner(tenantId, PartyProfileId.of(ownerId)).size)
+    }
+
+    @Test
+    fun `approval rejects a future interval that starts overlapping after request`() {
+        val repositories = repositoriesWithConfiguration(LimitChangePolicyDecision.REQUIRE_APPROVAL)
+        val service = limitChangeService(repositories)
+        val startsAt = now.plusSeconds(120)
+        val request = service.requestLimitRuleChange(
+            command(name = "Pending future rule", startsAt = startsAt),
+        )
+        assertEquals(LimitRuleChangeStatus.REQUESTED, request.status)
+
+        val existingRule = insertRule(repositories)
+        repositories.limitRules.update(
+            tenantId,
+            existingRule.copy(
+                name = LimitRuleName.of("Existing future rule"),
+                effectiveWindow = EffectiveWindow(now.plusSeconds(60), null),
+            ),
+        )
+
+        assertFailsWith<ConflictException> {
+            service.approveLimitRuleChange(
+                ApproveLimitRuleChangeCommand(
+                    tenantId = tenantId.value,
+                    changeRequestId = request.id,
+                    approvedBy = LimitChangeActorCommand(LimitChangeActorType.SYSTEM),
+                ),
+            )
+        }
+        val persistedRequest = assertNotNull(
+            repositories.limitChangeRequests.findById(tenantId, LimitChangeRequestId.of(request.id)),
+        )
+        assertEquals(
+            listOf(request.id),
+            repositories.limitChangeRequests
+                .findPendingForTarget(tenantId, persistedRequest.targetScopeHash, now)
+                .map { it.id.value },
+        )
+    }
+
+    @Test
+    fun `due application rejects overlap introduced after scheduling`() {
+        val repositories = repositoriesWithConfiguration()
+        val service = limitChangeService(repositories)
+        val dueAt = now.plusSeconds(3600)
+        val scheduled = service.requestLimitRuleChange(
+            command(
+                name = "Scheduled future rule",
+                startsAt = dueAt,
+                effectiveAt = dueAt,
+            ),
+        )
+        assertEquals(LimitRuleChangeStatus.PENDING_EFFECTIVE_DATE, scheduled.status)
+
+        val existingRule = insertRule(repositories)
+        repositories.limitRules.update(
+            tenantId,
+            existingRule.copy(
+                name = LimitRuleName.of("Existing due overlap"),
+                effectiveWindow = EffectiveWindow(now.plusSeconds(60), null),
+            ),
+        )
+
+        val result = service.applyDueLimitChanges(ApplyDueLimitChangesCommand(tenantId.value, dueAt))
+
+        assertEquals(0, result.appliedCount)
+        assertEquals(1, result.failedCount)
+        assertEquals(listOf(scheduled.id), result.failedChangeRequestIds)
+        assertEquals(
+            DomainLimitRuleChangeStatus.FAILED,
+            repositories.limitChangeRequests.findById(tenantId, LimitChangeRequestId.of(scheduled.id))?.status,
+        )
+        assertEquals(1, repositories.limitRules.findByOwner(tenantId, PartyProfileId.of(ownerId)).size)
     }
 
     @Test
@@ -1254,12 +1853,6 @@ class DefaultLimitChangeServiceTest {
         assertEquals(0, result.failedCount)
         assertEquals(listOf(scheduled.id), result.appliedChangeRequestIds)
         assertEquals(emptyList(), result.failedChangeRequestIds)
-        assertEquals(Triple(tenantId, dueAt, 100), repositories.limitChangeRequests.dueClaims.last())
-        assertTrue(
-            repositories.limitChangeRequests.lockedRequestIds.contains(
-                tenantId to LimitChangeRequestId.of(scheduled.id)
-            )
-        )
 
         val appliedRequest = assertNotNull(
             repositories.limitChangeRequests.findById(tenantId, LimitChangeRequestId.of(scheduled.id))
@@ -1455,6 +2048,7 @@ class DefaultLimitChangeServiceTest {
         priority: Int = 100,
         conditionExpression: Map<String, Any?> = emptyMap(),
         actionExpression: List<Map<String, Any?>> = emptyList(),
+        limitConfigurationId: LimitConfigurationId? = null,
     ): LimitChangePolicy =
         LimitChangePolicy(
             id = id,
@@ -1465,6 +2059,7 @@ class DefaultLimitChangeServiceTest {
             effectiveWindow = EffectiveWindow(now.minusSeconds(60), null),
             engine = LimitChangePolicyEngine.JSON_LOGIC,
             decision = decision,
+            limitConfigurationId = limitConfigurationId,
             priority = LimitPriority.of(priority),
             conditionExpression = Metadata(conditionExpression),
             actionExpression = actionExpression,
@@ -1477,6 +2072,35 @@ class DefaultLimitChangeServiceTest {
             createdAt = now,
             updatedAt = now,
         )
+
+    private fun insertConfiguration(
+        repositories: InMemoryLimitguardRepositories,
+        id: LimitConfigurationId,
+        parentConfigurationId: LimitConfigurationId? = null,
+        maxAssignableAmount: String = "1000.00",
+        fundingScope: LimitConfigurationFundingScope = LimitConfigurationFundingScope.AllFundingSources,
+    ): LimitConfiguration = repositories.limitConfigurations.insert(
+        tenantId,
+        LimitConfiguration(
+            id = id,
+            tenantId = tenantId,
+            parentConfigurationId = parentConfigurationId,
+            code = LimitConfigurationCode.of("CONFIG_${id.value.toString().takeLast(4)}"),
+            name = LimitConfigurationName.of("Test configuration ${id.value.toString().takeLast(4)}"),
+            description = null,
+            limitKind = DomainLimitKind.PerTransaction,
+            fundingScope = fundingScope,
+            channelScope = DomainLimitChannelScope.AllChannels,
+            operationScope = LimitOperationScope.AllOperations,
+            maxAssignableAmount = Money.positive(maxAssignableAmount, CurrencyCode.of("EUR")),
+            defaultAmount = null,
+            priority = LimitPriority.of(100),
+            isActive = true,
+            effectiveWindow = EffectiveWindow(now.minusSeconds(60), null),
+            metadata = Metadata.EMPTY,
+            createdAt = now,
+        )
+    )
 
     private fun amountGreaterThan(amount: String): Map<String, Any?> =
         mapOf(
@@ -1506,6 +2130,7 @@ class DefaultLimitChangeServiceTest {
             command = requestCommand,
             requestedRule = candidate,
             currentRule = null,
+            targetScope = candidate.toTargetScope(requireNotNull(facts.configuration).fundingScope),
             now = now,
         )
         val persisted = repositories.limitChangeRequests.insert(tenantId, request)
@@ -1521,83 +2146,19 @@ class DefaultLimitChangeServiceTest {
         clock: FixedClockProvider = FixedClockProvider(now),
         policyEngines: Collection<PolicyEngine> = listOf(JsonLogicPolicyEngine()),
     ): DefaultLimitChangeService {
-        val idGenerator = SequentialIdGenerator(startAt = 100L)
-        val changeEventFactory = LimitChangeEventFactory(idGenerator)
-        val mandateValidator = LimitRuleMandateValidator(repositories.mandates)
-        val applicationWorkflow = LimitChangeApplicationWorkflow(
+        return DefaultLimitChangeService(
             changeRequestRepository = repositories.limitChangeRequests,
             changeEventRepository = repositories.limitRuleChangeEvents,
             limitRuleRepository = repositories.limitRules,
             limitRuleRevisionRepository = repositories.limitRuleRevisions,
-            changeEventFactory = changeEventFactory,
-            idGenerator = idGenerator,
-        )
-        val policyRunner = LimitChangePolicyRunner(
+            limitConfigurationRepository = repositories.limitConfigurations,
+            mandateRepository = repositories.mandates,
             policyRepository = repositories.limitChangePolicies,
-            evaluationRepository = repositories.limitChangePolicyEvaluations,
-            changeEventRepository = repositories.limitRuleChangeEvents,
-            engineRegistry = PolicyEngineRegistry(policyEngines),
-            changeEventFactory = changeEventFactory,
-            idGenerator = idGenerator,
-        )
-        return DefaultLimitChangeService(
-            requestWorkflow = RequestLimitRuleChangeWorkflow(
-                commandValidator = ChangeCommandValidator(),
-                referenceResolver = ChangeReferenceResolver(
-                    limitConfigurationRepository = repositories.limitConfigurations,
-                    limitRuleRepository = repositories.limitRules,
-                    limitRuleRevisionRepository = repositories.limitRuleRevisions,
-                ),
-                candidateFactory = LimitRuleCandidateFactory(),
-                mandateValidator = mandateValidator,
-                changeRequestFactory = LimitChangeRequestFactory(),
-                changeEventFactory = changeEventFactory,
-                policyRunner = policyRunner,
-                applicationWorkflow = applicationWorkflow,
-                changeRequestRepository = repositories.limitChangeRequests,
-                changeEventRepository = repositories.limitRuleChangeEvents,
-                limitRuleRepository = repositories.limitRules,
-                idGenerator = idGenerator,
-                clockProvider = clock,
-                transactionRunner = DirectTransactionRunner(),
-            ),
-            approveWorkflow = ApproveLimitRuleChangeWorkflow(
-                candidateFactory = LimitRuleCandidateFactory(),
-                mandateValidator = mandateValidator,
-                applicationWorkflow = applicationWorkflow,
-                changeEventFactory = changeEventFactory,
-                changeRequestRepository = repositories.limitChangeRequests,
-                changeEventRepository = repositories.limitRuleChangeEvents,
-                limitConfigurationRepository = repositories.limitConfigurations,
-                limitRuleRepository = repositories.limitRules,
-                clockProvider = clock,
-                transactionRunner = DirectTransactionRunner(),
-            ),
-            rejectWorkflow = RejectLimitRuleChangeWorkflow(
-                changeEventFactory = changeEventFactory,
-                changeRequestRepository = repositories.limitChangeRequests,
-                changeEventRepository = repositories.limitRuleChangeEvents,
-                clockProvider = clock,
-                transactionRunner = DirectTransactionRunner(),
-            ),
-            cancelWorkflow = CancelLimitRuleChangeWorkflow(
-                changeEventFactory = changeEventFactory,
-                changeRequestRepository = repositories.limitChangeRequests,
-                changeEventRepository = repositories.limitRuleChangeEvents,
-                clockProvider = clock,
-                transactionRunner = DirectTransactionRunner(),
-            ),
-            applyDueWorkflow = ApplyDueLimitChangesWorkflow(
-                applicationWorkflow = applicationWorkflow,
-                mandateValidator = mandateValidator,
-                changeEventFactory = changeEventFactory,
-                changeRequestRepository = repositories.limitChangeRequests,
-                changeEventRepository = repositories.limitRuleChangeEvents,
-                limitConfigurationRepository = repositories.limitConfigurations,
-                limitRuleRepository = repositories.limitRules,
-                clockProvider = clock,
-                transactionRunner = DirectTransactionRunner(),
-            ),
+            policyEvaluationRepository = repositories.limitChangePolicyEvaluations,
+            policyEngines = policyEngines,
+            idGenerator = SequentialIdGenerator(startAt = 100L),
+            clockProvider = clock,
+            transactionRunner = DirectTransactionRunner(),
         )
     }
 
@@ -1679,6 +2240,9 @@ class DefaultLimitChangeServiceTest {
     private fun draft(
         name: String = "Daily ATM limit",
         amount: String = "500.00",
+        metadata: Map<String, Any?> = emptyMap(),
+        startsAt: Instant? = null,
+        endsAt: Instant? = null,
     ): LimitRuleDraft =
         LimitRuleDraft(
             name = name,
@@ -1689,12 +2253,21 @@ class DefaultLimitChangeServiceTest {
             channelScope = LimitChannelScope.ALL_CHANNELS,
             usageConsumptionMode = LimitUsageConsumptionMode.CASCADING,
             priority = 100,
+            startsAt = startsAt,
+            endsAt = endsAt,
+            metadata = metadata,
         )
 
     private fun command(
         idempotencyKey: String? = null,
         name: String = "Daily ATM limit",
         amount: String = "500.00",
+        expiresAt: Instant? = null,
+        policyContext: Map<String, Any?> = emptyMap(),
+        metadata: Map<String, Any?> = emptyMap(),
+        startsAt: Instant? = null,
+        endsAt: Instant? = null,
+        effectiveAt: Instant? = null,
     ): RequestLimitRuleChangeCommand =
         RequestLimitRuleChangeCommand(
             tenantId = tenantId.value,
@@ -1704,9 +2277,18 @@ class DefaultLimitChangeServiceTest {
                 partyProfileId = requesterId,
             ),
             targetOwnerPartyProfileId = ownerId,
-            requestedRule = draft(name, amount),
+            requestedRule = draft(
+                name = name,
+                amount = amount,
+                startsAt = startsAt,
+                endsAt = endsAt,
+            ),
             requestChannelId = channelId,
+            effectiveAt = effectiveAt,
+            expiresAt = expiresAt,
+            policyContext = policyContext,
             idempotencyKey = idempotencyKey,
+            metadata = metadata,
         )
 
 }

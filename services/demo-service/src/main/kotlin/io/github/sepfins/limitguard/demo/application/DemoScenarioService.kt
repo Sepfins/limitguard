@@ -368,18 +368,6 @@ class DemoScenarioService(
         transferDailyConfigurationId: UUID,
     ) {
         val requestedAmount = mapOf("var" to "changeRequest.requestedRule.amount")
-        // Core keeps a policy's configuration but does not filter by it yet, so each condition names it too.
-        fun forConfiguration(configurationId: UUID, condition: Map<String, Any?>) = mapOf(
-            "and" to listOf(
-                mapOf(
-                    "==" to listOf(
-                        mapOf("var" to "changeRequest.requestedRule.configurationId"),
-                        configurationId.toString(),
-                    ),
-                ),
-                condition,
-            ),
-        )
         limitguard.tenantCatalogService.createLimitChangePolicy(
             CreateLimitChangePolicyCommand(
                 tenantId = tenantId,
@@ -391,7 +379,7 @@ class DemoScenarioService(
                 decision = LimitChangePolicyDecision.DENY,
                 limitConfigurationId = atmConfigurationId,
                 priority = 20,
-                conditionExpression = forConfiguration(atmConfigurationId, mapOf(
+                conditionExpression = mapOf(
                     "and" to listOf(
                         mapOf(
                             "!=" to listOf(
@@ -411,7 +399,7 @@ class DemoScenarioService(
                             ),
                         ),
                     ),
-                )),
+                ),
                 denialCode = "PROXY_MAY_ONLY_LOWER",
                 denialMessage = "As an authorized user you can only lower the cash limit. Ask the account holder to raise it.",
                 metadata = mapOf("journey" to "SELF_SERVICE"),
@@ -428,9 +416,9 @@ class DemoScenarioService(
                 decision = LimitChangePolicyDecision.REQUIRE_APPROVAL,
                 limitConfigurationId = transferDailyConfigurationId,
                 priority = 30,
-                conditionExpression = forConfiguration(transferDailyConfigurationId, mapOf(
+                conditionExpression = mapOf(
                     "decimal_gt" to listOf(requestedAmount, AGREED_TRANSFER_MAXIMUM.toPlainString()),
-                )),
+                ),
                 metadata = mapOf("journey" to "SELF_SERVICE"),
             ),
         )
@@ -445,7 +433,7 @@ class DemoScenarioService(
                 decision = LimitChangePolicyDecision.ALLOW,
                 limitConfigurationId = cardConfigurationId,
                 priority = 40,
-                conditionExpression = forConfiguration(cardConfigurationId, mapOf(
+                conditionExpression = mapOf(
                     "and" to listOf(
                         mapOf("==" to listOf(mapOf("var" to "changeRequest.changeType"), "UPDATE")),
                         mapOf(
@@ -455,7 +443,7 @@ class DemoScenarioService(
                             ),
                         ),
                     ),
-                )),
+                ),
                 actionExpression = listOf(
                     mapOf("type" to "SET_EFFECTIVE_AT", "instant" to mapOf("var" to "facts.coolingOffEndsAt")),
                 ),

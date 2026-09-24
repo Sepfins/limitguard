@@ -7,6 +7,11 @@ import java.time.Instant
 
 internal class ChangeCommandValidator {
     fun validate(command: RequestLimitRuleChangeCommand, now: Instant) {
+        validateStructure(command)
+        validateEligibility(command, now)
+    }
+
+    fun validateStructure(command: RequestLimitRuleChangeCommand) {
         when (command.changeType) {
             LimitRuleChangeType.CREATE -> {
                 require(command.limitRuleId == null) { "limitRuleId must be null for CREATE changes" }
@@ -31,9 +36,6 @@ internal class ChangeCommandValidator {
                 requirePositiveExpectedVersion(command)
             }
         }
-        require(command.expiresAt == null || command.expiresAt > now) {
-            "expiresAt must be after the current time"
-        }
         require(command.effectiveAt == null || command.expiresAt == null || command.expiresAt > command.effectiveAt) {
             "expiresAt must be after effectiveAt"
         }
@@ -44,6 +46,12 @@ internal class ChangeCommandValidator {
             command.toTargetMandateId()
         }
         command.idempotencyKey?.let { IdempotencyKey.of(it) }
+    }
+
+    fun validateEligibility(command: RequestLimitRuleChangeCommand, now: Instant) {
+        require(command.expiresAt == null || command.expiresAt > now) {
+            "expiresAt must be after the current time"
+        }
     }
 
     private fun requirePositiveExpectedVersion(command: RequestLimitRuleChangeCommand) {

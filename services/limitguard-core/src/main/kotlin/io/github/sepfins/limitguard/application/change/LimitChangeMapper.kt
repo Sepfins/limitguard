@@ -16,25 +16,47 @@ import io.github.sepfins.limitguard.domain.change.RequestActorContext
 import io.github.sepfins.limitguard.domain.common.BankWorkerId
 import io.github.sepfins.limitguard.domain.common.ChannelGroupId
 import io.github.sepfins.limitguard.domain.common.ChannelId
+import io.github.sepfins.limitguard.domain.common.CurrencyCode
 import io.github.sepfins.limitguard.domain.common.MandateId
+import io.github.sepfins.limitguard.domain.common.Money
 import io.github.sepfins.limitguard.domain.common.OperationTypeId
 import io.github.sepfins.limitguard.domain.common.PartyProfileId
 import io.github.sepfins.limitguard.domain.limit.LimitKind as DomainLimitKind
 import io.github.sepfins.limitguard.domain.limit.LimitChannelScope as DomainLimitChannelScope
 import io.github.sepfins.limitguard.domain.limit.LimitOperationScope
+import io.github.sepfins.limitguard.domain.limit.LimitConfigurationFundingScope
 import io.github.sepfins.limitguard.domain.limit.LimitPeriod
 import io.github.sepfins.limitguard.domain.limit.LimitRule
 import io.github.sepfins.limitguard.domain.limit.LimitRuleTargetScope
+import io.github.sepfins.limitguard.domain.limit.LimitRuleName
 import io.github.sepfins.limitguard.domain.mandate.MandateScope
+import io.github.sepfins.limitguard.internal.json.JsonValueEquality
 
-internal fun LimitRule.toTargetScope(): LimitRuleTargetScope =
+internal fun LimitRuleDraft.matches(rule: LimitRule): Boolean =
+    LimitRuleName.of(name) == rule.name &&
+        description == rule.description &&
+        toLimitKind() == rule.limitKind &&
+        Money.positive(amount, CurrencyCode.of(currency)) == rule.amount &&
+        toMandateScope() == rule.mandateScope &&
+        toChannelScope() == rule.channelScope &&
+        toOperationScope() == rule.operationScope &&
+        usageConsumptionMode.name == rule.usageConsumptionMode.name &&
+        priority == rule.priority.value &&
+        endsAt == rule.effectiveWindow.endsAt &&
+        // Omitted values are resolved during initial submission, not again on replay.
+        (configurationId == null || configurationId == rule.configurationId?.value) &&
+        (startsAt == null || startsAt == rule.effectiveWindow.startsAt) &&
+        JsonValueEquality.objectsEqual(metadata, rule.metadata.value)
+
+internal fun LimitRule.toTargetScope(fundingScope: LimitConfigurationFundingScope): LimitRuleTargetScope =
     LimitRuleTargetScope(
         owner = ownerPartyProfileId,
         mandateScope = mandateScope,
         channelScope = channelScope,
         operationScope = operationScope,
         currency = amount.currency,
-        kind = limitKind
+        kind = limitKind,
+        fundingScope = fundingScope,
     )
 
 internal fun LimitRuleDraft.toMandateScope(): MandateScope =

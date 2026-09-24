@@ -10,9 +10,16 @@ import java.time.Instant
 interface LimitChangePolicyRepository {
     fun findById(tenantId: TenantId, id: LimitChangePolicyId): LimitChangePolicy?
     fun findByCode(tenantId: TenantId, code: LimitChangePolicyCode): LimitChangePolicy?
-    fun findActiveByPhase(
+
+    /**
+     * Active policies of the phase that apply to [configurationId]: unbound ones, and those bound
+     * to exactly it. A bound policy is exact-match only; configuration ancestry is not policy
+     * inheritance.
+     */
+    fun findActiveForConfiguration(
         tenantId: TenantId,
         phase: LimitChangePolicyPhase,
+        configurationId: LimitConfigurationId,
         at: Instant,
     ): List<LimitChangePolicy>
     fun insert(tenantId: TenantId, policy: LimitChangePolicy): LimitChangePolicy

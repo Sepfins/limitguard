@@ -1,31 +1,25 @@
 package io.github.sepfins.limitguard.application.change
 
 import io.github.sepfins.limitguard.api.LimitRuleChangeType
-import io.github.sepfins.limitguard.api.commands.LimitRuleDraft
 import io.github.sepfins.limitguard.api.commands.RequestLimitRuleChangeCommand
-import io.github.sepfins.limitguard.api.errors.ConflictException
 import io.github.sepfins.limitguard.api.errors.IdempotencyConflictException
 import io.github.sepfins.limitguard.api.errors.ValidationException
 import io.github.sepfins.limitguard.api.results.LimitChangeRequestResult
 import io.github.sepfins.limitguard.domain.change.ChangeActor
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeEventType
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeRequest
-import io.github.sepfins.limitguard.domain.change.LimitRuleChangeStatus
-import io.github.sepfins.limitguard.domain.common.CurrencyCode
 import io.github.sepfins.limitguard.domain.common.IdempotencyKey
 import io.github.sepfins.limitguard.domain.common.LimitChangeRequestId
 import io.github.sepfins.limitguard.domain.common.LimitRuleId
 import io.github.sepfins.limitguard.domain.common.Metadata
-import io.github.sepfins.limitguard.domain.common.Money
 import io.github.sepfins.limitguard.domain.common.PartyProfileDelegationId
 import io.github.sepfins.limitguard.domain.common.PartyProfileId
 import io.github.sepfins.limitguard.domain.common.TenantId
 import io.github.sepfins.limitguard.domain.limit.LimitRule
-import io.github.sepfins.limitguard.domain.limit.LimitRuleName
+import io.github.sepfins.limitguard.internal.json.JsonValueEquality
 import io.github.sepfins.limitguard.port.ids.IdGenerator
 import io.github.sepfins.limitguard.port.persistence.LimitChangeRequestRepository
 import io.github.sepfins.limitguard.port.persistence.LimitRuleChangeEventRepository
-import io.github.sepfins.limitguard.port.persistence.LimitRuleRepository
 import io.github.sepfins.limitguard.port.time.ClockProvider
 import io.github.sepfins.limitguard.port.transactions.TransactionRunner
 import java.time.Instant
@@ -41,14 +35,14 @@ internal class RequestLimitRuleChangeWorkflow(
     private val applicationWorkflow: LimitChangeApplicationWorkflow,
     private val changeRequestRepository: LimitChangeRequestRepository,
     private val changeEventRepository: LimitRuleChangeEventRepository,
-    private val limitRuleRepository: LimitRuleRepository,
+    private val targets: LimitChangeTargets,
     private val idGenerator: IdGenerator,
     private val clockProvider: ClockProvider,
     private val transactionRunner: TransactionRunner,
 ) {
     fun execute(command: RequestLimitRuleChangeCommand): LimitChangeRequestResult = mapValidation {
         val now = clockProvider.now()
-        commandValidator.validate(command, now)
+        commandValidator.validateStructure(command)
         val tenantId = TenantId.of(command.tenantId)
 
         transactionRunner.inTransaction {
@@ -75,6 +69,8 @@ internal class RequestLimitRuleChangeWorkflow(
                 return@inTransaction existingRequest.toResult()
             }
 
+            commandValidator.validateEligibility(command, now)
+
             val facts = referenceResolver.resolve(command)
             val candidate = candidateFactory.createCandidate(
                 command = command,
@@ -87,23 +83,26 @@ internal class RequestLimitRuleChangeWorkflow(
                 now = now,
             )
             mandateValidator.validate(candidate, command.effectiveAt ?: now)
+            val requestId = LimitChangeRequestId.of(idGenerator.newId())
+            val target = targets.requireAvailable(candidate, requestId, now)
             val request = changeRequestFactory.create(
-                id = LimitChangeRequestId.of(idGenerator.newId()),
+                id = requestId,
                 command = command,
                 requestedRule = candidate,
                 currentRule = facts.currentRule,
+                targetScope = target,
                 now = now,
             )
-
-            requireTargetAvailable(tenantId, candidate, request, now)
 
             val requested = changeRequestRepository.insert(tenantId, request)
             changeEventRepository.insert(tenantId, changeEventFactory.requested(requested, now))
 
-            val authorization = policyRunner.authorize(requested, now)
+            val authorization = policyRunner.authorize(
+                request = requested,
+                at = now,
+            )
             val policyRequest = authorization.request
-            var policyCandidate = candidate
-            val persistedApproved = when (authorization) {
+            when (authorization) {
                 is LimitChangeAuthorization.Failed -> {
                     val reason = authorization.evaluation.message
                         ?: "Policy ${authorization.policy.code.value} evaluation failed"
@@ -163,50 +162,22 @@ internal class RequestLimitRuleChangeWorkflow(
                     return@inTransaction rejected.toResult()
                 }
                 is LimitChangeAuthorization.Allowed -> {
-                    policyCandidate = candidateAfterPolicyActions(candidate, requested, policyRequest, now)
-                    val approved = policyRequest.approve(
-                        approvedRule = policyRequest.requestedRule,
+                    val policyCandidate = candidateAfterPolicyActions(candidate, requested, policyRequest, now)
+                    applicationWorkflow.approveAndApply(
+                        request = policyRequest,
+                        candidate = policyCandidate,
+                        actor = ChangeActor.System,
                         reason = authorization.evaluation.message
                             ?: "Automatically approved by policy ${authorization.policy.code.value}",
                         at = now,
-                    )
-                    changeRequestRepository.update(tenantId, approved).also { persisted ->
-                        changeEventRepository.insert(
-                            tenantId,
-                            changeEventFactory.approved(
-                                before = policyRequest,
-                                after = persisted,
-                                now = now,
-                                eventPayload = Metadata(
-                                    mapOf(
-                                        "policyCode" to authorization.policy.code.value,
-                                        "evaluationId" to authorization.evaluation.id.value.toString(),
-                                    )
-                                ),
-                                policyId = authorization.policy.id,
-                            ),
-                        )
-                    }
+                        eventPayload = Metadata(mapOf(
+                            "policyCode" to authorization.policy.code.value,
+                            "evaluationId" to authorization.evaluation.id.value.toString(),
+                        )),
+                        policyId = authorization.policy.id,
+                    ).toResult()
                 }
             }
-
-            val effectiveAt = persistedApproved.effectiveAt
-            if (effectiveAt != null && effectiveAt > now) {
-                val scheduled = persistedApproved.schedule(effectiveAt, now)
-                val persistedScheduled = changeRequestRepository.update(tenantId, scheduled)
-                changeEventRepository.insert(
-                    tenantId,
-                    changeEventFactory.scheduled(persistedApproved, persistedScheduled, now),
-                )
-                return@inTransaction persistedScheduled.toResult()
-            }
-
-            applicationWorkflow.applyInCurrentTransaction(
-                request = persistedApproved,
-                candidate = policyCandidate,
-                actor = ChangeActor.System,
-                applicationTime = now,
-            ).toResult()
         }
     }
 
@@ -218,7 +189,12 @@ internal class RequestLimitRuleChangeWorkflow(
     ): LimitRule {
         if (policyRequest == originalRequest) return originalCandidate
 
-        val candidate = if (policyRequest.requestedRule == originalRequest.requestedRule) {
+        val candidate = if (
+            JsonValueEquality.objectsEqual(
+                policyRequest.requestedRule.value,
+                originalRequest.requestedRule.value,
+            )
+        ) {
             originalCandidate
         } else {
             LimitRuleSnapshotter.restoreRule(
@@ -228,54 +204,8 @@ internal class RequestLimitRuleChangeWorkflow(
             )
         }
         mandateValidator.validate(candidate, policyRequest.effectiveAt ?: now)
-        requireTargetAvailable(policyRequest.tenantId, candidate, policyRequest, now)
+        targets.requireAvailable(candidate, policyRequest.id, now)
         return candidate
-    }
-
-    private fun requireTargetAvailable(
-        tenantId: TenantId,
-        candidate: LimitRule,
-        request: LimitRuleChangeRequest,
-        now: Instant,
-    ) {
-        changeRequestRepository.lockTarget(tenantId, request.targetScopeHash)
-
-        request.limitRuleId?.let { limitRuleId ->
-            val pendingForRule = changeRequestRepository.findByLimitRule(tenantId, limitRuleId)
-                .any {
-                    it.id != request.id &&
-                        it.status in PENDING_STATUSES &&
-                        (it.expiresAt == null || it.expiresAt > now)
-                }
-            if (pendingForRule) {
-                throw ConflictException("pending limit change already exists for rule: ${limitRuleId.value}")
-            }
-        }
-
-        if (candidate.isActive) {
-            val candidateEffectiveAt = maxOf(
-                now,
-                request.effectiveAt ?: now,
-                candidate.effectiveWindow.startsAt,
-            )
-            val targetAlreadyExists = limitRuleRepository
-                .findActiveForOwner(tenantId, candidate.ownerPartyProfileId, candidateEffectiveAt)
-                .any { it.id != candidate.id && it.toTargetScope() == candidate.toTargetScope() }
-            if (targetAlreadyExists) {
-                throw ConflictException(
-                    "active limit rule already exists for target scope: ${request.targetScopeHash.value}"
-                )
-            }
-        }
-
-        val targetHasAnotherPendingRequest = changeRequestRepository
-            .findPendingForTarget(tenantId, request.targetScopeHash, now)
-            .any { it.id != request.id }
-        if (targetHasAnotherPendingRequest) {
-            throw ConflictException(
-                "pending limit change already exists for target scope: ${request.targetScopeHash.value}"
-            )
-        }
     }
 
     private fun requireSameIdempotentRequest(
@@ -296,11 +226,11 @@ internal class RequestLimitRuleChangeWorkflow(
                 commandLimitRuleMatches(existingRequest, command) &&
                 commandTargetMandateMatches(existingRequest, command) &&
                 expectedVersionMatches(existingRequest, command) &&
-                requestedDraftMatches(originalRequestedRule, command.requestedRule) &&
+                (command.requestedRule?.matches(LimitRuleSnapshotter.restoreRule(originalRequestedRule)) != false) &&
                 originalEffectiveAt == command.effectiveAt &&
                 existingRequest.expiresAt == command.expiresAt &&
-                existingRequest.policyContext.value == command.policyContext &&
-                existingRequest.metadata.value == command.metadata
+                JsonValueEquality.objectsEqual(existingRequest.policyContext.value, command.policyContext) &&
+                JsonValueEquality.objectsEqual(existingRequest.metadata.value, command.metadata)
 
         if (!sameRequest) {
             throw IdempotencyConflictException(
@@ -333,37 +263,7 @@ internal class RequestLimitRuleChangeWorkflow(
         command: RequestLimitRuleChangeCommand,
     ): Boolean =
         command.changeType == LimitRuleChangeType.CREATE ||
-            request.beforeRule?.value?.get("version") == command.expectedVersion
-
-    private fun requestedDraftMatches(
-        requestedRule: Metadata,
-        draft: LimitRuleDraft?,
-    ): Boolean {
-        if (draft == null) return true
-        val snapshot = requestedRule.value
-        val expectedValues = mutableMapOf<String, Any?>(
-            "name" to LimitRuleName.of(draft.name).value,
-            "description" to draft.description,
-            "limitKind" to draft.limitKind.name,
-            "period" to draft.period?.name,
-            "amount" to Money.positive(draft.amount, CurrencyCode.of(draft.currency)).amount.toString(),
-            "currency" to CurrencyCode.of(draft.currency).value,
-            "mandateScope" to draft.mandateScope.name,
-            "mandateId" to draft.mandateId?.toString(),
-            "channelScope" to draft.channelScope.name,
-            "channelId" to draft.channelId?.toString(),
-            "channelGroupId" to draft.channelGroupId?.toString(),
-            "operationTypeId" to draft.operationTypeId?.toString(),
-            "usageConsumptionMode" to draft.usageConsumptionMode.name,
-            "priority" to draft.priority,
-            "endsAt" to draft.endsAt?.toString(),
-            "metadata" to draft.metadata,
-        )
-        draft.configurationId?.let { expectedValues["configurationId"] = it.toString() }
-        draft.startsAt?.let { expectedValues["startsAt"] = it.toString() }
-
-        return expectedValues.all { (key, value) -> snapshot[key] == value }
-    }
+            request.beforeRule?.let { LimitRuleSnapshotter.version(it).value } == command.expectedVersion
 
     private inline fun <T> mapValidation(block: () -> T): T =
         try {
@@ -375,11 +275,4 @@ internal class RequestLimitRuleChangeWorkflow(
             )
         }
 
-    private companion object {
-        val PENDING_STATUSES = setOf(
-            LimitRuleChangeStatus.REQUESTED,
-            LimitRuleChangeStatus.APPROVED,
-            LimitRuleChangeStatus.PENDING_EFFECTIVE_DATE,
-        )
-    }
 }

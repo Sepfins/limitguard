@@ -1,6 +1,7 @@
 package io.github.sepfins.limitguard.application.change
 
 import io.github.sepfins.limitguard.domain.change.LimitChangePolicy
+import io.github.sepfins.limitguard.domain.change.LimitChangePolicyCapabilities
 import io.github.sepfins.limitguard.domain.change.LimitChangePolicyDecision
 import io.github.sepfins.limitguard.domain.change.LimitChangePolicyEvaluation
 import io.github.sepfins.limitguard.domain.change.LimitChangePolicyEvaluationOutcome
@@ -31,7 +32,7 @@ internal class LimitChangePolicyRunner(
         at: Instant,
     ): LimitChangeAuthorization {
         val policies = policyRepository
-            .findActiveByPhase(request.tenantId, LimitChangePolicyPhase.AUTHORIZATION, at)
+            .findActiveForConfiguration(request.tenantId, LimitChangePolicyPhase.AUTHORIZATION, request.configurationId, at)
             .sortedWith(compareBy<LimitChangePolicy> { it.priority.value }.thenBy { it.code.value })
         var currentRequest = request
 
@@ -97,7 +98,7 @@ internal class LimitChangePolicyRunner(
         context: PolicyEvaluationContext,
     ): PolicyRun {
         val result = try {
-            require(policy.decision in AUTHORIZATION_DECISIONS) {
+            require(policy.decision in LimitChangePolicyCapabilities.authorizationDecisions) {
                 "Policy decision ${policy.decision.name} is not supported during AUTHORIZATION"
             }
             val engine = engineRegistry.get(policy.engine)
@@ -152,7 +153,7 @@ internal class LimitChangePolicyRunner(
                 request = context.changeRequest,
             )
         }
-        if (result.matched && result.decision !in AUTHORIZATION_DECISIONS) {
+        if (result.matched && result.decision !in LimitChangePolicyCapabilities.authorizationDecisions) {
             return PolicyRun(
                 result = result.copy(
                     matched = false,
@@ -193,12 +194,6 @@ internal class LimitChangePolicyRunner(
     }
 
     private companion object {
-        val AUTHORIZATION_DECISIONS = setOf(
-            LimitChangePolicyDecision.ALLOW,
-            LimitChangePolicyDecision.DENY,
-            LimitChangePolicyDecision.REQUIRE_APPROVAL,
-            LimitChangePolicyDecision.NO_OP,
-        )
         val MATCHED_OUTCOMES = setOf(
             LimitChangePolicyEvaluationOutcome.MATCHED,
             LimitChangePolicyEvaluationOutcome.APPLIED,

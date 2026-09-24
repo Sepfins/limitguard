@@ -8,21 +8,7 @@ import io.github.sepfins.limitguard.api.TenantCatalogService
 import io.github.sepfins.limitguard.api.TenantCatalogQueryService
 import io.github.sepfins.limitguard.application.catalog.DefaultTenantCatalogService
 import io.github.sepfins.limitguard.application.catalog.DefaultTenantCatalogQueryService
-import io.github.sepfins.limitguard.application.change.ApproveLimitRuleChangeWorkflow
-import io.github.sepfins.limitguard.application.change.ApplyDueLimitChangesWorkflow
-import io.github.sepfins.limitguard.application.change.CancelLimitRuleChangeWorkflow
-import io.github.sepfins.limitguard.application.change.ChangeCommandValidator
-import io.github.sepfins.limitguard.application.change.ChangeReferenceResolver
 import io.github.sepfins.limitguard.application.change.DefaultLimitChangeService
-import io.github.sepfins.limitguard.application.change.LimitChangeApplicationWorkflow
-import io.github.sepfins.limitguard.application.change.LimitChangeEventFactory
-import io.github.sepfins.limitguard.application.change.LimitChangePolicyRunner
-import io.github.sepfins.limitguard.application.change.LimitChangeRequestFactory
-import io.github.sepfins.limitguard.application.change.LimitRuleCandidateFactory
-import io.github.sepfins.limitguard.application.change.LimitRuleMandateValidator
-import io.github.sepfins.limitguard.application.change.RequestLimitRuleChangeWorkflow
-import io.github.sepfins.limitguard.application.change.RejectLimitRuleChangeWorkflow
-import io.github.sepfins.limitguard.application.change.PolicyEngineRegistry
 import io.github.sepfins.limitguard.application.evaluation.AuthorizationEvaluator
 import io.github.sepfins.limitguard.application.evaluation.AuthorizationDecisionRecorder
 import io.github.sepfins.limitguard.application.evaluation.AuthorizationReferenceResolver
@@ -36,7 +22,6 @@ import io.github.sepfins.limitguard.application.transaction.TransactionRecorder
 import io.github.sepfins.limitguard.application.usage.UsageMutationService
 import io.github.sepfins.limitguard.application.usage.UsageReservationService
 import io.github.sepfins.limitguard.application.usage.UsageWindowCalculator
-import io.github.sepfins.limitguard.infrastructure.policy.jsonlogic.JsonLogicPolicyEngine
 import io.github.sepfins.limitguard.port.ids.IdGenerator
 import io.github.sepfins.limitguard.port.persistence.BankWorkerRepository
 import io.github.sepfins.limitguard.port.persistence.AuthorizationDecisionRepository
@@ -107,30 +92,11 @@ class DefaultLimitguard(
     transactionEventRepository: TransactionEventRepository,
     usageBucketRepository: UsageBucketRepository,
     usageEventRepository: UsageEventRepository,
-    policyEngines: Collection<PolicyEngine> = listOf(JsonLogicPolicyEngine()),
+    policyEngines: Collection<PolicyEngine>,
     idGenerator: IdGenerator,
     clockProvider: ClockProvider,
     transactionRunner: TransactionRunner,
 ) : Limitguard {
-    private val limitChangeEventFactory = LimitChangeEventFactory(idGenerator)
-    private val limitRuleMandateValidator = LimitRuleMandateValidator(mandateRepository)
-    private val limitChangePolicyRunner = LimitChangePolicyRunner(
-        policyRepository = limitChangePolicyRepository,
-        evaluationRepository = limitChangePolicyEvaluationRepository,
-        changeEventRepository = limitChangeEventRepository,
-        engineRegistry = PolicyEngineRegistry(policyEngines),
-        changeEventFactory = limitChangeEventFactory,
-        idGenerator = idGenerator,
-    )
-    private val limitChangeApplicationWorkflow = LimitChangeApplicationWorkflow(
-        changeRequestRepository = limitChangeRequestRepository,
-        changeEventRepository = limitChangeEventRepository,
-        limitRuleRepository = limitRuleRepository,
-        limitRuleRevisionRepository = limitRuleRevisionRepository,
-        changeEventFactory = limitChangeEventFactory,
-        idGenerator = idGenerator,
-    )
-
     override val tenantCatalogService: TenantCatalogService = DefaultTenantCatalogService(
         tenantRepository = tenantRepository,
         identifierSchemeRepository = identifierSchemeRepository,
@@ -169,63 +135,18 @@ class DefaultLimitguard(
     )
 
     override val limitChangeService: LimitChangeService = DefaultLimitChangeService(
-        requestWorkflow = RequestLimitRuleChangeWorkflow(
-            commandValidator = ChangeCommandValidator(),
-            referenceResolver = ChangeReferenceResolver(
-                limitConfigurationRepository = limitConfigurationRepository,
-                limitRuleRepository = limitRuleRepository,
-                limitRuleRevisionRepository = limitRuleRevisionRepository,
-            ),
-            candidateFactory = LimitRuleCandidateFactory(),
-            mandateValidator = limitRuleMandateValidator,
-            changeRequestFactory = LimitChangeRequestFactory(),
-            changeEventFactory = limitChangeEventFactory,
-            policyRunner = limitChangePolicyRunner,
-            applicationWorkflow = limitChangeApplicationWorkflow,
-            changeRequestRepository = limitChangeRequestRepository,
-            changeEventRepository = limitChangeEventRepository,
-            limitRuleRepository = limitRuleRepository,
-            idGenerator = idGenerator,
-            clockProvider = clockProvider,
-            transactionRunner = transactionRunner,
-        ),
-        approveWorkflow = ApproveLimitRuleChangeWorkflow(
-            candidateFactory = LimitRuleCandidateFactory(),
-            mandateValidator = limitRuleMandateValidator,
-            applicationWorkflow = limitChangeApplicationWorkflow,
-            changeEventFactory = limitChangeEventFactory,
-            changeRequestRepository = limitChangeRequestRepository,
-            changeEventRepository = limitChangeEventRepository,
-            limitConfigurationRepository = limitConfigurationRepository,
-            limitRuleRepository = limitRuleRepository,
-            clockProvider = clockProvider,
-            transactionRunner = transactionRunner,
-        ),
-        rejectWorkflow = RejectLimitRuleChangeWorkflow(
-            changeEventFactory = limitChangeEventFactory,
-            changeRequestRepository = limitChangeRequestRepository,
-            changeEventRepository = limitChangeEventRepository,
-            clockProvider = clockProvider,
-            transactionRunner = transactionRunner,
-        ),
-        cancelWorkflow = CancelLimitRuleChangeWorkflow(
-            changeEventFactory = limitChangeEventFactory,
-            changeRequestRepository = limitChangeRequestRepository,
-            changeEventRepository = limitChangeEventRepository,
-            clockProvider = clockProvider,
-            transactionRunner = transactionRunner,
-        ),
-        applyDueWorkflow = ApplyDueLimitChangesWorkflow(
-            applicationWorkflow = limitChangeApplicationWorkflow,
-            mandateValidator = limitRuleMandateValidator,
-            changeEventFactory = limitChangeEventFactory,
-            changeRequestRepository = limitChangeRequestRepository,
-            changeEventRepository = limitChangeEventRepository,
-            limitConfigurationRepository = limitConfigurationRepository,
-            limitRuleRepository = limitRuleRepository,
-            clockProvider = clockProvider,
-            transactionRunner = transactionRunner,
-        ),
+        changeRequestRepository = limitChangeRequestRepository,
+        changeEventRepository = limitChangeEventRepository,
+        limitRuleRepository = limitRuleRepository,
+        limitRuleRevisionRepository = limitRuleRevisionRepository,
+        limitConfigurationRepository = limitConfigurationRepository,
+        mandateRepository = mandateRepository,
+        policyRepository = limitChangePolicyRepository,
+        policyEvaluationRepository = limitChangePolicyEvaluationRepository,
+        policyEngines = policyEngines,
+        idGenerator = idGenerator,
+        clockProvider = clockProvider,
+        transactionRunner = transactionRunner,
     )
 
     private val transactionRecorder = TransactionRecorder(
@@ -264,6 +185,7 @@ class DefaultLimitguard(
         limitRuleMatcher = LimitRuleMatcher(
             limitRuleRepository = limitRuleRepository,
             channelGroupMemberRepository = channelGroupMemberRepository,
+            limitConfigurationRepository = limitConfigurationRepository,
         ),
         authorizationEvaluator = AuthorizationEvaluator(
             UsageReservationService(

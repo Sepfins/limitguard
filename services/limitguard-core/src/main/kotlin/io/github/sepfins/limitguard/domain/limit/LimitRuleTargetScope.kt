@@ -10,5 +10,6 @@ data class LimitRuleTargetScope(
     val channelScope: LimitChannelScope,
     val operationScope: LimitOperationScope,
     val currency: CurrencyCode,
-    val kind: LimitKind
+    val kind: LimitKind,
+    val fundingScope: LimitConfigurationFundingScope,
 )

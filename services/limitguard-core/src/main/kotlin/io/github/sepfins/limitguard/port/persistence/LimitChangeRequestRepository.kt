@@ -22,8 +22,8 @@ interface LimitChangeRequestRepository {
     /**
      * Locks the logical target for the surrounding transaction, including when
      * neither a request nor a rule exists yet. Implementations must serialize
-     * callers for the same tenant and target hash; locking only existing rows is
-     * insufficient for concurrent CREATE requests.
+     * callers for the same tenant and funding-aware target hash; locking only
+     * existing rows is insufficient for concurrent CREATE requests.
      */
     fun lockTarget(tenantId: TenantId, targetScopeHash: ScopeHash)
 

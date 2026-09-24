@@ -1,79 +1,46 @@
 package io.github.sepfins.limitguard.internal.hashing
 
+import io.github.sepfins.limitguard.domain.change.ScopeHash
+import io.github.sepfins.limitguard.domain.common.Metadata
 import io.github.sepfins.limitguard.domain.limit.LimitChannelScope
+import io.github.sepfins.limitguard.domain.limit.LimitConfigurationFundingScope
 import io.github.sepfins.limitguard.domain.limit.LimitKind
 import io.github.sepfins.limitguard.domain.limit.LimitOperationScope
 import io.github.sepfins.limitguard.domain.limit.LimitRuleTargetScope
 import io.github.sepfins.limitguard.domain.mandate.MandateScope
 
-internal object TargetScopeCanonicalizer : Canonicalizer<LimitRuleTargetScope> {
-    override fun canonicalize(value: LimitRuleTargetScope): String =
-        CanonicalJson.encodeObject(value.toCanonicalValues())
+internal object TargetScopeCanonicalizer {
+    fun hash(scope: LimitRuleTargetScope): ScopeHash = ScopeHash.of(StableJsonHasher.sha256Hex(canonicalize(scope)))
 
-    private fun LimitRuleTargetScope.toCanonicalValues(): Map<String, Any?> {
-        val canonicalMandateScope = when (mandateScope) {
-            MandateScope.AllOwnerMandates ->
-                CanonicalMandateScope("ALL_OWNER_MANDATES", null)
-            is MandateScope.MandateSpecific ->
-                CanonicalMandateScope("MANDATE", mandateScope.mandateId.value.toString())
-        }
+    fun canonicalize(scope: LimitRuleTargetScope): String = CanonicalJson.encodeObject(snapshot(scope).value)
 
-        val canonicalChannelScope = when (channelScope) {
-            LimitChannelScope.AllChannels ->
-                CanonicalChannelScope("ALL_CHANNELS", null, null)
-            is LimitChannelScope.ChannelGroupSpecific ->
-                CanonicalChannelScope("CHANNEL_GROUP", channelScope.channelGroupId.value.toString(), null)
-            is LimitChannelScope.ChannelSpecific ->
-                CanonicalChannelScope("CHANNEL", null, channelScope.channelId.value.toString())
-        }
+    fun snapshot(scope: LimitRuleTargetScope): Metadata = Metadata(values(scope).filterValues { it != null })
 
-        val canonicalOperationScope = when (operationScope) {
-            LimitOperationScope.AllOperations ->
-                CanonicalOperationScope("ALL_OPERATIONS", null)
-            is LimitOperationScope.OperationTypeSpecific ->
-                CanonicalOperationScope("OPERATION", operationScope.operationTypeId.value.toString())
-        }
-
-        val canonicalKind = when (kind) {
-            LimitKind.PerTransaction ->
-                CanonicalKind("PER_TRANSACTION", null)
-            is LimitKind.Periodic ->
-                CanonicalKind("PERIODIC", kind.period.name)
-        }
-
-        return mapOf(
+    private fun values(scope: LimitRuleTargetScope): Map<String, Any?> = with(scope) {
+        mapOf(
             "owner" to owner.value.toString(),
-            "mandateScope" to canonicalMandateScope.scope,
-            "mandateId" to canonicalMandateScope.mandateId,
-            "channelScope" to canonicalChannelScope.scope,
-            "channelGroupId" to canonicalChannelScope.channelGroupId,
-            "channelId" to canonicalChannelScope.channelId,
-            "operationScope" to canonicalOperationScope.scope,
-            "operationTypeId" to canonicalOperationScope.operationTypeId,
+            "mandateScope" to if (mandateScope is MandateScope.MandateSpecific) "MANDATE" else "ALL_OWNER_MANDATES",
+            "mandateId" to (mandateScope as? MandateScope.MandateSpecific)?.mandateId?.value?.toString(),
+            "channelScope" to when (channelScope) {
+                LimitChannelScope.AllChannels -> "ALL_CHANNELS"
+                is LimitChannelScope.ChannelSpecific -> "CHANNEL"
+                is LimitChannelScope.ChannelGroupSpecific -> "CHANNEL_GROUP"
+            },
+            "channelId" to (channelScope as? LimitChannelScope.ChannelSpecific)?.channelId?.value?.toString(),
+            "channelGroupId" to (channelScope as? LimitChannelScope.ChannelGroupSpecific)?.channelGroupId?.value?.toString(),
+            "operationScope" to if (operationScope is LimitOperationScope.OperationTypeSpecific) "OPERATION_TYPE" else "ALL_OPERATIONS",
+            "operationTypeId" to (operationScope as? LimitOperationScope.OperationTypeSpecific)?.operationTypeId?.value?.toString(),
             "currency" to currency.value,
-            "kind" to canonicalKind.kind,
-            "period" to canonicalKind.period,
-        )
+            "kind" to if (kind is LimitKind.Periodic) "PERIODIC" else "PER_TRANSACTION",
+            "period" to (kind as? LimitKind.Periodic)?.period?.name,
+        ) + when (val funding = fundingScope) {
+            LimitConfigurationFundingScope.AllFundingSources -> mapOf("fundingScope" to "ALL_FUNDING_SOURCES")
+            is LimitConfigurationFundingScope.FundingSourceCategorySpecific -> mapOf(
+                "fundingScope" to "FUNDING_SOURCE_CATEGORY", "fundingSourceCategory" to funding.sourceCategory.name,
+            )
+            is LimitConfigurationFundingScope.FundingSourceProductSpecific -> mapOf(
+                "fundingScope" to "FUNDING_SOURCE_PRODUCT", "fundingSourceProductId" to funding.productId.value.toString(),
+            )
+        }
     }
 }
-
-private data class CanonicalMandateScope(
-    val scope: String,
-    val mandateId: String?
-)
-
-private data class CanonicalChannelScope(
-    val scope: String,
-    val channelGroupId: String?,
-    val channelId: String?
-)
-
-private data class CanonicalOperationScope(
-    val scope: String,
-    val operationTypeId: String?
-)
-
-private data class CanonicalKind(
-    val kind: String,
-    val period: String?
-)

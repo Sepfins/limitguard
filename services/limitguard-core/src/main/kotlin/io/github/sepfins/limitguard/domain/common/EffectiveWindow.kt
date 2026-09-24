@@ -14,4 +14,9 @@ data class EffectiveWindow(val startsAt: Instant, val endsAt: Instant?) {
     fun contains(other: EffectiveWindow): Boolean =
         other.startsAt >= startsAt &&
             (endsAt == null || (other.endsAt != null && other.endsAt <= endsAt))
+
+    /** Half-open interval overlap: touching endpoints do not overlap. */
+    fun overlaps(other: EffectiveWindow): Boolean =
+        (other.endsAt == null || startsAt < other.endsAt) &&
+            (endsAt == null || other.startsAt < endsAt)
 }

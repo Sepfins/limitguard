@@ -61,6 +61,7 @@ import io.github.sepfins.limitguard.domain.channel.ChannelGroupMember
 import io.github.sepfins.limitguard.domain.channel.ChannelGroupName
 import io.github.sepfins.limitguard.domain.channel.ChannelName
 import io.github.sepfins.limitguard.domain.change.LimitChangePolicy
+import io.github.sepfins.limitguard.domain.change.LimitChangePolicyCapabilities
 import io.github.sepfins.limitguard.domain.change.LimitChangePolicyCode
 import io.github.sepfins.limitguard.domain.change.LimitChangePolicyDecision
 import io.github.sepfins.limitguard.domain.change.LimitChangePolicyEngine
@@ -717,7 +718,7 @@ class DefaultTenantCatalogService(
                     FundingSourceScope.FundingSourceGroupSpecific(fundingSourceGroupId)
                 }
             },
-            isActive = effectiveWindow.contains(now),
+            isActive = true,
             version = Version.INITIAL,
             effectiveWindow = effectiveWindow,
             metadata = Metadata(command.metadata),
@@ -892,6 +893,18 @@ class DefaultTenantCatalogService(
     ): LimitChangePolicyResult = mapValidation {
         val tenantId = TenantId.of(command.tenantId)
         requireTenantExists(tenantId)
+        val phase = LimitChangePolicyPhase.valueOf(command.phase.name)
+        val decision = LimitChangePolicyDecision.valueOf(command.decision.name)
+        if (phase != LimitChangePolicyPhase.AUTHORIZATION) {
+            throw ValidationException(
+                "limit change policy phase ${phase.name} is not supported; only AUTHORIZATION is supported",
+            )
+        }
+        if (decision !in LimitChangePolicyCapabilities.authorizationDecisions) {
+            throw ValidationException(
+                "limit change policy decision ${decision.name} is not supported during AUTHORIZATION",
+            )
+        }
         val limitConfigurationId = command.limitConfigurationId?.let { rawId ->
             val id = LimitConfigurationId.of(rawId)
             requireLimitConfigurationExists(tenantId, id)
@@ -904,9 +917,9 @@ class DefaultTenantCatalogService(
             code = LimitChangePolicyCode.of(command.code),
             name = LimitChangePolicyName.of(command.name),
             description = command.description,
-            phase = LimitChangePolicyPhase.valueOf(command.phase.name),
+            phase = phase,
             engine = LimitChangePolicyEngine.valueOf(command.engine.name),
-            decision = LimitChangePolicyDecision.valueOf(command.decision.name),
+            decision = decision,
             limitConfigurationId = limitConfigurationId,
             priority = LimitPriority.of(command.priority),
             isActive = command.isActive,
