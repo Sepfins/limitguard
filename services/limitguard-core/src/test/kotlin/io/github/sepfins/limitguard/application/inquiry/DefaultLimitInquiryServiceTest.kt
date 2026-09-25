@@ -489,6 +489,187 @@ class DefaultLimitInquiryServiceTest {
     }
 
     @Test
+    fun `operation capacity excludes a rule whose funding configuration does not apply`() {
+        val repositories = repositoriesWithTenant()
+        val scenario = operationCapacityScenario(repositories)
+        val savingsConfiguration = limitConfiguration(
+            configurationIdValue = 90,
+            scope = LimitConfigurationFundingScope.FundingSourceCategorySpecific(
+                FundingSourceCategory.SAVINGS,
+            ),
+        )
+        repositories.limitConfigurations.insert(tenantId, savingsConfiguration)
+        repositories.limitRules.insert(
+            tenantId,
+            periodicRule(
+                ruleId = LimitRuleId.of(id(91)),
+                ownerId = scenario.profileId,
+                configurationId = savingsConfiguration.id,
+            ),
+        )
+
+        val result = inquiryService(repositories).getOperationCapacity(
+            GetOperationCapacityQuery(
+                tenantId = tenantId.value,
+                actingPartyProfileId = scenario.profileId.value,
+                fundingSourceId = scenario.fundingSourceId.value,
+                operationTypeId = scenario.operationTypeId.value,
+                channelId = scenario.channelId.value,
+                currency = "EUR",
+            ),
+        )
+
+        assertEquals(OperationCapacityStatus.UNAVAILABLE, result.status)
+        assertEquals("NO_MATCHING_LIMIT_RULE", result.reasons.single().code)
+        assertEquals(emptyList(), result.applicableLimits)
+    }
+
+    @Test
+    fun `operation capacity includes an applicable all-funding configuration`() {
+        val repositories = repositoriesWithTenant()
+        val scenario = operationCapacityScenario(repositories)
+        val allFundingConfiguration = limitConfiguration(
+            configurationIdValue = 87,
+            scope = LimitConfigurationFundingScope.AllFundingSources,
+        )
+        repositories.limitConfigurations.insert(tenantId, allFundingConfiguration)
+        val rule = periodicRule(
+            ruleId = LimitRuleId.of(id(88)),
+            ownerId = scenario.profileId,
+            configurationId = allFundingConfiguration.id,
+        )
+        repositories.limitRules.insert(tenantId, rule)
+
+        val result = inquiryService(repositories).getOperationCapacity(
+            GetOperationCapacityQuery(
+                tenantId = tenantId.value,
+                actingPartyProfileId = scenario.profileId.value,
+                fundingSourceId = scenario.fundingSourceId.value,
+                operationTypeId = scenario.operationTypeId.value,
+                channelId = scenario.channelId.value,
+                currency = "EUR",
+            ),
+        )
+
+        assertEquals(OperationCapacityStatus.AVAILABLE, result.status)
+        assertEquals(listOf(rule.id.value), result.applicableLimits.map { it.limitRuleId })
+        assertEquals("500.0000".toBigDecimal(), result.effectiveAvailableAmount)
+    }
+
+    @Test
+    fun `operation capacity applies product descendants but excludes unrelated branches`() {
+        val descendantRepositories = repositoriesWithTenant()
+        val descendantScenario = operationCapacityScenario(descendantRepositories)
+        val descendantRoot = FundingSourceProduct(
+            id = FundingSourceProductId.of(id(93)),
+            tenantId = tenantId,
+            parentId = null,
+            accountCategory = FundingSourceCategory.TRANSACTIONAL,
+            nodeType = ProductNodeType.FAMILY,
+            code = FundingSourceProductCode.of("CAPACITY_ACCOUNTS"),
+            name = FundingSourceProductName.of("Capacity accounts"),
+            isLeaf = false,
+            isActive = true,
+            createdAt = now,
+        )
+        descendantRepositories.fundingSourceProducts.insert(tenantId, descendantRoot)
+        val descendantLeaf = requireNotNull(
+            descendantRepositories.fundingSourceProducts.findById(
+                tenantId,
+                descendantScenario.productId,
+            ),
+        )
+        descendantRepositories.fundingSourceProducts.update(
+            tenantId,
+            descendantLeaf.copy(parentId = descendantRoot.id),
+        )
+        val descendantConfiguration = limitConfiguration(
+            configurationIdValue = 96,
+            scope = LimitConfigurationFundingScope.FundingSourceProductSpecific(descendantRoot.id),
+        )
+        descendantRepositories.limitConfigurations.insert(tenantId, descendantConfiguration)
+        val descendantRule = periodicRule(
+            ruleId = LimitRuleId.of(id(97)),
+            ownerId = descendantScenario.profileId,
+            configurationId = descendantConfiguration.id,
+        )
+        descendantRepositories.limitRules.insert(tenantId, descendantRule)
+
+        val descendantResult = inquiryService(descendantRepositories).getOperationCapacity(
+            GetOperationCapacityQuery(
+                tenantId = tenantId.value,
+                actingPartyProfileId = descendantScenario.profileId.value,
+                fundingSourceId = descendantScenario.fundingSourceId.value,
+                operationTypeId = descendantScenario.operationTypeId.value,
+                channelId = descendantScenario.channelId.value,
+                currency = "EUR",
+            ),
+        )
+
+        assertEquals(OperationCapacityStatus.AVAILABLE, descendantResult.status)
+        assertEquals(listOf(descendantRule.id.value), descendantResult.applicableLimits.map { it.limitRuleId })
+
+        val unrelatedRepositories = repositoriesWithTenant()
+        val unrelatedScenario = operationCapacityScenario(unrelatedRepositories)
+        val unrelatedRoot = FundingSourceProduct(
+            id = FundingSourceProductId.of(id(94)),
+            tenantId = tenantId,
+            parentId = null,
+            accountCategory = FundingSourceCategory.TRANSACTIONAL,
+            nodeType = ProductNodeType.FAMILY,
+            code = FundingSourceProductCode.of("OTHER_ACCOUNTS"),
+            name = FundingSourceProductName.of("Other accounts"),
+            isLeaf = false,
+            isActive = true,
+            createdAt = now,
+        )
+        unrelatedRepositories.fundingSourceProducts.insert(tenantId, unrelatedRoot)
+        unrelatedRepositories.fundingSourceProducts.insert(
+            tenantId,
+            FundingSourceProduct(
+                id = FundingSourceProductId.of(id(95)),
+                tenantId = tenantId,
+                parentId = unrelatedRoot.id,
+                accountCategory = FundingSourceCategory.TRANSACTIONAL,
+                nodeType = ProductNodeType.PRODUCT,
+                code = FundingSourceProductCode.of("OTHER_CARD"),
+                name = FundingSourceProductName.of("Other card"),
+                isLeaf = true,
+                isActive = true,
+                createdAt = now,
+            ),
+        )
+        val unrelatedConfiguration = limitConfiguration(
+            configurationIdValue = 98,
+            scope = LimitConfigurationFundingScope.FundingSourceProductSpecific(unrelatedRoot.id),
+        )
+        unrelatedRepositories.limitConfigurations.insert(tenantId, unrelatedConfiguration)
+        unrelatedRepositories.limitRules.insert(
+            tenantId,
+            periodicRule(
+                ruleId = LimitRuleId.of(id(99)),
+                ownerId = unrelatedScenario.profileId,
+                configurationId = unrelatedConfiguration.id,
+            ),
+        )
+
+        val unrelatedResult = inquiryService(unrelatedRepositories).getOperationCapacity(
+            GetOperationCapacityQuery(
+                tenantId = tenantId.value,
+                actingPartyProfileId = unrelatedScenario.profileId.value,
+                fundingSourceId = unrelatedScenario.fundingSourceId.value,
+                operationTypeId = unrelatedScenario.operationTypeId.value,
+                channelId = unrelatedScenario.channelId.value,
+                currency = "EUR",
+            ),
+        )
+
+        assertEquals(OperationCapacityStatus.UNAVAILABLE, unrelatedResult.status)
+        assertEquals("NO_MATCHING_LIMIT_RULE", unrelatedResult.reasons.single().code)
+        assertEquals(emptyList(), unrelatedResult.applicableLimits)
+    }
+
+    @Test
     fun `catalog lookups use stable business keys and include inactive entries`() {
         val repositories = repositoriesWithTenant()
         val channel = Channel(
@@ -591,6 +772,99 @@ class DefaultLimitInquiryServiceTest {
         assertNull(service.findChannelByCode(FindChannelByCodeQuery(tenantId.value, "MOBILE")))
     }
 
+    private data class OperationCapacityScenario(
+        val profileId: PartyProfileId,
+        val productId: FundingSourceProductId,
+        val fundingSourceId: FundingSourceId,
+        val operationTypeId: OperationTypeId,
+        val channelId: ChannelId,
+    )
+
+    private fun operationCapacityScenario(
+        repositories: InMemoryLimitguardRepositories,
+    ): OperationCapacityScenario {
+        val profileId = PartyProfileId.of(id(80))
+        val productId = FundingSourceProductId.of(id(81))
+        val fundingSourceId = FundingSourceId.of(id(82))
+        val channelId = ChannelId.of(id(83))
+        val operationTypeId = OperationTypeId.of(id(84))
+        repositories.partyProfiles.insert(
+            tenantId,
+            PartyProfile(
+                id = profileId,
+                partyId = PartyId.of(id(85)),
+                tenantId = tenantId,
+                createdAt = now,
+            ),
+        )
+        repositories.fundingSourceProducts.insert(
+            tenantId,
+            FundingSourceProduct(
+                id = productId,
+                tenantId = tenantId,
+                parentId = null,
+                accountCategory = FundingSourceCategory.TRANSACTIONAL,
+                nodeType = ProductNodeType.PRODUCT,
+                code = FundingSourceProductCode.of("CAPACITY_CARD"),
+                name = FundingSourceProductName.of("Capacity card"),
+                isLeaf = true,
+                isActive = true,
+                createdAt = now,
+            ),
+        )
+        repositories.fundingSources.insert(
+            tenantId,
+            FundingSource(
+                id = fundingSourceId,
+                tenantId = tenantId,
+                productId = productId,
+                externalReference = ExternalReference.of("CAPACITY-CARD-001"),
+                isActive = true,
+                createdAt = now,
+            ),
+        )
+        repositories.fundingSourceOwners.insert(
+            tenantId,
+            FundingSourceOwner(
+                id = FundingSourceOwnerId.of(id(86)),
+                tenantId = tenantId,
+                partyProfileId = profileId,
+                fundingSourceId = fundingSourceId,
+                createdAt = now,
+            ),
+        )
+        repositories.channels.insert(
+            tenantId,
+            Channel(
+                id = channelId,
+                tenantId = tenantId,
+                code = ChannelCode.of("CAPACITY_MOBILE"),
+                name = ChannelName.of("Capacity mobile"),
+                isActive = true,
+                createdAt = now,
+            ),
+        )
+        repositories.operationTypes.insert(
+            tenantId,
+            OperationType(
+                id = operationTypeId,
+                scope = OperationTypeScope.TenantSpecific(tenantId),
+                parentId = null,
+                code = OperationTypeCode.of("CAPACITY_PAYMENT"),
+                name = OperationTypeName.of("Capacity payment"),
+                isLeaf = true,
+                createdAt = now,
+            ),
+        )
+        return OperationCapacityScenario(
+            profileId = profileId,
+            productId = productId,
+            fundingSourceId = fundingSourceId,
+            operationTypeId = operationTypeId,
+            channelId = channelId,
+        )
+    }
+
     private fun repositoriesWithTenant(): InMemoryLimitguardRepositories =
         InMemoryLimitguardRepositories().also { repositories ->
             repositories.tenants.insert(
@@ -628,7 +902,34 @@ class DefaultLimitInquiryServiceTest {
             transactionRunner = DirectTransactionRunner(),
         )
 
-    private fun periodicRule(ruleId: LimitRuleId, ownerId: PartyProfileId): LimitRule =
+    private fun limitConfiguration(
+        configurationIdValue: Long,
+        scope: LimitConfigurationFundingScope,
+    ): LimitConfiguration = LimitConfiguration(
+        id = LimitConfigurationId.of(id(configurationIdValue)),
+        tenantId = tenantId,
+        parentConfigurationId = null,
+        code = LimitConfigurationCode.of("CONFIG_$configurationIdValue"),
+        name = LimitConfigurationName.of("Configuration $configurationIdValue"),
+        description = null,
+        limitKind = LimitKind.Periodic(LimitPeriod.DAILY),
+        fundingScope = scope,
+        channelScope = LimitChannelScope.AllChannels,
+        operationScope = LimitOperationScope.AllOperations,
+        maxAssignableAmount = eur("1000"),
+        defaultAmount = eur("500"),
+        priority = LimitPriority.of(100),
+        isActive = true,
+        effectiveWindow = EffectiveWindow(now.minus(1, ChronoUnit.DAYS), null),
+        createdAt = now,
+        updatedAt = now,
+    )
+
+    private fun periodicRule(
+        ruleId: LimitRuleId,
+        ownerId: PartyProfileId,
+        configurationId: LimitConfigurationId? = null,
+    ): LimitRule =
         LimitRule(
             id = ruleId,
             tenantId = tenantId,
@@ -638,7 +939,7 @@ class DefaultLimitInquiryServiceTest {
             limitKind = LimitKind.Periodic(LimitPeriod.DAILY),
             amount = eur("500"),
             mandateScope = MandateScope.AllOwnerMandates,
-            configurationId = null,
+            configurationId = configurationId,
             channelScope = LimitChannelScope.AllChannels,
             operationScope = LimitOperationScope.AllOperations,
             usageConsumptionMode = LimitUsageConsumptionMode.CASCADING,

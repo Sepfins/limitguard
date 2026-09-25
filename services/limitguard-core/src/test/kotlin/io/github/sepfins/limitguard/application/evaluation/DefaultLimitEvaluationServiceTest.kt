@@ -7,6 +7,7 @@ import io.github.sepfins.limitguard.api.commands.CaptureTransactionCommand
 import io.github.sepfins.limitguard.api.commands.ExpireDueAuthorizationsCommand
 import io.github.sepfins.limitguard.api.commands.ReleaseAuthorizationCommand
 import io.github.sepfins.limitguard.api.commands.ReverseTransactionCommand
+import io.github.sepfins.limitguard.api.queries.GetOperationCapacityQuery
 import io.github.sepfins.limitguard.api.errors.IdempotencyConflictException
 import io.github.sepfins.limitguard.api.errors.AuthorizationExpiredException
 import io.github.sepfins.limitguard.api.errors.NotFoundException
@@ -14,6 +15,7 @@ import io.github.sepfins.limitguard.api.errors.ValidationException
 import io.github.sepfins.limitguard.api.TransactionStatus as ApiTransactionStatus
 import io.github.sepfins.limitguard.application.transaction.TransactionRecorder
 import io.github.sepfins.limitguard.application.usage.UsageMutationService
+import io.github.sepfins.limitguard.application.inquiry.DefaultLimitInquiryService
 import io.github.sepfins.limitguard.domain.channel.Channel
 import io.github.sepfins.limitguard.domain.channel.ChannelCode
 import io.github.sepfins.limitguard.domain.channel.ChannelGroupMember
@@ -29,6 +31,7 @@ import io.github.sepfins.limitguard.domain.common.FundingSourceOwnerId
 import io.github.sepfins.limitguard.domain.common.FundingSourceProductId
 import io.github.sepfins.limitguard.domain.common.IdempotencyKey
 import io.github.sepfins.limitguard.domain.common.LimitRuleId
+import io.github.sepfins.limitguard.domain.common.LimitConfigurationId
 import io.github.sepfins.limitguard.domain.common.MandateId
 import io.github.sepfins.limitguard.domain.common.Metadata
 import io.github.sepfins.limitguard.domain.common.Money
@@ -50,6 +53,10 @@ import io.github.sepfins.limitguard.domain.funding.FundingSourceProductName
 import io.github.sepfins.limitguard.domain.funding.FundingSourceScope
 import io.github.sepfins.limitguard.domain.funding.ProductNodeType
 import io.github.sepfins.limitguard.domain.limit.LimitChannelScope
+import io.github.sepfins.limitguard.domain.limit.LimitConfiguration
+import io.github.sepfins.limitguard.domain.limit.LimitConfigurationCode
+import io.github.sepfins.limitguard.domain.limit.LimitConfigurationFundingScope
+import io.github.sepfins.limitguard.domain.limit.LimitConfigurationName
 import io.github.sepfins.limitguard.domain.limit.LimitKind
 import io.github.sepfins.limitguard.domain.limit.LimitOperationScope
 import io.github.sepfins.limitguard.domain.limit.LimitPeriod
@@ -131,6 +138,82 @@ class DefaultLimitEvaluationServiceTest {
     }
 
     @Test
+    fun `configured rule matches its funding category and all-funding scope`() {
+        val categoryMatch = authorizeConfiguredRule(
+            LimitConfigurationFundingScope.FundingSourceCategorySpecific(
+                FundingSourceCategory.TRANSACTIONAL,
+            ),
+        )
+        assertEquals(AuthorizationDecision.ALLOWED, categoryMatch.decision)
+
+        val allFundingSources = authorizeConfiguredRule(
+            LimitConfigurationFundingScope.AllFundingSources,
+        )
+        assertEquals(AuthorizationDecision.ALLOWED, allFundingSources.decision)
+
+        val categoryMismatch = authorizeConfiguredRule(
+            LimitConfigurationFundingScope.FundingSourceCategorySpecific(
+                FundingSourceCategory.SAVINGS,
+            ),
+        )
+        assertEquals(AuthorizationDecision.DENIED, categoryMismatch.decision)
+        assertEquals("NO_MATCHING_LIMIT_RULE", categoryMismatch.violations.single().code)
+        assertEquals(emptyList(), categoryMismatch.matchedRules)
+    }
+
+    @Test
+    fun `configured product scope matches exact product descendants but not another branch`() {
+        val exactMatch = fixture(firstOwnerId)
+        val exactProduct = FundingSourceProductId.of(uuid(20))
+        val exactResult = exactMatch.authorizeWithScope(
+            LimitConfigurationFundingScope.FundingSourceProductSpecific(exactProduct),
+        )
+        assertEquals(AuthorizationDecision.ALLOWED, exactResult.decision)
+
+        val descendantMatch = fixture(firstOwnerId)
+        val descendantRoot = descendantMatch.addProduct(id = 21, isLeaf = false)
+        descendantMatch.setLeafParent(descendantRoot.id)
+        val descendantResult = descendantMatch.authorizeWithScope(
+            LimitConfigurationFundingScope.FundingSourceProductSpecific(descendantRoot.id),
+        )
+        assertEquals(AuthorizationDecision.ALLOWED, descendantResult.decision)
+
+        val unrelatedBranch = fixture(firstOwnerId)
+        val unrelatedRoot = unrelatedBranch.addProduct(id = 22, isLeaf = false)
+        unrelatedBranch.addProduct(id = 23, parentId = unrelatedRoot.id)
+        val unrelatedResult = unrelatedBranch.authorizeWithScope(
+            LimitConfigurationFundingScope.FundingSourceProductSpecific(unrelatedRoot.id),
+        )
+        assertEquals(AuthorizationDecision.DENIED, unrelatedResult.decision)
+        assertEquals("NO_MATCHING_LIMIT_RULE", unrelatedResult.violations.single().code)
+    }
+
+    @Test
+    fun `missing configuration is a reference error regardless of no-rule behavior`() {
+        for (behavior in NoMatchingRuleBehavior.entries) {
+            val fixture = fixture(actorId, noMatchingRuleBehavior = behavior)
+            fixture.addRule(
+                id = 200,
+                ownerId = actorId,
+                mandateScope = MandateScope.AllOwnerMandates,
+                amount = "100.00",
+                configurationId = LimitConfigurationId.of(uuid(999)),
+            )
+
+            assertFailsWith<NotFoundException>(behavior.name) {
+                fixture.service.authorizeTransaction(command(amount = "250.00"))
+            }
+            assertFailsWith<NotFoundException>(behavior.name) {
+                inquiryService(fixture.repositories).getOperationCapacity(operationCapacityQuery())
+            }
+            assertEquals(
+                emptyList(),
+                fixture.repositories.transactions.findByFundingSourceId(tenantId, fundingSourceId),
+            )
+        }
+    }
+
+    @Test
     fun `over-limit transaction persists its decision but no payment transaction`() {
         val fixture = fixture(firstOwnerId)
         val mandate = fixture.addMandate(
@@ -178,7 +261,14 @@ class DefaultLimitEvaluationServiceTest {
             amount = "100.00",
         )
 
-        val first = fixture.service.authorizeTransaction(command(amount = "75.00", idempotencyKey = "auth-1"))
+        val metadata = mapOf(
+            "merchantCategory" to "GROCERY",
+            "attempt" to 1L,
+            "nested" to mapOf("amounts" to listOf(1L, BigDecimal("0.12345678901234567890"))),
+        )
+        val first = fixture.service.authorizeTransaction(
+            command(amount = "75.00", idempotencyKey = "auth-1", metadata = metadata),
+        )
         val persistedTransaction = assertNotNull(
             fixture.repositories.transactions.findById(
                 tenantId,
@@ -191,7 +281,9 @@ class DefaultLimitEvaluationServiceTest {
                 metadata = Metadata(mapOf("changedAfterAuthorization" to true)),
             ),
         )
-        val replay = fixture.service.authorizeTransaction(command(amount = "75.00", idempotencyKey = "auth-1"))
+        val replay = fixture.service.authorizeTransaction(
+            command(amount = "75.00", idempotencyKey = "auth-1", metadata = metadata),
+        )
 
         assertEquals(first, replay)
         assertEquals(1, fixture.repositories.transactions.findByFundingSourceId(tenantId, fundingSourceId).size)
@@ -222,8 +314,11 @@ class DefaultLimitEvaluationServiceTest {
         }
         assertFailsWith<IdempotencyConflictException> {
             fixture.service.authorizeTransaction(
-                command(amount = "75.00", idempotencyKey = "auth-1")
-                    .copy(metadata = mapOf("merchantCategory" to "TRAVEL")),
+                command(
+                    amount = "75.00",
+                    idempotencyKey = "auth-1",
+                    metadata = metadata + ("nested" to mapOf("amounts" to listOf(1L, BigDecimal("0.123")))),
+                ),
             )
         }
     }
@@ -372,14 +467,22 @@ class DefaultLimitEvaluationServiceTest {
             releaseCommand(
                 paymentTransactionId = transactionId,
                 idempotencyKey = "release-1",
-                metadata = mapOf("processorReference" to "release-001"),
+                metadata = mapOf(
+                    "processorReference" to "release-001",
+                    "attempt" to 1L,
+                    "nested" to mapOf("amounts" to listOf(1L, BigDecimal("0.12345678901234567890"))),
+                ),
             ),
         )
         val replay = fixture.service.releaseAuthorization(
             releaseCommand(
                 paymentTransactionId = transactionId,
                 idempotencyKey = "release-1",
-                metadata = mapOf("processorReference" to "release-001"),
+                metadata = mapOf(
+                    "processorReference" to "release-001",
+                    "attempt" to 1L,
+                    "nested" to mapOf("amounts" to listOf(1L, BigDecimal("0.12345678901234567890"))),
+                ),
             ),
         )
 
@@ -388,6 +491,19 @@ class DefaultLimitEvaluationServiceTest {
         assertEquals(BigDecimal("40.0000"), first.amount)
         assertEquals(ApiLimitUsageEventType.RELEASE, first.usageEvents.single().eventType)
         assertEquals(BigDecimal("-40.0000"), first.usageEvents.single().amountDelta)
+        assertFailsWith<IdempotencyConflictException> {
+            fixture.service.releaseAuthorization(
+                releaseCommand(
+                    paymentTransactionId = transactionId,
+                    idempotencyKey = "release-1",
+                    metadata = mapOf(
+                        "processorReference" to "release-001",
+                        "attempt" to 2L,
+                        "nested" to mapOf("amounts" to listOf(1L, BigDecimal("0.12345678901234567890"))),
+                    ),
+                ),
+            )
+        }
 
         val transaction = assertNotNull(
             fixture.repositories.transactions.findById(tenantId, PaymentTransactionId.of(transactionId)),
@@ -670,12 +786,13 @@ class DefaultLimitEvaluationServiceTest {
             ownerId = firstOwnerId,
             mandateScope = MandateScope.AllOwnerMandates,
             amount = "100.00",
+            limitKind = LimitKind.Periodic(LimitPeriod.DAILY),
         )
         val authorization = fixture.service.authorizeTransaction(command(amount = "75.00"))
         val transactionId = requireNotNull(authorization.paymentTransactionId)
         val capture = captureCommand(
             paymentTransactionId = transactionId,
-            amount = "25.00",
+            amount = "1.00001",
             reason = "first presentment",
             idempotencyKey = "capture-1",
             metadata = mapOf("processorReference" to "capture-002"),
@@ -686,7 +803,7 @@ class DefaultLimitEvaluationServiceTest {
 
         assertEquals(first, replay)
         assertEquals(ApiTransactionStatus.PARTIALLY_CAPTURED, first.status)
-        assertEquals(BigDecimal("25.0000"), first.amount)
+        assertEquals(BigDecimal("1.0000"), first.amount)
         assertEquals(mapOf("processorReference" to "capture-002"), replay.metadata)
 
         val transaction = assertNotNull(
@@ -695,12 +812,13 @@ class DefaultLimitEvaluationServiceTest {
                 PaymentTransactionId.of(transactionId),
             ),
         )
-        assertEquals(Money.positive("25.00", CurrencyCode.of("EUR")), transaction.capturedAmount)
+        assertEquals(Money.positive("1.0000", CurrencyCode.of("EUR")), transaction.capturedAmount)
         val events = fixture.repositories.transactionEvents.findByTransaction(tenantId, transaction.id)
         assertEquals(2, events.size)
         val captureEvent = events.single { it.eventType == TransactionEventType.PARTIAL_CAPTURE }
         assertEquals(IdempotencyKey.of("capture-1"), captureEvent.idempotencyKey)
-        assertEquals(Money.positive("25.00", CurrencyCode.of("EUR")), captureEvent.requestedAmount)
+        assertEquals(Money.positive("1.0000", CurrencyCode.of("EUR")), captureEvent.requestedAmount)
+        assertEquals(1, fixture.repositories.usageEvents.findByTransactionEvent(tenantId, captureEvent.id).size)
         assertEquals(
             first.transactionEventId.toString(),
             captureEvent.resultSnapshot?.value?.get("transactionEventId"),
@@ -823,17 +941,68 @@ class DefaultLimitEvaluationServiceTest {
     @Test
     fun `inactive mandate does not authorize an otherwise matching source`() {
         val fixture = fixture(firstOwnerId)
-        fixture.addMandate(
+        val mandate = fixture.addMandate(
             id = 100,
             ownerId = firstOwnerId,
             scope = FundingSourceScope.AllOwnerSources,
             isActive = false,
+            startsAt = now.minusSeconds(60),
+            endsAt = now.plusSeconds(60),
+        )
+        fixture.addRule(
+            id = 200,
+            ownerId = firstOwnerId,
+            mandateScope = MandateScope.MandateSpecific(mandate.id),
+            amount = "100.00",
         )
 
-        val result = fixture.service.authorizeTransaction(command(amount = "10.00"))
+        val result = fixture.service.authorizeTransaction(
+            command(amount = "10.00", idempotencyKey = "inactive-mandate"),
+        )
 
         assertEquals(AuthorizationDecision.DENIED, result.decision)
         assertEquals("ACTOR_NOT_AUTHORIZED", result.violations.single().code)
+    }
+
+    @Test
+    fun `future mandate becomes usable at its start and stops at its exclusive end`() {
+        val fixture = fixture(firstOwnerId)
+        val startsAt = now.plusSeconds(60)
+        val endsAt = now.plusSeconds(120)
+        val mandate = fixture.addMandate(
+            id = 100,
+            ownerId = firstOwnerId,
+            scope = FundingSourceScope.AllOwnerSources,
+            startsAt = startsAt,
+            endsAt = endsAt,
+        )
+        val rule = fixture.addRule(
+            id = 200,
+            ownerId = firstOwnerId,
+            mandateScope = MandateScope.MandateSpecific(mandate.id),
+            amount = "100.00",
+        )
+
+        val beforeStart = fixture.service.authorizeTransaction(
+            command(amount = "10.00", idempotencyKey = "future-mandate-before-start"),
+        )
+        assertEquals(AuthorizationDecision.DENIED, beforeStart.decision)
+        assertEquals("ACTOR_NOT_AUTHORIZED", beforeStart.violations.single().code)
+
+        fixture.clock.setTo(startsAt)
+        val atStart = fixture.service.authorizeTransaction(
+            command(amount = "10.00", idempotencyKey = "future-mandate-at-start"),
+        )
+        assertEquals(AuthorizationDecision.ALLOWED, atStart.decision)
+        assertEquals(listOf(rule.id.value), atStart.matchedRules.map { it.id })
+
+        fixture.clock.setTo(endsAt)
+        val atEnd = fixture.service.authorizeTransaction(
+            command(amount = "10.00", idempotencyKey = "future-mandate-at-end"),
+        )
+        assertEquals(AuthorizationDecision.DENIED, atEnd.decision)
+        assertEquals("ACTOR_NOT_AUTHORIZED", atEnd.violations.single().code)
+        assertEquals(true, fixture.repositories.mandates.findById(tenantId, mandate.id)?.isActive)
     }
 
     @Test
@@ -1273,6 +1442,7 @@ class DefaultLimitEvaluationServiceTest {
         idempotencyKey: String? = null,
         currency: String = "EUR",
         expiresAt: Instant? = null,
+        metadata: Map<String, Any?> = mapOf("merchantCategory" to "GROCERY"),
     ): AuthorizeTransactionCommand =
         AuthorizeTransactionCommand(
             tenantId = tenantId.value,
@@ -1284,8 +1454,65 @@ class DefaultLimitEvaluationServiceTest {
             currency = currency,
             idempotencyKey = idempotencyKey,
             expiresAt = expiresAt,
-            metadata = mapOf("merchantCategory" to "GROCERY"),
+            metadata = metadata,
         )
+
+    private fun authorizeConfiguredRule(
+        scope: LimitConfigurationFundingScope,
+    ) = fixture(firstOwnerId).authorizeWithScope(scope)
+
+    private fun operationCapacityQuery() = GetOperationCapacityQuery(
+        tenantId = tenantId.value,
+        actingPartyProfileId = actorId.value,
+        fundingSourceId = fundingSourceId.value,
+        operationTypeId = operationTypeId.value,
+        channelId = channelId.value,
+        currency = "EUR",
+    )
+
+    private fun inquiryService(repositories: InMemoryLimitguardRepositories) =
+        DefaultLimitInquiryService(
+            tenantRepository = repositories.tenants,
+            channelRepository = repositories.channels,
+            channelGroupMemberRepository = repositories.channelGroupMembers,
+            operationTypeRepository = repositories.operationTypes,
+            fundingSourceProductRepository = repositories.fundingSourceProducts,
+            fundingSourceRepository = repositories.fundingSources,
+            fundingSourceOwnerRepository = repositories.fundingSourceOwners,
+            fundingSourceGroupMemberRepository = repositories.fundingSourceGroupMembers,
+            mandateRepository = repositories.mandates,
+            limitConfigurationRepository = repositories.limitConfigurations,
+            partyProfileRepository = repositories.partyProfiles,
+            limitChangeRequestRepository = repositories.limitChangeRequests,
+            limitChangeEventRepository = repositories.limitRuleChangeEvents,
+            limitRuleRevisionRepository = repositories.limitRuleRevisions,
+            limitRuleRepository = repositories.limitRules,
+            transactionRepository = repositories.transactions,
+            transactionEventRepository = repositories.transactionEvents,
+            authorizationDecisionRepository = repositories.authorizationDecisions,
+            usageBucketRepository = repositories.usageBuckets,
+            clockProvider = FixedClockProvider(now),
+            transactionRunner = DirectTransactionRunner(),
+        )
+
+    private fun AuthorizationFixture.authorizeWithScope(
+        scope: LimitConfigurationFundingScope,
+    ) = run {
+        val mandate = addMandate(
+            id = 100,
+            ownerId = firstOwnerId,
+            scope = FundingSourceScope.AllOwnerSources,
+        )
+        val configuration = addConfiguration(id = 300, scope = scope)
+        addRule(
+            id = 200,
+            ownerId = firstOwnerId,
+            mandateScope = MandateScope.MandateSpecific(mandate.id),
+            amount = "100.00",
+            configurationId = configuration.id,
+        )
+        service.authorizeTransaction(command(amount = "75.00"))
+    }
 
     private fun captureCommand(
         paymentTransactionId: UUID,
@@ -1457,6 +1684,7 @@ class DefaultLimitEvaluationServiceTest {
                 limitRuleMatcher = LimitRuleMatcher(
                     limitRuleRepository = repositories.limitRules,
                     channelGroupMemberRepository = repositories.channelGroupMembers,
+                    limitConfigurationRepository = repositories.limitConfigurations,
                 ),
                 authorizationEvaluator = AuthorizationEvaluator(
                     UsageReservationService(
@@ -1486,6 +1714,8 @@ class DefaultLimitEvaluationServiceTest {
             ownerId: PartyProfileId,
             scope: FundingSourceScope,
             isActive: Boolean = true,
+            startsAt: Instant = now.minusSeconds(60),
+            endsAt: Instant? = null,
         ): Mandate =
             Mandate(
                 id = MandateId.of(uuid(id)),
@@ -1498,11 +1728,59 @@ class DefaultLimitEvaluationServiceTest {
                 fundingScope = scope,
                 isActive = isActive,
                 version = Version.INITIAL,
-                effectiveWindow = EffectiveWindow(now.minusSeconds(60), null),
+                effectiveWindow = EffectiveWindow(startsAt, endsAt),
                 metadata = Metadata.EMPTY,
                 createdAt = now,
                 updatedAt = now,
             ).also { repositories.mandates.insert(tenantId, it) }
+
+        fun addConfiguration(
+            id: Long,
+            scope: LimitConfigurationFundingScope,
+        ): LimitConfiguration = LimitConfiguration(
+            id = LimitConfigurationId.of(uuid(id)),
+            tenantId = tenantId,
+            parentConfigurationId = null,
+            code = LimitConfigurationCode.of("CONFIG_$id"),
+            name = LimitConfigurationName.of("Configuration $id"),
+            description = null,
+            limitKind = LimitKind.PerTransaction,
+            fundingScope = scope,
+            channelScope = LimitChannelScope.AllChannels,
+            operationScope = LimitOperationScope.OperationTypeSpecific(operationTypeId),
+            maxAssignableAmount = Money.positive("1000.00", CurrencyCode.of("EUR")),
+            defaultAmount = Money.positive("100.00", CurrencyCode.of("EUR")),
+            priority = LimitPriority.of(100),
+            isActive = true,
+            effectiveWindow = EffectiveWindow(now.minusSeconds(60), null),
+            metadata = Metadata.EMPTY,
+            createdAt = now,
+            updatedAt = now,
+        ).also { repositories.limitConfigurations.insert(tenantId, it) }
+
+        fun addProduct(
+            id: Long,
+            parentId: FundingSourceProductId? = null,
+            isLeaf: Boolean = true,
+        ): FundingSourceProduct = FundingSourceProduct(
+            id = FundingSourceProductId.of(uuid(id)),
+            tenantId = tenantId,
+            parentId = parentId,
+            accountCategory = FundingSourceCategory.TRANSACTIONAL,
+            nodeType = if (isLeaf) ProductNodeType.PRODUCT else ProductNodeType.FAMILY,
+            code = FundingSourceProductCode.of("PRODUCT_$id"),
+            name = FundingSourceProductName.of("Product $id"),
+            isLeaf = isLeaf,
+            isActive = true,
+            createdAt = now,
+        ).also { repositories.fundingSourceProducts.insert(tenantId, it) }
+
+        fun setLeafParent(parentId: FundingSourceProductId) {
+            val leaf = requireNotNull(
+                repositories.fundingSourceProducts.findById(tenantId, FundingSourceProductId.of(uuid(20))),
+            )
+            repositories.fundingSourceProducts.update(tenantId, leaf.copy(parentId = parentId))
+        }
 
         fun addRule(
             id: Long,
@@ -1513,6 +1791,7 @@ class DefaultLimitEvaluationServiceTest {
             channelScope: LimitChannelScope = LimitChannelScope.AllChannels,
             limitKind: LimitKind = LimitKind.PerTransaction,
             usageConsumptionMode: LimitUsageConsumptionMode = LimitUsageConsumptionMode.CASCADING,
+            configurationId: LimitConfigurationId? = null,
         ): LimitRule =
             LimitRule(
                 id = LimitRuleId.of(uuid(id)),
@@ -1523,7 +1802,7 @@ class DefaultLimitEvaluationServiceTest {
                 limitKind = limitKind,
                 amount = Money.positive(amount, CurrencyCode.of("EUR")),
                 mandateScope = mandateScope,
-                configurationId = null,
+                configurationId = configurationId,
                 channelScope = channelScope,
                 operationScope = LimitOperationScope.OperationTypeSpecific(operationTypeId),
                 usageConsumptionMode = usageConsumptionMode,

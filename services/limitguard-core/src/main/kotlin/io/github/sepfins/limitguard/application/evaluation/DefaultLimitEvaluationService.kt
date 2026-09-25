@@ -19,10 +19,11 @@ import io.github.sepfins.limitguard.application.transaction.TransactionRecorder
 import io.github.sepfins.limitguard.application.usage.UsageMutationService
 import io.github.sepfins.limitguard.domain.common.IdempotencyKey
 import io.github.sepfins.limitguard.domain.common.Metadata
+import io.github.sepfins.limitguard.domain.common.Money
 import io.github.sepfins.limitguard.domain.transaction.PaymentTransaction
 import io.github.sepfins.limitguard.domain.transaction.TransactionEvent
 import io.github.sepfins.limitguard.domain.transaction.TransactionEventReason
-import io.github.sepfins.limitguard.internal.hashing.CanonicalJson
+import io.github.sepfins.limitguard.internal.json.JsonValueEquality
 import io.github.sepfins.limitguard.port.persistence.FundingSourceOwnerRepository
 import io.github.sepfins.limitguard.port.persistence.TransactionEventRepository
 import io.github.sepfins.limitguard.port.persistence.TransactionRepository
@@ -105,6 +106,7 @@ internal class DefaultLimitEvaluationService(
             val matchingRules = limitRuleMatcher.findMatches(
                 transaction = requestedTransaction,
                 authorities = authorities,
+                references = references,
                 at = now,
             )
             val evaluation = authorizationEvaluator.evaluate(
@@ -283,14 +285,17 @@ internal class DefaultLimitEvaluationService(
         when {
             event.requestedAmount == null -> command.amount == null
             command.amount == null -> false
-            else -> event.requestedAmount.amount.compareTo(command.amount) == 0
+            else -> runCatching {
+                event.requestedAmount.amount.compareTo(
+                    Money.positive(command.amount, event.requestedAmount.currency).amount,
+                ) == 0
+            }.getOrDefault(false)
         }
 
     private fun sameMetadata(
         persisted: Map<String, Any?>,
         requested: Map<String, Any?>,
-    ): Boolean =
-        CanonicalJson.encodeObject(persisted) == CanonicalJson.encodeObject(requested)
+    ): Boolean = JsonValueEquality.objectsEqual(persisted, requested)
 
     private fun validatedTransaction(
         command: AuthorizeTransactionCommand,

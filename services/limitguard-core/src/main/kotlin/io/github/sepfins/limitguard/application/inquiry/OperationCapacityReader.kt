@@ -86,6 +86,7 @@ internal class OperationCapacityReader(
         val matchingRules = limitRuleMatcher.findMatches(
             context = context,
             authorities = authorities,
+            references = references,
             at = at,
         )
         if (matchingRules.isEmpty()) {

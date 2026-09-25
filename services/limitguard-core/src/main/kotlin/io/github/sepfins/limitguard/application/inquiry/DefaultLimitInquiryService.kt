@@ -141,6 +141,7 @@ class DefaultLimitInquiryService(
         limitRuleMatcher = LimitRuleMatcher(
             limitRuleRepository = limitRuleRepository,
             channelGroupMemberRepository = channelGroupMemberRepository,
+            limitConfigurationRepository = limitConfigurationRepository,
         ),
         usageBucketRepository = usageBucketRepository,
         usageWindowCalculator = usageWindowCalculator,
