@@ -60,6 +60,14 @@ class JooqUsageBucketRepository(
         return findById(tenantId, id, forUpdate = true)
     }
 
+    override fun findByIds(tenantId: TenantId, ids: Set<UsageBucketId>): List<LimitUsageBucket> =
+        jooqOperation("find usage buckets by ids") {
+            selectBuckets()
+                .where(table.TENANT_ID.eq(tenantId.value))
+                .and(table.ID.`in`(ids.map { it.value }))
+                .fetch { it.toDomain() }
+        }
+
     override fun findForUpdate(
         tenantId: TenantId,
         limitRuleId: LimitRuleId,

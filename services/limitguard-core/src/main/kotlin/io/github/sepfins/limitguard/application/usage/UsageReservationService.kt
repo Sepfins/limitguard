@@ -4,6 +4,7 @@ import io.github.sepfins.limitguard.domain.common.Money
 import io.github.sepfins.limitguard.domain.common.TransactionEventId
 import io.github.sepfins.limitguard.domain.common.UsageBucketId
 import io.github.sepfins.limitguard.domain.common.UsageEventId
+import io.github.sepfins.limitguard.domain.common.UsageWindow
 import io.github.sepfins.limitguard.domain.limit.LimitKind
 import io.github.sepfins.limitguard.domain.limit.LimitRule
 import io.github.sepfins.limitguard.domain.limit.LimitViolation
@@ -32,24 +33,45 @@ internal class UsageReservationService(
             "Usage reservations can only be planned for periodic rules"
         }
 
-        val candidates = periodicRules.map { rule ->
+        val requests = periodicRules.map { rule ->
             val period = (rule.limitKind as LimitKind.Periodic).period
             val window = usageWindowCalculator.calculateWindow(now, period)
-
-            val existingBucket = usageBucketRepository.findForUpdate(
-                tenantId = transaction.tenantId,
-                limitRuleId = rule.id,
-                assigneePartyProfileId = transaction.actingPartyProfileId,
-                currency = transaction.authorizedAmount.currency,
+            ReservationBucketRequest(
+                rule = rule,
                 window = window,
+                lockKey = UsageBucketLockKey.forWindow(
+                    tenantId = transaction.tenantId,
+                    limitRuleId = rule.id,
+                    assigneePartyProfileId = transaction.actingPartyProfileId,
+                    currency = transaction.authorizedAmount.currency,
+                    window = window,
+                ),
             )
+        }
+
+        // Evaluation order remains the caller's priority/cascade order. Only
+        // the physical bucket acquisition order is normalized here.
+        val existingBuckets = requests
+            .sortedBy { it.lockKey }
+            .associateWith { request ->
+                usageBucketRepository.findForUpdate(
+                    tenantId = transaction.tenantId,
+                    limitRuleId = request.rule.id,
+                    assigneePartyProfileId = transaction.actingPartyProfileId,
+                    currency = transaction.authorizedAmount.currency,
+                    window = request.window,
+                )
+            }
+
+        val candidates = requests.map { request ->
+            val existingBucket = existingBuckets.getValue(request)
 
             val candidateBucket = existingBucket ?: LimitUsageBucket(
                 id = UsageBucketId.of(idGenerator.newId()),
                 tenantId = transaction.tenantId,
-                limitRuleId = rule.id,
+                limitRuleId = request.rule.id,
                 assigneePartyProfileId = transaction.actingPartyProfileId,
-                window = window,
+                window = request.window,
                 reservedAmount = Money.zero(transaction.authorizedAmount.currency),
                 consumedAmount = Money.zero(transaction.authorizedAmount.currency),
                 createdAt = now,
@@ -57,7 +79,7 @@ internal class UsageReservationService(
             )
 
             UsageReservationCandidate(
-                rule = rule,
+                rule = request.rule,
                 existingBucket = existingBucket,
                 candidateBucket = candidateBucket,
             )
@@ -129,6 +151,12 @@ internal class UsageReservationService(
             events = usageEvents,
         )
     }
+
+    private data class ReservationBucketRequest(
+        val rule: LimitRule,
+        val window: UsageWindow,
+        val lockKey: UsageBucketLockKey,
+    )
 
     private fun UsageReservationCandidate.toViolation(
         attemptedAmount: Money,

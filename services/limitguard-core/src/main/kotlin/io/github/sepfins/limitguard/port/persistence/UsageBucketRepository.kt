@@ -25,6 +25,8 @@ interface UsageBucketRepository {
 
     fun findById(tenantId: TenantId, id: UsageBucketId): LimitUsageBucket?
 
+    fun findByIds(tenantId: TenantId, ids: Set<UsageBucketId>): List<LimitUsageBucket>
+
     fun findByIdForUpdate(tenantId: TenantId, id: UsageBucketId): LimitUsageBucket?
 
     /**

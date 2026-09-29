@@ -47,24 +47,50 @@ class UsageMutationService(
             return UsageMutation()
         }
 
+        val reservedBucketIds = reservedEvents.map { reservedEvent ->
+            reservedEvent to checkNotNull(reservedEvent.usageBucketId) {
+                "Reserve usage event ${reservedEvent.id.value} has no bucket"
+            }
+        }
+        val bucketsById = usageBucketRepository
+            .findByIds(transaction.tenantId, reservedBucketIds.mapTo(hashSetOf()) { it.second })
+            .associateBy { it.id }
+        val discoveredBuckets = reservedBucketIds.map { (reservedEvent, bucketId) ->
+            val bucket = bucketsById[bucketId] ?: error("Usage bucket ${bucketId.value} not found")
+            DiscoveredUsageBucket(
+                reservedEvent = reservedEvent,
+                bucket = bucket,
+                lockKey = UsageBucketLockKey.forBucket(bucket),
+            )
+        }
+
+        // Discover rows without locking first, then lock every logical key in
+        // the same order authorization reservations use. Events and results
+        // below stay in bucket UUID order.
+        val lockedBuckets = discoveredBuckets
+            .map { it.lockKey }
+            .distinct()
+            .sorted()
+            .associateWith { lockKey ->
+                val discovered = discoveredBuckets.first { it.lockKey == lockKey }
+                usageBucketRepository.findForUpdate(
+                    tenantId = transaction.tenantId,
+                    limitRuleId = lockKey.limitRuleId,
+                    assigneePartyProfileId = lockKey.assigneePartyProfileId,
+                    currency = lockKey.currency,
+                    window = discovered.bucket.window,
+                ) ?: error(
+                    "Usage bucket ${discovered.bucket.id.value} not found for logical lock key $lockKey"
+                )
+            }
+            .toMutableMap()
+
         val updatedBuckets = mutableListOf<LimitUsageBucket>()
         val usageEvents = mutableListOf<LimitUsageEvent>()
 
-        for (
-            reservedEvent in reservedEvents.sortedBy {
-                checkNotNull(it.usageBucketId) {
-                    "Reserve usage event ${it.id.value} has no bucket"
-                }.value
-            }
-        ) {
-            val bucketId = checkNotNull(reservedEvent.usageBucketId) {
-                "Reserve usage event ${reservedEvent.id.value} has no bucket"
-            }
-
-            val bucket = usageBucketRepository.findByIdForUpdate(
-                transaction.tenantId,
-                bucketId
-            ) ?: error("Usage bucket ${bucketId.value} not found")
+        for (discovered in discoveredBuckets.sortedBy { it.bucket.id.value }) {
+            val reservedEvent = discovered.reservedEvent
+            val bucket = lockedBuckets.getValue(discovered.lockKey)
 
             val bucketMutation = bucket.applyMutation(
                 mutationKind = mutationKind,
@@ -76,6 +102,8 @@ class UsageMutationService(
                 transaction.tenantId,
                 bucketMutation.bucket,
             )
+
+            lockedBuckets[discovered.lockKey] = persistedBucket
 
             val mutateEvent = usageEventRepository.insert(
                 tenantId = transaction.tenantId,
@@ -102,6 +130,12 @@ class UsageMutationService(
             events = usageEvents,
         )
     }
+
+    private data class DiscoveredUsageBucket(
+        val reservedEvent: LimitUsageEvent,
+        val bucket: LimitUsageBucket,
+        val lockKey: UsageBucketLockKey,
+    )
 
     private fun LimitUsageBucket.applyMutation(
         mutationKind: TransactionMutationKind,
