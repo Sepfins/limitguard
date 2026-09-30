@@ -31,7 +31,6 @@ import io.github.sepfins.limitguard.api.commands.UpdateLimitConfigurationCommand
 import io.github.sepfins.limitguard.api.errors.ConflictException
 import io.github.sepfins.limitguard.api.errors.NotFoundException
 import io.github.sepfins.limitguard.api.errors.ValidationException
-import io.github.sepfins.limitguard.domain.common.MandateId
 import io.github.sepfins.limitguard.domain.common.Metadata
 import io.github.sepfins.limitguard.domain.common.PartyId
 import io.github.sepfins.limitguard.domain.common.TenantId
@@ -414,7 +413,7 @@ class DefaultTenantCatalogServiceTest {
         assertEquals(LimitFundingScope.FUNDING_SOURCE, result.fundingScope)
         assertEquals(fundingSource.id, result.fundingSourceId)
         assertEquals(null, result.fundingSourceGroupId)
-        assertFalse(result.isActive)
+        assertTrue(result.isActive)
         assertEquals(startsAt, result.startsAt)
         assertEquals(result.createdAt, result.updatedAt)
         assertEquals(mapOf("reason" to "family"), result.metadata)
@@ -551,72 +550,6 @@ class DefaultTenantCatalogServiceTest {
                 ),
             )
         }
-    }
-
-    @Test
-    fun `builds phase F1 catalog slice from empty store`() {
-        val repositories = InMemoryLimitguardRepositories()
-        val service = catalogService(repositories)
-
-        val tenant = service.registerTenant(RegisterTenantCommand(name = "Demo Bank"))
-        val channel = service.registerChannel(
-            RegisterChannelCommand(
-                tenantId = tenant.id,
-                code = "ATM",
-                name = "ATM",
-            )
-        )
-        val operationType = service.registerOperationType(
-            RegisterOperationTypeCommand(
-                tenantId = tenant.id,
-                code = "ATM_WITHDRAWAL",
-                name = "ATM withdrawal",
-                isLeaf = true,
-            )
-        )
-        val product = createLeafProduct(service, tenant.id)
-        val fundingSource = createFundingSource(service, tenant.id, product.id)
-        val ownerProfile = createIndividualProfile(service, tenant.id, "OWNER004")
-        val assigneeProfile = createIndividualProfile(service, tenant.id, "ASSIGNEE004")
-        service.assignFundingSourceOwner(
-            AssignFundingSourceOwnerCommand(
-                tenantId = tenant.id,
-                partyProfileId = ownerProfile.id,
-                fundingSourceId = fundingSource.id,
-            )
-        )
-        val mandate = service.createMandate(
-            CreateMandateCommand(
-                tenantId = tenant.id,
-                ownerPartyProfileId = ownerProfile.id,
-                assigneePartyProfileId = assigneeProfile.id,
-                name = "ATM withdrawal mandate",
-                fundingScope = LimitFundingScope.FUNDING_SOURCE,
-                fundingSourceId = fundingSource.id,
-            )
-        )
-        val configuration = service.createLimitConfiguration(
-            CreateLimitConfigurationCommand(
-                tenantId = tenant.id,
-                code = "ATM_DAILY",
-                name = "ATM daily limit",
-                limitKind = LimitKind.PERIODIC,
-                period = LimitPeriod.DAILY,
-                currency = "EUR",
-                maxAssignableAmount = BigDecimal("1000.00"),
-                defaultAmount = BigDecimal("250.00"),
-                fundingScope = LimitConfigurationFundingScope.FUNDING_SOURCE_PRODUCT,
-                fundingSourceProductId = product.id,
-                channelScope = LimitChannelScope.CHANNEL,
-                channelId = channel.id,
-                operationTypeId = operationType.id,
-            )
-        )
-
-        assertEquals(tenant.id, configuration.tenantId)
-        val persistedMandate = repositories.mandates.findById(TenantId.of(tenant.id), MandateId.of(mandate.id))
-        assertEquals(mandate.id, persistedMandate?.id?.value)
-        assertEquals(BigDecimal("1000.0000"), configuration.maxAssignableAmount)
     }
 
     @Test

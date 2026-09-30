@@ -1195,18 +1195,14 @@ class InMemoryLimitChangePolicyEvaluationRepository : LimitChangePolicyEvaluatio
 class InMemoryLimitRuleRepository : LimitRuleRepository {
     private val lock = Any()
     private val limitRules = ConcurrentHashMap<TenantScopedKey<LimitRuleId>, LimitRule>()
-    val lockedRuleIds = mutableListOf<Pair<TenantId, LimitRuleId>>()
-    val conditionalUpdates = mutableListOf<Triple<TenantId, LimitRuleId, Version>>()
 
     override fun findById(tenantId: TenantId, id: LimitRuleId): LimitRule? =
         limitRules[TenantScopedKey(tenantId, id)]
 
-    override fun findByIdForUpdate(tenantId: TenantId, id: LimitRuleId): LimitRule? {
-        synchronized(lock) {
-            lockedRuleIds += tenantId to id
-        }
-        return findById(tenantId, id)
-    }
+    override fun findByIdForUpdate(tenantId: TenantId, id: LimitRuleId): LimitRule? = findById(tenantId, id)
+
+    override fun findByOwner(tenantId: TenantId, owner: PartyProfileId): List<LimitRule> =
+        limitRules.tenantValues(tenantId).filter { it.ownerPartyProfileId == owner }
 
     override fun findActiveForOwner(tenantId: TenantId, owner: PartyProfileId, at: Instant): List<LimitRule> =
         limitRules.tenantValues(tenantId).filter { it.ownerPartyProfileId == owner && it.isEffectiveAt(at) }
@@ -1225,7 +1221,6 @@ class InMemoryLimitRuleRepository : LimitRuleRepository {
         expectedVersion: Version,
     ): LimitRule? = synchronized(lock) {
         requireSameTenant(tenantId, limitRule.tenantId)
-        conditionalUpdates += Triple(tenantId, limitRule.id, expectedVersion)
         val currentRule = findById(tenantId, limitRule.id) ?: return@synchronized null
         if (currentRule.version != expectedVersion) return@synchronized null
         requireLimitRuleNameUnique(tenantId, limitRule)
@@ -1255,9 +1250,6 @@ class InMemoryLimitRuleRepository : LimitRuleRepository {
 class InMemoryLimitChangeRequestRepository : LimitChangeRequestRepository {
     private val lock = Any()
     private val requests = ConcurrentHashMap<TenantScopedKey<LimitChangeRequestId>, LimitRuleChangeRequest>()
-    val lockedRequestIds = mutableListOf<Pair<TenantId, LimitChangeRequestId>>()
-    val lockedTargetHashes = mutableListOf<Pair<TenantId, ScopeHash>>()
-    val dueClaims = mutableListOf<Triple<TenantId, Instant, Int>>()
 
     override fun findById(tenantId: TenantId, id: LimitChangeRequestId): LimitRuleChangeRequest? =
         requests[TenantScopedKey(tenantId, id)]
@@ -1265,12 +1257,7 @@ class InMemoryLimitChangeRequestRepository : LimitChangeRequestRepository {
     override fun findByIdForUpdate(
         tenantId: TenantId,
         id: LimitChangeRequestId,
-    ): LimitRuleChangeRequest? {
-        synchronized(lock) {
-            lockedRequestIds += tenantId to id
-        }
-        return findById(tenantId, id)
-    }
+    ): LimitRuleChangeRequest? = findById(tenantId, id)
 
     override fun findByIdempotencyKey(tenantId: TenantId, key: IdempotencyKey): LimitRuleChangeRequest? =
         requests.tenantValues(tenantId).firstOrNull { it.idempotencyKey == key }
@@ -1289,19 +1276,14 @@ class InMemoryLimitChangeRequestRepository : LimitChangeRequestRepository {
                 (it.expiresAt == null || it.expiresAt > at)
         }
 
-    override fun lockTarget(tenantId: TenantId, targetScopeHash: ScopeHash) {
-        synchronized(lock) {
-            lockedTargetHashes += tenantId to targetScopeHash
-        }
-    }
+    override fun lockTarget(tenantId: TenantId, targetScopeHash: ScopeHash) = Unit
 
     override fun claimDueForApplication(
         tenantId: TenantId,
         dueAt: Instant,
         limit: Int,
     ): List<LimitRuleChangeRequest> = synchronized(lock) {
-        dueClaims += Triple(tenantId, dueAt, limit)
-        val claimed = requests.tenantValues(tenantId)
+        requests.tenantValues(tenantId)
             .filter {
                 it.status in DUE_FOR_APPLICATION_STATUSES &&
                     (it.effectiveAt == null || it.effectiveAt <= dueAt) &&
@@ -1309,8 +1291,6 @@ class InMemoryLimitChangeRequestRepository : LimitChangeRequestRepository {
             }
             .sortedBy { it.createdAt }
             .take(limit)
-        lockedRequestIds += claimed.map { tenantId to it.id }
-        claimed
     }
 
     override fun findByRequesterContext(
