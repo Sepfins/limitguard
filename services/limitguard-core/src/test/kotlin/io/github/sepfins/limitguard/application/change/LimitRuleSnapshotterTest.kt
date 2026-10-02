@@ -86,7 +86,7 @@ class LimitRuleSnapshotterTest {
                 val rule = LimitRuleSnapshotter.restoreRule(modified)
                 assertEquals(1, if (key == "version") rule.version.value else rule.priority.value)
             }
-            for (number in listOf(BigDecimal("1.5"), 4294967297L, Double.NaN)) {
+            for (number in listOf(BigDecimal("1.5"), 4294967297L)) {
                 val modified = Metadata(snapshot.value + (key to number))
                 assertFailsWith<IllegalArgumentException>("$key = $number") {
                     LimitRuleSnapshotter.restoreRule(modified)

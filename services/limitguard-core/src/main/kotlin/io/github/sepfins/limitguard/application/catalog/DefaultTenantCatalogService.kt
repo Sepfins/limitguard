@@ -1,5 +1,7 @@
 package io.github.sepfins.limitguard.application.catalog
 
+import io.github.sepfins.limitguard.internal.json.JsonSnapshots
+
 import io.github.sepfins.limitguard.api.LimitChannelScope as ApiLimitChannelScope
 import io.github.sepfins.limitguard.api.LimitConfigurationFundingScope as ApiLimitConfigurationFundingScope
 import io.github.sepfins.limitguard.api.LimitFundingScope
@@ -925,7 +927,7 @@ class DefaultTenantCatalogService(
             isActive = command.isActive,
             appliesTo = Metadata(command.appliesTo),
             conditionExpression = Metadata(command.conditionExpression),
-            actionExpression = command.actionExpression,
+            actionExpression = JsonSnapshots.objectList(command.actionExpression, "actionExpression"),
             denialCode = command.denialCode,
             denialMessage = command.denialMessage,
             effectiveWindow = EffectiveWindow(command.startsAt ?: now, command.endsAt),

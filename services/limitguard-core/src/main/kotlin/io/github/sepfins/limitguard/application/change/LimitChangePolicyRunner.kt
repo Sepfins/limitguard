@@ -1,5 +1,6 @@
 package io.github.sepfins.limitguard.application.change
 
+import io.github.sepfins.limitguard.api.errors.ValidationException
 import io.github.sepfins.limitguard.domain.change.LimitChangePolicy
 import io.github.sepfins.limitguard.domain.change.LimitChangePolicyCapabilities
 import io.github.sepfins.limitguard.domain.change.LimitChangePolicyDecision
@@ -12,11 +13,13 @@ import io.github.sepfins.limitguard.domain.common.Metadata
 import io.github.sepfins.limitguard.domain.policy.PolicyEvaluationContext
 import io.github.sepfins.limitguard.domain.policy.PolicyEvaluationResult
 import io.github.sepfins.limitguard.internal.policy.toPolicyEvaluationInput
+import io.github.sepfins.limitguard.internal.json.JsonSnapshots
 import io.github.sepfins.limitguard.port.ids.IdGenerator
 import io.github.sepfins.limitguard.port.persistence.LimitChangePolicyEvaluationRepository
 import io.github.sepfins.limitguard.port.persistence.LimitChangePolicyRepository
 import io.github.sepfins.limitguard.port.persistence.LimitRuleChangeEventRepository
 import java.time.Instant
+import java.util.Collections
 
 internal class LimitChangePolicyRunner(
     private val policyRepository: LimitChangePolicyRepository,
@@ -33,6 +36,7 @@ internal class LimitChangePolicyRunner(
     ): LimitChangeAuthorization {
         val policies = policyRepository
             .findActiveForConfiguration(request.tenantId, LimitChangePolicyPhase.AUTHORIZATION, request.configurationId, at)
+            .map { it.copy(actionExpression = JsonSnapshots.objectList(it.actionExpression, "policy.actionExpression")) }
             .sortedWith(compareBy<LimitChangePolicy> { it.priority.value }.thenBy { it.code.value })
         var currentRequest = request
 
@@ -103,9 +107,13 @@ internal class LimitChangePolicyRunner(
             }
             val engine = engineRegistry.get(policy.engine)
             engine.validate(policy)
-            engine.evaluate(policy, context)
+            engine.evaluate(policy, context).let { result ->
+                result.copy(actions = Collections.unmodifiableList(ArrayList(result.actions)))
+            }
         } catch (exception: InterruptedException) {
             Thread.currentThread().interrupt()
+            throw exception
+        } catch (exception: ValidationException) {
             throw exception
         } catch (exception: Exception) {
             val detail = exception.message ?: exception::class.simpleName ?: "unknown error"

@@ -6,8 +6,10 @@ import io.github.sepfins.limitguard.api.commands.ApproveLimitRuleChangeCommand
 import io.github.sepfins.limitguard.api.commands.CancelLimitRuleChangeCommand
 import io.github.sepfins.limitguard.api.commands.RejectLimitRuleChangeCommand
 import io.github.sepfins.limitguard.api.commands.RequestLimitRuleChangeCommand
+import io.github.sepfins.limitguard.api.commands.LimitRuleDraft
 import io.github.sepfins.limitguard.api.results.ApplyDueChangesResult
 import io.github.sepfins.limitguard.api.results.LimitChangeRequestResult
+import io.github.sepfins.limitguard.internal.json.JsonSnapshots
 
 import io.github.sepfins.limitguard.port.ids.IdGenerator
 import io.github.sepfins.limitguard.port.persistence.LimitChangePolicyEvaluationRepository
@@ -110,17 +112,27 @@ internal class DefaultLimitChangeService(
     )
 
     override fun requestLimitRuleChange(command: RequestLimitRuleChangeCommand): LimitChangeRequestResult =
-        requestWorkflow.execute(command)
+        requestWorkflow.execute(command.copy(
+            metadata = JsonSnapshots.objectValue(command.metadata),
+            policyContext = JsonSnapshots.objectValue(command.policyContext, "policyContext"),
+            requestedRule = command.requestedRule?.detachedJson("requestedRule"),
+        ))
 
     override fun approveLimitRuleChange(command: ApproveLimitRuleChangeCommand): LimitChangeRequestResult =
-        approveWorkflow.execute(command)
+        approveWorkflow.execute(command.copy(
+            metadata = JsonSnapshots.objectValue(command.metadata),
+            approvedRule = command.approvedRule?.detachedJson("approvedRule"),
+        ))
 
     override fun rejectLimitRuleChange(command: RejectLimitRuleChangeCommand): LimitChangeRequestResult =
-        rejectWorkflow.execute(command)
+        rejectWorkflow.execute(command.copy(metadata = JsonSnapshots.objectValue(command.metadata)))
 
     override fun cancelLimitRuleChange(command: CancelLimitRuleChangeCommand): LimitChangeRequestResult =
-        cancelWorkflow.execute(command)
+        cancelWorkflow.execute(command.copy(metadata = JsonSnapshots.objectValue(command.metadata)))
 
     override fun applyDueLimitChanges(command: ApplyDueLimitChangesCommand): ApplyDueChangesResult =
         applyDueWorkflow.execute(command)
+
+    private fun LimitRuleDraft.detachedJson(field: String): LimitRuleDraft =
+        copy(metadata = JsonSnapshots.objectValue(metadata, "$field.metadata"))
 }

@@ -7,6 +7,7 @@ import io.github.sepfins.limitguard.api.errors.ConflictException
 import io.github.sepfins.limitguard.api.errors.IdempotencyConflictException
 import io.github.sepfins.limitguard.api.errors.InfrastructureException
 import io.github.sepfins.limitguard.domain.common.Metadata
+import io.github.sepfins.limitguard.internal.json.JsonSnapshots
 import org.jooq.Condition
 import org.jooq.Field
 import org.jooq.JSONB
@@ -18,9 +19,10 @@ private val gson = GsonBuilder().serializeNulls().create()
 
 internal fun Metadata.toJsonb(): JSONB = JSONB.valueOf(gson.toJson(value))
 
-internal fun Map<String, Any?>.toJsonb(): JSONB = JSONB.valueOf(gson.toJson(this))
+internal fun Map<String, Any?>.toJsonb(): JSONB = JSONB.valueOf(gson.toJson(JsonSnapshots.objectValue(this)))
 
-internal fun List<Map<String, Any?>>.toJsonb(): JSONB = JSONB.valueOf(gson.toJson(this))
+internal fun List<Map<String, Any?>>.toJsonb(): JSONB =
+    JSONB.valueOf(gson.toJson(JsonSnapshots.objectList(this, "actions")))
 
 internal fun JSONB?.toMetadata(): Metadata {
     return Metadata(toObjectMap("metadata"))
@@ -34,7 +36,7 @@ internal fun JSONB?.toObjectMap(description: String): Map<String, Any?> {
         @Suppress("UNCHECKED_CAST")
         val values = parsed as? Map<String, Any?>
             ?: throw InfrastructureException("Cannot map non-object JSONB $description")
-        values
+        JsonSnapshots.objectValue(values, description)
     } catch (exception: InfrastructureException) {
         throw exception
     } catch (exception: RuntimeException) {
@@ -49,11 +51,7 @@ internal fun JSONB?.toObjectList(description: String): List<Map<String, Any?>> {
         val parsed = JsonParser.parseString(data()).toKotlinValue()
         val values = parsed as? List<*>
             ?: throw InfrastructureException("Cannot map non-array JSONB $description")
-        values.mapIndexed { index, value ->
-            @Suppress("UNCHECKED_CAST")
-            value as? Map<String, Any?>
-                ?: throw InfrastructureException("Cannot map non-object entry $index in JSONB $description")
-        }
+        JsonSnapshots.objectList(values, description)
     } catch (exception: InfrastructureException) {
         throw exception
     } catch (exception: RuntimeException) {

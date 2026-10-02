@@ -16,7 +16,8 @@ internal class LimitChangeEventFactory(
 ) {
     fun requested(
         changeRequest: LimitRuleChangeRequest,
-        now: Instant
+        now: Instant,
+        originalIntent: Metadata? = null,
     ): LimitRuleChangeEvent {
         return LimitRuleChangeEvent(
             id = LimitRuleChangeEventId.of(idGenerator.newId()),
@@ -33,7 +34,7 @@ internal class LimitChangeEventFactory(
                     "changeType" to changeRequest.changeType.name,
                     "targetScopeHash" to changeRequest.targetScopeHash.value,
                     "effectiveAt" to changeRequest.effectiveAt?.toString(),
-                )
+                ) + (originalIntent?.let { mapOf("originalIntent" to it.value) } ?: emptyMap())
             ),
             message = "Limit rule change requested",
             createdAt = now,

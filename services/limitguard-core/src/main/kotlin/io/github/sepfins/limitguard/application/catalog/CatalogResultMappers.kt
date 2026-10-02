@@ -1,5 +1,6 @@
 package io.github.sepfins.limitguard.application.catalog
 
+import io.github.sepfins.limitguard.internal.json.JsonSnapshots
 import io.github.sepfins.limitguard.api.FundingSourceCategory as ApiFundingSourceCategory
 import io.github.sepfins.limitguard.api.FundingSourceOwnerRole as ApiFundingSourceOwnerRole
 import io.github.sepfins.limitguard.api.LimitChannelScope as ApiLimitChannelScope
@@ -395,7 +396,7 @@ internal fun LimitChangePolicy.toResult(): LimitChangePolicyResult {
         isActive = isActive,
         appliesTo = appliesTo.value,
         conditionExpression = conditionExpression.value,
-        actionExpression = actionExpression,
+        actionExpression = JsonSnapshots.objectList(actionExpression, "policy.actionExpression"),
         denialCode = denialCode,
         denialMessage = denialMessage,
         startsAt = effectiveWindow.startsAt,

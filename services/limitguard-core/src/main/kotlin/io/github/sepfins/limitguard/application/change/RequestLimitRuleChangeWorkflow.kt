@@ -16,6 +16,7 @@ import io.github.sepfins.limitguard.domain.common.PartyProfileDelegationId
 import io.github.sepfins.limitguard.domain.common.PartyProfileId
 import io.github.sepfins.limitguard.domain.common.TenantId
 import io.github.sepfins.limitguard.domain.limit.LimitRule
+import io.github.sepfins.limitguard.domain.mandate.MandateScope
 import io.github.sepfins.limitguard.internal.json.JsonValueEquality
 import io.github.sepfins.limitguard.port.ids.IdGenerator
 import io.github.sepfins.limitguard.port.persistence.LimitChangeRequestRepository
@@ -53,12 +54,25 @@ internal class RequestLimitRuleChangeWorkflow(
                 val requestedEvent = changeEventRepository
                     .findByChangeRequest(tenantId, existingRequest.id)
                     .firstOrNull { it.eventType == LimitRuleChangeEventType.REQUESTED }
-                val originalRequestedRule = requestedEvent?.afterRule ?: existingRequest.requestedRule
-                val requestedEventPayload = requestedEvent?.eventPayload?.value
-                val originalEffectiveAt = if (requestedEventPayload?.containsKey("effectiveAt") == true) {
+                val originalIntent = requestedEvent?.eventPayload?.value?.get("originalIntent") as? Map<*, *>
+                if (originalIntent != null) {
+                    if (!LimitChangeCreationIntent.matches(originalIntent, command)) {
+                        throw IdempotencyConflictException(
+                            "idempotency key already belongs to a different limit change request"
+                        )
+                    }
+                    return@inTransaction existingRequest.toResult()
+                }
+                val originalRequestedRule = requestedEvent?.afterRule
+                    ?: throw IdempotencyConflictException("original creation evidence is unavailable for this request")
+                val requestedEventPayload = requestedEvent.eventPayload.value
+                val originalEffectiveAt = if (requestedEventPayload.containsKey("effectiveAt")) {
                     (requestedEventPayload["effectiveAt"] as? String)?.let(Instant::parse)
                 } else {
-                    existingRequest.effectiveAt
+                    throw IdempotencyConflictException("original creation timing is unavailable for this request")
+                }
+                if (existingRequest.supersededByChangeRequestId != null) {
+                    throw IdempotencyConflictException("original creation deadline is unavailable for this request")
                 }
                 requireSameIdempotentRequest(
                     existingRequest = existingRequest,
@@ -95,7 +109,11 @@ internal class RequestLimitRuleChangeWorkflow(
             )
 
             val requested = changeRequestRepository.insert(tenantId, request)
-            changeEventRepository.insert(tenantId, changeEventFactory.requested(requested, now))
+            changeEventRepository.insert(tenantId, changeEventFactory.requested(
+                requested,
+                now,
+                originalIntent = LimitChangeCreationIntent.capture(command, candidate, target),
+            ))
 
             val authorization = policyRunner.authorize(
                 request = requested,
@@ -224,7 +242,7 @@ internal class RequestLimitRuleChangeWorkflow(
                     ?.let { PartyProfileDelegationId.of(it) } &&
                 existingRequest.targetOwnerPartyProfileId == PartyProfileId.of(command.targetOwnerPartyProfileId) &&
                 commandLimitRuleMatches(existingRequest, command) &&
-                commandTargetMandateMatches(existingRequest, command) &&
+                commandTargetMandateMatches(LimitRuleSnapshotter.restoreRule(originalRequestedRule), command) &&
                 expectedVersionMatches(existingRequest, command) &&
                 (command.requestedRule?.matches(LimitRuleSnapshotter.restoreRule(originalRequestedRule)) != false) &&
                 originalEffectiveAt == command.effectiveAt &&
@@ -247,7 +265,7 @@ internal class RequestLimitRuleChangeWorkflow(
             request.limitRuleId?.value == command.limitRuleId
 
     private fun commandTargetMandateMatches(
-        request: LimitRuleChangeRequest,
+        originalRule: LimitRule,
         command: RequestLimitRuleChangeCommand,
     ): Boolean {
         val commandMandateId = when {
@@ -255,7 +273,8 @@ internal class RequestLimitRuleChangeWorkflow(
             command.targetMandateId != null -> command.targetMandateId
             else -> return true
         }
-        return request.targetMandateId?.value == commandMandateId
+        return (originalRule.mandateScope as? MandateScope.MandateSpecific)
+            ?.mandateId?.value == commandMandateId
     }
 
     private fun expectedVersionMatches(
