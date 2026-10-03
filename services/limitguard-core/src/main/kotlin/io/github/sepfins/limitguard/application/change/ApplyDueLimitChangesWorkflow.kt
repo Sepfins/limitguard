@@ -26,6 +26,7 @@ internal class ApplyDueLimitChangesWorkflow(
     private val changeEventRepository: LimitRuleChangeEventRepository,
     private val limitConfigurationRepository: LimitConfigurationRepository,
     private val limitRuleRepository: LimitRuleRepository,
+    private val locks: LimitChangeLocks,
     private val clockProvider: ClockProvider,
     private val transactionRunner: TransactionRunner,
 ) {
@@ -35,18 +36,28 @@ internal class ApplyDueLimitChangesWorkflow(
         val dueAt = command.dueAt ?: clockProvider.now()
 
         transactionRunner.inTransaction {
-            val dueRequests = changeRequestRepository.claimDueForApplication(
+            val candidates = changeRequestRepository.findDueForApplication(
                 tenantId = tenantId,
                 dueAt = dueAt,
                 limit = command.limit,
             )
+            val plans = candidates.associate { it.id to locks.discover(it) }
+            val lockedTargets = locks.acquireTargets(tenantId, plans.values, skipBusy = true)
+            val dueRequests = candidates.sortedBy { it.id.value.toString() }.mapNotNull { observed ->
+                val plan = plans.getValue(observed.id)
+                if (!lockedTargets.covers(plan)) return@mapNotNull null
+                changeRequestRepository.claimForApplication(tenantId, observed.id, dueAt)?.also {
+                    locks.requireSameIdentity(observed, it)
+                }
+            }.sortedWith(compareBy<LimitRuleChangeRequest> { it.createdAt }.thenBy { it.id.value.toString() })
+            locks.acquireRules(tenantId, dueRequests.map { plans.getValue(it.id) })
             val appliedRequestIds = mutableListOf<LimitChangeRequestId>()
             val failedRequestIds = mutableListOf<LimitChangeRequestId>()
 
             dueRequests.forEach { request ->
                 try {
                     transactionRunner.inSavepoint {
-                        applyClaimed(request, dueAt)
+                        applyClaimed(request, dueAt, lockedTargets)
                     }
                     appliedRequestIds += request.id
                 } catch (exception: ConflictException) {
@@ -75,6 +86,7 @@ internal class ApplyDueLimitChangesWorkflow(
     private fun applyClaimed(
         request: LimitRuleChangeRequest,
         dueAt: Instant,
+        lockedTargets: LockedLimitChangeTargets,
     ) {
         val currentRule = request.limitRuleId?.let {
             limitRuleRepository.findByIdForUpdate(request.tenantId, it)
@@ -99,6 +111,7 @@ internal class ApplyDueLimitChangesWorkflow(
             candidate = candidate,
             actor = ChangeActor.System,
             applicationTime = dueAt,
+            lockedTargets = lockedTargets,
         )
     }
 

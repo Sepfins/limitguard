@@ -1,0 +1,510 @@
+package io.github.sepfins.limitguard.infrastructure.jooq
+
+import io.github.sepfins.limitguard.api.FundingSourceCategory
+import io.github.sepfins.limitguard.api.LimitChangeActorType
+import io.github.sepfins.limitguard.api.LimitChangePolicyDecision
+import io.github.sepfins.limitguard.api.LimitChangePolicyPhase
+import io.github.sepfins.limitguard.api.LimitConfigurationFundingScope
+import io.github.sepfins.limitguard.api.LimitKind
+import io.github.sepfins.limitguard.api.LimitRuleChangeStatus
+import io.github.sepfins.limitguard.api.LimitRuleChangeType
+import io.github.sepfins.limitguard.api.Limitguard
+import io.github.sepfins.limitguard.api.PartyType
+import io.github.sepfins.limitguard.api.commands.ApplyDueLimitChangesCommand
+import io.github.sepfins.limitguard.api.commands.ApproveLimitRuleChangeCommand
+import io.github.sepfins.limitguard.api.commands.CancelLimitRuleChangeCommand
+import io.github.sepfins.limitguard.api.commands.CreateLimitConfigurationCommand
+import io.github.sepfins.limitguard.api.commands.CreateLimitChangePolicyCommand
+import io.github.sepfins.limitguard.api.commands.LimitChangeActorCommand
+import io.github.sepfins.limitguard.api.commands.LimitRuleDraft
+import io.github.sepfins.limitguard.api.commands.RegisterPartyProfileCommand
+import io.github.sepfins.limitguard.api.commands.RegisterTenantCommand
+import io.github.sepfins.limitguard.api.commands.RejectLimitRuleChangeCommand
+import io.github.sepfins.limitguard.api.commands.RequestLimitRuleChangeCommand
+import io.github.sepfins.limitguard.api.errors.ConflictException
+import io.github.sepfins.limitguard.api.queries.GetLimitChangeQuery
+import io.github.sepfins.limitguard.support.FixedClockProvider
+import org.flywaydb.core.Flyway
+import org.junit.jupiter.api.BeforeAll
+import org.junit.jupiter.api.Tag
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.Timeout
+import org.postgresql.ds.PGSimpleDataSource
+import org.testcontainers.junit.jupiter.Container
+import org.testcontainers.junit.jupiter.Testcontainers
+import org.testcontainers.postgresql.PostgreSQLContainer
+import java.lang.reflect.InvocationTargetException
+import java.lang.reflect.Proxy
+import java.math.BigDecimal
+import java.sql.Connection
+import java.sql.PreparedStatement
+import java.time.Duration
+import java.time.Instant
+import java.util.UUID
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.CyclicBarrier
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import javax.sql.DataSource
+import kotlin.test.assertEquals
+import kotlin.test.assertIs
+import kotlin.test.assertTrue
+
+@Tag("database")
+@Testcontainers
+@Timeout(30)
+class ChangeWorkflowLockingIntegrationTest {
+    private val dataSource by lazy {
+        PGSimpleDataSource().apply {
+            setURL(postgres.jdbcUrl)
+            user = postgres.username
+            password = postgres.password
+            options = "-c lock_timeout=5000 -c statement_timeout=10000 -c deadlock_timeout=100"
+        }
+    }
+    private val clock = FixedClockProvider(NOW)
+    private val facade by lazy { JooqLimitguardFactory(dataSource).create(clockProvider = clock) }
+
+    @Test
+    fun `submission and a due batch complete when a funded target moves onto earlier batch work`() {
+        val fixture = fixture()
+        val savings = configuration(fixture.tenant, "SAVINGS", FundingSourceCategory.SAVINGS)
+        val credit = configuration(fixture.tenant, "CREDIT", FundingSourceCategory.CREDIT)
+        val original = facade.limitChangeService.requestLimitRuleChange(fixture.create(credit, "Credit limit"))
+        facade.limitChangeService.approveLimitRuleChange(ApproveLimitRuleChangeCommand(
+            fixture.tenant, original.id, SYSTEM,
+        ))
+        val scheduledCreate = facade.limitChangeService.requestLimitRuleChange(
+            fixture.create(savings, "Savings limit").copy(effectiveAt = DUE),
+        )
+        facade.limitChangeService.approveLimitRuleChange(ApproveLimitRuleChangeCommand(
+            fixture.tenant, scheduledCreate.id, SYSTEM,
+        ))
+        clock.advanceBy(Duration.ofSeconds(1))
+        val existingRule = facade.limitInquiryService.getLimitChange(GetLimitChangeQuery(fixture.tenant, original.id))
+            .request.limitRuleId!!
+        val update = fixture.create(credit, "Credit limit").copy(
+            changeType = LimitRuleChangeType.UPDATE, limitRuleId = existingRule, expectedVersion = 1,
+        )
+        val scheduledUpdate = facade.limitChangeService.requestLimitRuleChange(update.copy(effectiveAt = DUE))
+        facade.limitChangeService.approveLimitRuleChange(ApproveLimitRuleChangeCommand(
+            fixture.tenant, scheduledUpdate.id, SYSTEM,
+        ))
+
+        val firstRevisionWritten = CountDownLatch(1)
+        val continueBatch = CountDownLatch(1)
+        val submissionAtTarget = CountDownLatch(1)
+        val pauseOnce = AtomicBoolean()
+        val dueFacade = facade(ObservedDataSource(dataSource, after = { sql ->
+            if (sql.startsWith("insert into \"limit_rule_revision\"") && pauseOnce.compareAndSet(false, true)) {
+                firstRevisionWritten.countDown()
+                await(continueBatch)
+            }
+        }))
+        val submittingFacade = facade(ObservedDataSource(dataSource, before = { sql ->
+            if (sql.contains("pg_advisory_xact_lock")) submissionAtTarget.countDown()
+        }))
+        val executor = Executors.newFixedThreadPool(2)
+        try {
+            val application = executor.submit<io.github.sepfins.limitguard.api.results.ApplyDueChangesResult> {
+                dueFacade.limitChangeService.applyDueLimitChanges(ApplyDueLimitChangesCommand(fixture.tenant, DUE))
+            }
+            await(firstRevisionWritten)
+            val submission = executor.submit<Result<io.github.sepfins.limitguard.api.results.LimitChangeRequestResult>> {
+                runCatching {
+                    submittingFacade.limitChangeService.requestLimitRuleChange(update.copy(
+                        requestedRule = update.requestedRule!!.copy(configurationId = savings),
+                        idempotencyKey = "move-target",
+                    ))
+                }
+            }
+            await(submissionAtTarget)
+            continueBatch.countDown()
+
+            val applied = application.get(10, TimeUnit.SECONDS)
+            assertEquals(2, applied.appliedCount)
+            assertEquals(0, applied.failedCount)
+            val conflict = submission.get(10, TimeUnit.SECONDS).exceptionOrNull()
+            assertIs<ConflictException>(conflict, conflict?.stackTraceToString())
+            for (id in listOf(scheduledCreate.id, scheduledUpdate.id)) {
+                val details = facade.limitInquiryService.getLimitChange(GetLimitChangeQuery(fixture.tenant, id))
+                assertEquals(LimitRuleChangeStatus.APPLIED, details.request.status)
+                assertEquals(1, details.revisions.size)
+                assertEquals(1, details.events.count { it.eventType.name == "APPLIED" })
+            }
+        } finally {
+            continueBatch.countDown()
+            executor.shutdownNow()
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS))
+        }
+    }
+
+    @Test
+    fun `concurrent equivalent funded targets admit one complete workflow and leave the losing key reusable`() {
+        val fixture = fixture()
+        val savings = configuration(fixture.tenant, "SAVINGS", FundingSourceCategory.SAVINGS)
+        val equivalentSavings = configuration(fixture.tenant, "EQUIVALENT", FundingSourceCategory.SAVINGS)
+        val credit = configuration(fixture.tenant, "CREDIT", FundingSourceCategory.CREDIT)
+        val firstCommand = fixture.create(savings, "Savings limit").copy(idempotencyKey = "first")
+        val secondCommand = fixture.create(equivalentSavings, "Other savings limit").copy(idempotencyKey = "second")
+        val barrier = WorkflowWriteBarrier(dataSource)
+        val firstFacade = facade(barrier.first)
+        val secondFacade = facade(barrier.second)
+        val executor = Executors.newFixedThreadPool(2)
+        try {
+            val first = executor.submit<io.github.sepfins.limitguard.api.results.LimitChangeRequestResult> {
+                firstFacade.limitChangeService.requestLimitRuleChange(firstCommand)
+            }
+            await(barrier.inserted)
+            val second = executor.submit<Result<io.github.sepfins.limitguard.api.results.LimitChangeRequestResult>> {
+                runCatching { secondFacade.limitChangeService.requestLimitRuleChange(secondCommand) }
+            }
+            await(barrier.contenderAtTarget)
+            barrier.release.countDown()
+            val winner = first.get(10, TimeUnit.SECONDS)
+            assertIs<ConflictException>(second.get(10, TimeUnit.SECONDS).exceptionOrNull())
+            assertEquals(winner, facade.limitChangeService.requestLimitRuleChange(firstCommand))
+            val details = facade.limitInquiryService.getLimitChange(GetLimitChangeQuery(fixture.tenant, winner.id))
+            assertEquals(listOf("REQUESTED"), details.events.map { it.eventType.name })
+            assertEquals(emptyList(), details.revisions)
+
+            val recovered = facade.limitChangeService.requestLimitRuleChange(secondCommand.copy(
+                requestedRule = secondCommand.requestedRule!!.copy(configurationId = credit),
+            ))
+            assertEquals(LimitRuleChangeStatus.REQUESTED, recovered.status)
+            assertEquals(listOf("REQUESTED"), facade.limitInquiryService
+                .getLimitChange(GetLimitChangeQuery(fixture.tenant, recovered.id)).events.map { it.eventType.name })
+        } finally {
+            barrier.release.countDown()
+            executor.shutdownNow()
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS))
+        }
+    }
+
+    @Test
+    fun `concurrent identical creation keys replay one workflow after waiting on its missing row target`() {
+        val fixture = fixture()
+        val savings = configuration(fixture.tenant, "SAVINGS", FundingSourceCategory.SAVINGS)
+        val command = fixture.create(savings, "Savings limit").copy(idempotencyKey = "same-intent")
+        val barrier = WorkflowWriteBarrier(dataSource)
+        val firstFacade = facade(barrier.first)
+        val secondFacade = facade(barrier.second)
+        val executor = Executors.newFixedThreadPool(2)
+        try {
+            val first = executor.submit<io.github.sepfins.limitguard.api.results.LimitChangeRequestResult> {
+                firstFacade.limitChangeService.requestLimitRuleChange(command)
+            }
+            await(barrier.inserted)
+            val second = executor.submit<io.github.sepfins.limitguard.api.results.LimitChangeRequestResult> {
+                secondFacade.limitChangeService.requestLimitRuleChange(command)
+            }
+            await(barrier.contenderAtTarget)
+            barrier.release.countDown()
+            val winner = first.get(10, TimeUnit.SECONDS)
+            assertEquals(winner, second.get(10, TimeUnit.SECONDS))
+            assertEquals(listOf("REQUESTED"), facade.limitInquiryService
+                .getLimitChange(GetLimitChangeQuery(fixture.tenant, winner.id)).events.map { it.eventType.name })
+        } finally {
+            barrier.release.countDown()
+            executor.shutdownNow()
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS))
+        }
+    }
+
+    @Test
+    fun `competing existing request decisions commit one outcome and at most one revision`() {
+        val fixture = fixture()
+        val savings = configuration(fixture.tenant, "SAVINGS", FundingSourceCategory.SAVINGS)
+        val command = fixture.create(savings, "Savings limit").copy(idempotencyKey = "original")
+        val pending = facade.limitChangeService.requestLimitRuleChange(command)
+        val approvalFacade = facade(dataSource)
+        val rejectionFacade = facade(dataSource)
+        val start = CyclicBarrier(2)
+        val executor = Executors.newFixedThreadPool(2)
+        try {
+            val approval = executor.submit<Result<io.github.sepfins.limitguard.api.results.LimitChangeRequestResult>> {
+                start.await(10, TimeUnit.SECONDS)
+                runCatching { approvalFacade.limitChangeService.approveLimitRuleChange(
+                    ApproveLimitRuleChangeCommand(fixture.tenant, pending.id, SYSTEM),
+                ) }
+            }
+            val rejection = executor.submit<Result<io.github.sepfins.limitguard.api.results.LimitChangeRequestResult>> {
+                start.await(10, TimeUnit.SECONDS)
+                runCatching { rejectionFacade.limitChangeService.rejectLimitRuleChange(
+                    RejectLimitRuleChangeCommand(fixture.tenant, pending.id, SYSTEM, "Declined"),
+                ) }
+            }
+            val results = listOf(approval.get(10, TimeUnit.SECONDS), rejection.get(10, TimeUnit.SECONDS))
+            assertEquals(1, results.count { it.isSuccess })
+            assertIs<ConflictException>(results.single { it.isFailure }.exceptionOrNull())
+            val winner = results.single { it.isSuccess }.getOrThrow()
+            val details = facade.limitInquiryService.getLimitChange(GetLimitChangeQuery(fixture.tenant, pending.id))
+            assertEquals(winner, details.request)
+            val revisionCount = if (winner.status == LimitRuleChangeStatus.APPLIED) 1 else 0
+            assertEquals(revisionCount, details.revisions.size)
+            assertEquals(revisionCount, details.events.count { it.eventType.name == "APPLIED" })
+            assertEquals(winner, facade.limitChangeService.requestLimitRuleChange(command))
+        } finally {
+            executor.shutdownNow()
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS))
+        }
+    }
+
+    @Test
+    fun `an equal update creation key replays when the rule changes during unlocked discovery`() {
+        val fixture = fixture()
+        val savings = configuration(fixture.tenant, "SAVINGS", FundingSourceCategory.SAVINGS)
+        facade.tenantCatalogService.createLimitChangePolicy(CreateLimitChangePolicyCommand(
+            fixture.tenant, "ALLOW", "Automatic approval", LimitChangePolicyPhase.AUTHORIZATION,
+            decision = LimitChangePolicyDecision.ALLOW,
+        ))
+        val original = facade.limitChangeService.requestLimitRuleChange(fixture.create(savings, "Savings limit"))
+        val command = fixture.create(savings, "Savings limit").copy(
+            changeType = LimitRuleChangeType.UPDATE, limitRuleId = original.limitRuleId, expectedVersion = 1,
+            idempotencyKey = "same-update", requestedRule = fixture.create(savings, "Savings limit").requestedRule!!
+                .copy(amount = BigDecimal("600")),
+        )
+        val barrier = WorkflowWriteBarrier(dataSource)
+        val secondAtRuleRead = CountDownLatch(1)
+        val continueRead = CountDownLatch(1)
+        val secondFacade = facade(ObservedDataSource(dataSource, before = { sql ->
+            if (sql.contains("from \"limit_rule\"")) {
+                secondAtRuleRead.countDown()
+                await(continueRead)
+            }
+        }))
+        val firstFacade = facade(barrier.first)
+        val executor = Executors.newFixedThreadPool(2)
+        try {
+            val first = executor.submit<io.github.sepfins.limitguard.api.results.LimitChangeRequestResult> {
+                firstFacade.limitChangeService.requestLimitRuleChange(command)
+            }
+            await(barrier.inserted)
+            val second = executor.submit<io.github.sepfins.limitguard.api.results.LimitChangeRequestResult> {
+                secondFacade.limitChangeService.requestLimitRuleChange(command)
+            }
+            await(secondAtRuleRead)
+            barrier.release.countDown()
+            val applied = first.get(10, TimeUnit.SECONDS)
+            assertEquals(LimitRuleChangeStatus.APPLIED, applied.status)
+            continueRead.countDown()
+            assertEquals(applied, second.get(10, TimeUnit.SECONDS))
+            val details = facade.limitInquiryService.getLimitChange(GetLimitChangeQuery(fixture.tenant, applied.id))
+            assertEquals(1, details.revisions.size)
+            assertEquals(listOf("REQUESTED", "POLICY_EVALUATED", "APPROVED", "APPLIED"),
+                details.events.map { it.eventType.name })
+        } finally {
+            barrier.release.countDown()
+            continueRead.countDown()
+            executor.shutdownNow()
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS))
+        }
+    }
+
+    @Test
+    fun `distinct funded targets of one owner can be admitted without waiting for each other`() {
+        val fixture = fixture()
+        val savings = configuration(fixture.tenant, "SAVINGS", FundingSourceCategory.SAVINGS)
+        val credit = configuration(fixture.tenant, "CREDIT", FundingSourceCategory.CREDIT)
+        val barrier = WorkflowWriteBarrier(dataSource)
+        val firstFacade = facade(barrier.first)
+        val secondFacade = facade(barrier.second)
+        val executor = Executors.newFixedThreadPool(2)
+        try {
+            val first = executor.submit<io.github.sepfins.limitguard.api.results.LimitChangeRequestResult> {
+                firstFacade.limitChangeService.requestLimitRuleChange(fixture.create(savings, "Savings limit"))
+            }
+            await(barrier.inserted)
+            val second = executor.submit<io.github.sepfins.limitguard.api.results.LimitChangeRequestResult> {
+                secondFacade.limitChangeService.requestLimitRuleChange(fixture.create(credit, "Credit limit"))
+            }
+            assertEquals(LimitRuleChangeStatus.REQUESTED, second.get(5, TimeUnit.SECONDS).status)
+            barrier.release.countDown()
+            assertEquals(LimitRuleChangeStatus.REQUESTED, first.get(10, TimeUnit.SECONDS).status)
+        } finally {
+            barrier.release.countDown()
+            executor.shutdownNow()
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS))
+        }
+    }
+
+    @Test
+    fun `another due worker skips a busy target and applies unrelated scheduled work`() {
+        val fixture = fixture()
+        val savings = configuration(fixture.tenant, "SAVINGS", FundingSourceCategory.SAVINGS)
+        val credit = configuration(fixture.tenant, "CREDIT", FundingSourceCategory.CREDIT)
+        val firstRequest = facade.limitChangeService.requestLimitRuleChange(
+            fixture.create(savings, "Savings limit").copy(effectiveAt = DUE),
+        )
+        facade.limitChangeService.approveLimitRuleChange(ApproveLimitRuleChangeCommand(fixture.tenant, firstRequest.id, SYSTEM))
+        clock.advanceBy(Duration.ofSeconds(1))
+        val secondRequest = facade.limitChangeService.requestLimitRuleChange(
+            fixture.create(credit, "Credit limit").copy(effectiveAt = DUE),
+        )
+        facade.limitChangeService.approveLimitRuleChange(ApproveLimitRuleChangeCommand(fixture.tenant, secondRequest.id, SYSTEM))
+        val barrier = WorkflowWriteBarrier(dataSource, "limit_rule_revision")
+        val firstFacade = facade(barrier.first)
+        val secondFacade = facade(dataSource)
+        val executor = Executors.newFixedThreadPool(2)
+        try {
+            val first = executor.submit<io.github.sepfins.limitguard.api.results.ApplyDueChangesResult> {
+                firstFacade.limitChangeService.applyDueLimitChanges(ApplyDueLimitChangesCommand(fixture.tenant, DUE, 1))
+            }
+            await(barrier.inserted)
+            val second = executor.submit<io.github.sepfins.limitguard.api.results.ApplyDueChangesResult> {
+                secondFacade.limitChangeService.applyDueLimitChanges(ApplyDueLimitChangesCommand(fixture.tenant, DUE))
+            }
+            val unrelated = second.get(5, TimeUnit.SECONDS)
+            assertEquals(listOf(secondRequest.id), unrelated.appliedChangeRequestIds)
+            assertEquals(0, unrelated.failedCount)
+            barrier.release.countDown()
+            assertEquals(listOf(firstRequest.id), first.get(10, TimeUnit.SECONDS).appliedChangeRequestIds)
+            for (id in listOf(firstRequest.id, secondRequest.id)) {
+                assertEquals(1, facade.limitInquiryService.getLimitChange(GetLimitChangeQuery(fixture.tenant, id)).revisions.size)
+            }
+        } finally {
+            barrier.release.countDown()
+            executor.shutdownNow()
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS))
+        }
+    }
+
+    @Test
+    fun `cancellation competing with due application returns a lifecycle conflict without a second revision`() {
+        val fixture = fixture()
+        val savings = configuration(fixture.tenant, "SAVINGS", FundingSourceCategory.SAVINGS)
+        val request = facade.limitChangeService.requestLimitRuleChange(
+            fixture.create(savings, "Savings limit").copy(effectiveAt = DUE),
+        )
+        facade.limitChangeService.approveLimitRuleChange(ApproveLimitRuleChangeCommand(fixture.tenant, request.id, SYSTEM))
+        val barrier = WorkflowWriteBarrier(dataSource, "limit_rule_revision")
+        val applyingFacade = facade(barrier.first)
+        val cancellingFacade = facade(barrier.second)
+        val executor = Executors.newFixedThreadPool(2)
+        try {
+            val application = executor.submit<io.github.sepfins.limitguard.api.results.ApplyDueChangesResult> {
+                applyingFacade.limitChangeService.applyDueLimitChanges(ApplyDueLimitChangesCommand(fixture.tenant, DUE))
+            }
+            await(barrier.inserted)
+            val cancellation = executor.submit<Result<io.github.sepfins.limitguard.api.results.LimitChangeRequestResult>> {
+                runCatching { cancellingFacade.limitChangeService.cancelLimitRuleChange(
+                    CancelLimitRuleChangeCommand(fixture.tenant, request.id, SYSTEM),
+                ) }
+            }
+            await(barrier.contenderAtTarget)
+            barrier.release.countDown()
+            assertEquals(listOf(request.id), application.get(10, TimeUnit.SECONDS).appliedChangeRequestIds)
+            assertIs<ConflictException>(cancellation.get(10, TimeUnit.SECONDS).exceptionOrNull())
+            val details = facade.limitInquiryService.getLimitChange(GetLimitChangeQuery(fixture.tenant, request.id))
+            assertEquals(LimitRuleChangeStatus.APPLIED, details.request.status)
+            assertEquals(1, details.revisions.size)
+            assertEquals(0, details.events.count { it.eventType.name == "CANCELLED" })
+        } finally {
+            barrier.release.countDown()
+            executor.shutdownNow()
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS))
+        }
+    }
+
+    private fun facade(source: DataSource): Limitguard =
+        JooqLimitguardFactory(source).create(clockProvider = FixedClockProvider(NOW))
+
+    private fun fixture(): Fixture {
+        val tenant = facade.tenantCatalogService.registerTenant(RegisterTenantCommand("Locking bank ${UUID.randomUUID()}")).id
+        val owner = facade.tenantCatalogService.registerPartyProfile(RegisterPartyProfileCommand(
+            tenantId = tenant, partyType = PartyType.INDIVIDUAL, firstName = "Alex", lastName = "Customer",
+        )).id
+        return Fixture(tenant, owner)
+    }
+
+    private fun configuration(tenant: UUID, code: String, category: FundingSourceCategory): UUID =
+        facade.tenantCatalogService.createLimitConfiguration(CreateLimitConfigurationCommand(
+            tenantId = tenant, code = code, name = code, limitKind = LimitKind.PER_TRANSACTION,
+            currency = "EUR", maxAssignableAmount = BigDecimal("1000"),
+            fundingScope = LimitConfigurationFundingScope.FUNDING_SOURCE_CATEGORY, fundingSourceCategory = category,
+        )).id
+
+    private data class Fixture(val tenant: UUID, val owner: UUID) {
+        fun create(configuration: UUID, name: String) = RequestLimitRuleChangeCommand(
+            tenantId = tenant, changeType = LimitRuleChangeType.CREATE, requestedBy = SYSTEM,
+            targetOwnerPartyProfileId = owner,
+            requestedRule = LimitRuleDraft(name, LimitKind.PER_TRANSACTION, BigDecimal("500"), "EUR",
+                configurationId = configuration),
+        )
+    }
+
+    private class WorkflowWriteBarrier(source: DataSource, table: String = "limit_rule_change_request") {
+        val inserted = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val contenderAtTarget = CountDownLatch(1)
+        private val pauseOnce = AtomicBoolean()
+        val first: DataSource = ObservedDataSource(source, after = { sql ->
+            if (sql.startsWith("insert into \"$table\"") && pauseOnce.compareAndSet(false, true)) {
+                inserted.countDown()
+                await(release)
+            }
+        })
+        val second: DataSource = ObservedDataSource(source, before = { sql ->
+            if (sql.contains("pg_advisory_xact_lock")) contenderAtTarget.countDown()
+        })
+    }
+
+    // JDBC observation only arranges contention; results and history are checked through the public facade.
+    private class ObservedDataSource(
+        private val delegate: DataSource,
+        private val before: (String) -> Unit = {},
+        private val after: (String) -> Unit = {},
+    ) : DataSource by delegate {
+        override fun getConnection(): Connection = observe(delegate.connection)
+
+        override fun getConnection(username: String, password: String): Connection =
+            observe(delegate.getConnection(username, password))
+
+        private fun observe(connection: Connection): Connection = proxy(Connection::class.java, connection) { method, args ->
+            val result = invoke { method.invoke(connection, *args) }
+            if (method.name == "prepareStatement" && result is PreparedStatement) {
+                val sql = args[0] as String
+                proxy(PreparedStatement::class.java, result) { statementMethod, statementArgs ->
+                    val executes = statementMethod.name.startsWith("execute")
+                    if (executes) before(sql)
+                    val value = invoke { statementMethod.invoke(result, *statementArgs) }
+                    if (executes) after(sql)
+                    value
+                }
+            } else result
+        }
+
+        private fun <T> proxy(type: Class<T>, target: T, call: (java.lang.reflect.Method, Array<out Any?>) -> Any?): T =
+            type.cast(Proxy.newProxyInstance(target!!::class.java.classLoader, arrayOf(type)) { _, method, args ->
+                call(method, args ?: emptyArray())
+            })
+
+        private fun invoke(block: () -> Any?): Any? = try {
+            block()
+        } catch (exception: InvocationTargetException) {
+            throw exception.targetException
+        }
+    }
+
+    companion object {
+        private val NOW = Instant.parse("2026-10-02T10:00:00Z")
+        private val DUE = NOW.plusSeconds(60)
+        private val SYSTEM = LimitChangeActorCommand(LimitChangeActorType.SYSTEM)
+
+        private fun await(latch: CountDownLatch) {
+            assertTrue(latch.await(10, TimeUnit.SECONDS), "contention barrier timed out")
+        }
+
+        @Container
+        @JvmStatic
+        val postgres = PostgreSQLContainer("postgres:18")
+
+        @BeforeAll
+        @JvmStatic
+        fun initializeDatabase() {
+            Flyway.configure().dataSource(postgres.jdbcUrl, postgres.username, postgres.password)
+                .locations("classpath:db/limitguard/migration").load().migrate()
+        }
+    }
+}

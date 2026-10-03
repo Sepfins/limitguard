@@ -37,10 +37,11 @@ internal class LimitChangeApplicationWorkflow(
         actor: ChangeActor,
         reason: String?,
         at: Instant,
+        lockedTargets: LockedLimitChangeTargets,
         eventPayload: Metadata = Metadata.EMPTY,
         policyId: LimitChangePolicyId? = null,
     ): LimitRuleChangeRequest {
-        val target = targets.requireAvailable(candidate, request.id, at)
+        val target = targets.requireAvailable(candidate, request.id, at, lockedTargets)
         val approved = changeRequestRepository.update(request.tenantId, request.approve(
             approvedRule = LimitRuleSnapshotter.ruleSnapshot(candidate),
             reason = reason,
@@ -60,7 +61,7 @@ internal class LimitChangeApplicationWorkflow(
             changeEventRepository.insert(request.tenantId, changeEventFactory.scheduled(approved, scheduled, at, actor))
             return scheduled
         }
-        return applyInCurrentTransaction(approved, candidate, actor, at)
+        return applyInCurrentTransaction(approved, candidate, actor, at, lockedTargets)
     }
 
     fun applyInCurrentTransaction(
@@ -68,6 +69,7 @@ internal class LimitChangeApplicationWorkflow(
         candidate: LimitRule,
         actor: ChangeActor,
         applicationTime: Instant,
+        lockedTargets: LockedLimitChangeTargets,
     ): LimitRuleChangeRequest {
         if (request.status !in APPLICABLE_STATUSES) {
             throw ConflictException("limit change request is not approved: ${request.id.value}")
@@ -78,7 +80,7 @@ internal class LimitChangeApplicationWorkflow(
         if (request.expiresAt != null && request.expiresAt <= applicationTime) {
             throw ConflictException("limit change request has expired: ${request.id.value}")
         }
-        targets.requireApplicable(request, candidate)
+        targets.requireApplicable(request, candidate, lockedTargets)
 
         val candidateAtApplication = candidate.copy(updatedAt = applicationTime)
         val persistedRule = when (request.changeType) {

@@ -20,7 +20,7 @@ internal class LimitChangeTargets(
     private val rules: LimitRuleRepository,
     private val requests: LimitChangeRequestRepository,
 ) {
-    private fun scopeFor(rule: LimitRule): LimitRuleTargetScope {
+    fun scopeFor(rule: LimitRule): LimitRuleTargetScope {
         val funding = rule.configurationId?.let { id ->
             configurations.findById(rule.tenantId, id)?.fundingScope
                 ?: throw NotFoundException("limit configuration not found: ${id.value}")
@@ -32,8 +32,9 @@ internal class LimitChangeTargets(
         candidate: LimitRule,
         requestId: LimitChangeRequestId,
         at: Instant,
+        lockedTargets: LockedLimitChangeTargets,
     ): LimitRuleTargetScope {
-        val target = lockAndCheckRules(candidate)
+        val target = checkRules(candidate, lockedTargets)
         val hash = TargetScopeCanonicalizer.hash(target)
         val ruleHasPendingChange = requests.findByLimitRule(candidate.tenantId, candidate.id).any {
             it.id != requestId && it.status in PENDING_STATUSES && (it.expiresAt == null || it.expiresAt > at)
@@ -51,14 +52,18 @@ internal class LimitChangeTargets(
         return target
     }
 
-    fun requireApplicable(request: LimitRuleChangeRequest, candidate: LimitRule) {
+    fun requireApplicable(
+        request: LimitRuleChangeRequest,
+        candidate: LimitRule,
+        lockedTargets: LockedLimitChangeTargets,
+    ) {
         requireMatches(request, candidate)
-        lockAndCheckRules(candidate)
+        checkRules(candidate, lockedTargets)
     }
 
-    private fun lockAndCheckRules(candidate: LimitRule): LimitRuleTargetScope {
+    private fun checkRules(candidate: LimitRule, lockedTargets: LockedLimitChangeTargets): LimitRuleTargetScope {
         val target = scopeFor(candidate)
-        requests.lockTarget(candidate.tenantId, TargetScopeCanonicalizer.hash(target))
+        lockedTargets.requireHeld(TargetScopeCanonicalizer.hash(target))
         val overlaps = candidate.isActive && rules.findByOwner(candidate.tenantId, candidate.ownerPartyProfileId).any {
             it.id != candidate.id && it.isActive && it.effectiveWindow.overlaps(candidate.effectiveWindow) &&
                 scopeFor(it) == target

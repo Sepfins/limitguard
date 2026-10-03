@@ -1278,20 +1278,35 @@ class InMemoryLimitChangeRequestRepository : LimitChangeRequestRepository {
 
     override fun lockTarget(tenantId: TenantId, targetScopeHash: ScopeHash) = Unit
 
+    override fun tryLockTarget(tenantId: TenantId, targetScopeHash: ScopeHash): Boolean = true
+
+    override fun findDueForApplication(
+        tenantId: TenantId,
+        dueAt: Instant,
+        limit: Int,
+    ): List<LimitRuleChangeRequest> = synchronized(lock) {
+        requests.tenantValues(tenantId).filter { it.isDue(dueAt) }
+            .sortedWith(compareBy<LimitRuleChangeRequest> { it.createdAt }.thenBy { it.id.value.toString() })
+            .take(limit)
+    }
+
+    override fun claimForApplication(
+        tenantId: TenantId,
+        id: LimitChangeRequestId,
+        dueAt: Instant,
+    ): LimitRuleChangeRequest? = findById(tenantId, id)?.takeIf { it.isDue(dueAt) }
+
     override fun claimDueForApplication(
         tenantId: TenantId,
         dueAt: Instant,
         limit: Int,
     ): List<LimitRuleChangeRequest> = synchronized(lock) {
-        requests.tenantValues(tenantId)
-            .filter {
-                it.status in DUE_FOR_APPLICATION_STATUSES &&
-                    (it.effectiveAt == null || it.effectiveAt <= dueAt) &&
-                    (it.expiresAt == null || it.expiresAt > dueAt)
-            }
-            .sortedBy { it.createdAt }
-            .take(limit)
+        findDueForApplication(tenantId, dueAt, limit)
     }
+
+    private fun LimitRuleChangeRequest.isDue(at: Instant): Boolean =
+        status in DUE_FOR_APPLICATION_STATUSES &&
+            (effectiveAt == null || effectiveAt <= at) && (expiresAt == null || expiresAt > at)
 
     override fun findByRequesterContext(
         tenantId: TenantId,

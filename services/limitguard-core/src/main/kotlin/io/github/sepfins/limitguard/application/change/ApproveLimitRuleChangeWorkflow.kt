@@ -25,6 +25,7 @@ internal class ApproveLimitRuleChangeWorkflow(
     private val mandateValidator: LimitRuleMandateValidator,
     private val applicationWorkflow: LimitChangeApplicationWorkflow,
     private val targets: LimitChangeTargets,
+    private val locks: LimitChangeLocks,
     private val changeRequestRepository: LimitChangeRequestRepository,
     private val limitConfigurationRepository: LimitConfigurationRepository,
     private val limitRuleRepository: LimitRuleRepository,
@@ -41,13 +42,17 @@ internal class ApproveLimitRuleChangeWorkflow(
         val now = clockProvider.now()
 
         transactionRunner.inTransaction {
-            val request = changeRequestRepository.findByIdForUpdate(tenantId, changeRequestId)
-                ?: throw NotFoundException("limit change request not found: ${changeRequestId.value}")
+            val locked = locks.acquireRequest(tenantId, changeRequestId) { observed ->
+                requireOpenRequest(observed, now)
+                val requested = LimitRuleSnapshotter.restoreRule(observed.requestedRule)
+                listOf(approvedCandidate(observed, requested, command, now))
+            }
+            val request = locked.request
             requireOpenRequest(request, now)
 
-            val currentRule = request.limitRuleId?.let { limitRuleId ->
-                limitRuleRepository.findByIdForUpdate(tenantId, limitRuleId)
-                    ?: throw NotFoundException("limit rule not found: ${limitRuleId.value}")
+            val currentRule = locked.currentRule
+            if (request.limitRuleId != null && currentRule == null) {
+                throw NotFoundException("limit rule not found: ${request.limitRuleId.value}")
             }
             requireCurrentRuleVersion(request, currentRule)
             val requestedCandidate = LimitRuleSnapshotter.restoreRule(
@@ -57,17 +62,7 @@ internal class ApproveLimitRuleChangeWorkflow(
             )
             targets.requireMatches(request, requestedCandidate)
 
-            val approvedCandidate = command.approvedRule?.let { approvedRule ->
-                require(request.changeType in ADJUSTABLE_CHANGE_TYPES) {
-                    "approvedRule is not supported for ${request.changeType} changes"
-                }
-                candidateFactory.createApprovedCandidate(
-                    requestedCandidate = requestedCandidate,
-                    approvedRule = approvedRule,
-                    effectiveAt = request.effectiveAt,
-                    now = now,
-                )
-            } ?: requestedCandidate
+            val approvedCandidate = approvedCandidate(request, requestedCandidate, command, now)
             validateCandidate(request, approvedCandidate, now)
             mandateValidator.validate(approvedCandidate, request.effectiveAt ?: now)
 
@@ -78,9 +73,22 @@ internal class ApproveLimitRuleChangeWorkflow(
                 reason = command.decisionReason,
                 at = now,
                 eventPayload = Metadata(command.metadata),
+                lockedTargets = locked.targets,
             ).toResult()
         }
     }
+
+    private fun approvedCandidate(
+        request: LimitRuleChangeRequest,
+        requestedCandidate: LimitRule,
+        command: ApproveLimitRuleChangeCommand,
+        now: Instant,
+    ): LimitRule = command.approvedRule?.let { approvedRule ->
+        require(request.changeType in ADJUSTABLE_CHANGE_TYPES) {
+            "approvedRule is not supported for ${request.changeType} changes"
+        }
+        candidateFactory.createApprovedCandidate(requestedCandidate, approvedRule, request.effectiveAt, now)
+    } ?: requestedCandidate
 
     private fun requireOpenRequest(request: LimitRuleChangeRequest, now: Instant) {
         if (request.status != LimitRuleChangeStatus.REQUESTED) {

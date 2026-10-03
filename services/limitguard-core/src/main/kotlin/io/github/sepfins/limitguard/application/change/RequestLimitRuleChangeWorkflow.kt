@@ -2,6 +2,7 @@ package io.github.sepfins.limitguard.application.change
 
 import io.github.sepfins.limitguard.api.LimitRuleChangeType
 import io.github.sepfins.limitguard.api.commands.RequestLimitRuleChangeCommand
+import io.github.sepfins.limitguard.api.errors.ConflictException
 import io.github.sepfins.limitguard.api.errors.IdempotencyConflictException
 import io.github.sepfins.limitguard.api.errors.ValidationException
 import io.github.sepfins.limitguard.api.results.LimitChangeRequestResult
@@ -37,6 +38,7 @@ internal class RequestLimitRuleChangeWorkflow(
     private val changeRequestRepository: LimitChangeRequestRepository,
     private val changeEventRepository: LimitRuleChangeEventRepository,
     private val targets: LimitChangeTargets,
+    private val locks: LimitChangeLocks,
     private val idGenerator: IdGenerator,
     private val clockProvider: ClockProvider,
     private val transactionRunner: TransactionRunner,
@@ -47,58 +49,30 @@ internal class RequestLimitRuleChangeWorkflow(
         val tenantId = TenantId.of(command.tenantId)
 
         transactionRunner.inTransaction {
-            val existingRequest = command.idempotencyKey
-                ?.let { IdempotencyKey.of(it) }
-                ?.let { changeRequestRepository.findByIdempotencyKey(tenantId, it) }
-            if (existingRequest != null) {
-                val requestedEvent = changeEventRepository
-                    .findByChangeRequest(tenantId, existingRequest.id)
-                    .firstOrNull { it.eventType == LimitRuleChangeEventType.REQUESTED }
-                val originalIntent = requestedEvent?.eventPayload?.value?.get("originalIntent") as? Map<*, *>
-                if (originalIntent != null) {
-                    if (!LimitChangeCreationIntent.matches(originalIntent, command)) {
-                        throw IdempotencyConflictException(
-                            "idempotency key already belongs to a different limit change request"
-                        )
-                    }
-                    return@inTransaction existingRequest.toResult()
-                }
-                val originalRequestedRule = requestedEvent?.afterRule
-                    ?: throw IdempotencyConflictException("original creation evidence is unavailable for this request")
-                val requestedEventPayload = requestedEvent.eventPayload.value
-                val originalEffectiveAt = if (requestedEventPayload.containsKey("effectiveAt")) {
-                    (requestedEventPayload["effectiveAt"] as? String)?.let(Instant::parse)
-                } else {
-                    throw IdempotencyConflictException("original creation timing is unavailable for this request")
-                }
-                if (existingRequest.supersededByChangeRequestId != null) {
-                    throw IdempotencyConflictException("original creation deadline is unavailable for this request")
-                }
-                requireSameIdempotentRequest(
-                    existingRequest = existingRequest,
-                    command = command,
-                    originalRequestedRule = originalRequestedRule,
-                    originalEffectiveAt = originalEffectiveAt,
-                )
-                return@inTransaction existingRequest.toResult()
-            }
+            replay(command, tenantId)?.let { return@inTransaction it }
 
             commandValidator.validateEligibility(command, now)
 
+            val futureRuleId = if (command.changeType == LimitRuleChangeType.CREATE) {
+                LimitRuleId.of(idGenerator.newId())
+            } else null
+            val plan = try {
+                val discoveredFacts = referenceResolver.resolve(command)
+                val discoveredCandidate = candidateFactory.createCandidate(command, discoveredFacts, futureRuleId, now)
+                locks.discover(discoveredFacts.currentRule, discoveredCandidate)
+            } catch (exception: ConflictException) {
+                // A concurrent equal keyed submission may have applied between replay lookup and discovery.
+                replay(command, tenantId)?.let { return@inTransaction it }
+                throw exception
+            }
+            val lockedTargets = locks.acquireTargets(tenantId, listOf(plan))
+            replay(command, tenantId)?.let { return@inTransaction it }
+            locks.acquireRules(tenantId, listOf(plan))
             val facts = referenceResolver.resolve(command)
-            val candidate = candidateFactory.createCandidate(
-                command = command,
-                facts = facts,
-                futureRuleId = if (command.changeType == LimitRuleChangeType.CREATE) {
-                    LimitRuleId.of(idGenerator.newId())
-                } else {
-                    null
-                },
-                now = now,
-            )
+            val candidate = candidateFactory.createCandidate(command, facts, futureRuleId, now)
             mandateValidator.validate(candidate, command.effectiveAt ?: now)
             val requestId = LimitChangeRequestId.of(idGenerator.newId())
-            val target = targets.requireAvailable(candidate, requestId, now)
+            val target = targets.requireAvailable(candidate, requestId, now, lockedTargets)
             val request = changeRequestFactory.create(
                 id = requestId,
                 command = command,
@@ -144,7 +118,7 @@ internal class RequestLimitRuleChangeWorkflow(
                     return@inTransaction failed.toResult()
                 }
                 is LimitChangeAuthorization.ManualApprovalRequired -> {
-                    candidateAfterPolicyActions(candidate, requested, policyRequest, now)
+                    candidateAfterPolicyActions(candidate, requested, policyRequest, now, lockedTargets)
                     val pending = if (policyRequest == requested) {
                         requested
                     } else {
@@ -180,7 +154,7 @@ internal class RequestLimitRuleChangeWorkflow(
                     return@inTransaction rejected.toResult()
                 }
                 is LimitChangeAuthorization.Allowed -> {
-                    val policyCandidate = candidateAfterPolicyActions(candidate, requested, policyRequest, now)
+                    val policyCandidate = candidateAfterPolicyActions(candidate, requested, policyRequest, now, lockedTargets)
                     applicationWorkflow.approveAndApply(
                         request = policyRequest,
                         candidate = policyCandidate,
@@ -193,10 +167,39 @@ internal class RequestLimitRuleChangeWorkflow(
                             "evaluationId" to authorization.evaluation.id.value.toString(),
                         )),
                         policyId = authorization.policy.id,
+                        lockedTargets = lockedTargets,
                     ).toResult()
                 }
             }
         }
+    }
+
+    private fun replay(command: RequestLimitRuleChangeCommand, tenantId: TenantId): LimitChangeRequestResult? {
+        val existingRequest = command.idempotencyKey
+            ?.let { IdempotencyKey.of(it) }
+            ?.let { changeRequestRepository.findByIdempotencyKey(tenantId, it) } ?: return null
+        val requestedEvent = changeEventRepository.findByChangeRequest(tenantId, existingRequest.id)
+            .firstOrNull { it.eventType == LimitRuleChangeEventType.REQUESTED }
+        val originalIntent = requestedEvent?.eventPayload?.value?.get("originalIntent") as? Map<*, *>
+        if (originalIntent != null) {
+            if (!LimitChangeCreationIntent.matches(originalIntent, command)) {
+                throw IdempotencyConflictException("idempotency key already belongs to a different limit change request")
+            }
+            return existingRequest.toResult()
+        }
+        val originalRequestedRule = requestedEvent?.afterRule
+            ?: throw IdempotencyConflictException("original creation evidence is unavailable for this request")
+        val requestedEventPayload = requestedEvent.eventPayload.value
+        val originalEffectiveAt = if (requestedEventPayload.containsKey("effectiveAt")) {
+            (requestedEventPayload["effectiveAt"] as? String)?.let(Instant::parse)
+        } else {
+            throw IdempotencyConflictException("original creation timing is unavailable for this request")
+        }
+        if (existingRequest.supersededByChangeRequestId != null) {
+            throw IdempotencyConflictException("original creation deadline is unavailable for this request")
+        }
+        requireSameIdempotentRequest(existingRequest, command, originalRequestedRule, originalEffectiveAt)
+        return existingRequest.toResult()
     }
 
     private fun candidateAfterPolicyActions(
@@ -204,6 +207,7 @@ internal class RequestLimitRuleChangeWorkflow(
         originalRequest: LimitRuleChangeRequest,
         policyRequest: LimitRuleChangeRequest,
         now: Instant,
+        lockedTargets: LockedLimitChangeTargets,
     ): LimitRule {
         if (policyRequest == originalRequest) return originalCandidate
 
@@ -222,7 +226,7 @@ internal class RequestLimitRuleChangeWorkflow(
             )
         }
         mandateValidator.validate(candidate, policyRequest.effectiveAt ?: now)
-        targets.requireAvailable(candidate, policyRequest.id, now)
+        targets.requireAvailable(candidate, policyRequest.id, now, lockedTargets)
         return candidate
     }
 

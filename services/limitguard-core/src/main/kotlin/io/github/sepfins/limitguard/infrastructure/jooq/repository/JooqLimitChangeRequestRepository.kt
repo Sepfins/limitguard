@@ -89,6 +89,33 @@ class JooqLimitChangeRequestRepository(
             Unit
         }
 
+    override fun tryLockTarget(tenantId: TenantId, targetScopeHash: ScopeHash): Boolean =
+        jooqOperation("try lock limit change target") {
+            context.requireTransaction("locking a limit change target")
+            val lockKey = "limit-change-target:${tenantId.value}:${targetScopeHash.value}"
+            context.dsl().fetchValue("select pg_try_advisory_xact_lock(hashtextextended(?, 0))", lockKey) == true
+        }
+
+    override fun findDueForApplication(
+        tenantId: TenantId,
+        dueAt: Instant,
+        limit: Int,
+    ): List<LimitRuleChangeRequest> = jooqOperation("discover due limit change requests") {
+        require(limit > 0) { "limit must be greater than zero" }
+        selectRequests().where(dueCondition(tenantId, dueAt))
+            .orderBy(table.CREATED_AT, table.ID).limit(limit).fetch { it.toDomain() }
+    }
+
+    override fun claimForApplication(
+        tenantId: TenantId,
+        id: LimitChangeRequestId,
+        dueAt: Instant,
+    ): LimitRuleChangeRequest? = jooqOperation("claim due limit change request") {
+        context.requireTransaction("claiming a due limit change request")
+        selectRequests().where(dueCondition(tenantId, dueAt)).and(table.ID.eq(id.value))
+            .forUpdate().skipLocked().fetchOne { it.toDomain() }
+    }
+
     override fun claimDueForApplication(
         tenantId: TenantId,
         dueAt: Instant,
@@ -96,12 +123,8 @@ class JooqLimitChangeRequestRepository(
     ): List<LimitRuleChangeRequest> = jooqOperation("claim due limit change requests") {
         context.requireTransaction("claiming due limit change requests")
         require(limit > 0) { "limit must be greater than zero" }
-        val timestamp = dueAt.toOffsetDateTime()
         selectRequests()
-            .where(table.TENANT_ID.eq(tenantId.value))
-            .and(table.STATUS.`in`(DUE_STATUSES))
-            .and(table.EFFECTIVE_AT.isNull.or(table.EFFECTIVE_AT.le(timestamp)))
-            .and(table.EXPIRES_AT.isNull.or(table.EXPIRES_AT.gt(timestamp)))
+            .where(dueCondition(tenantId, dueAt))
             .orderBy(table.CREATED_AT, table.ID)
             .limit(limit)
             .forUpdate()
@@ -233,6 +256,12 @@ class JooqLimitChangeRequestRepository(
     private fun selectRequests() = context.dsl()
         .select(table.fields().toList())
         .from(table)
+
+    private fun dueCondition(tenantId: TenantId, dueAt: Instant) =
+        table.TENANT_ID.eq(tenantId.value)
+            .and(table.STATUS.`in`(DUE_STATUSES))
+            .and(table.EFFECTIVE_AT.isNull.or(table.EFFECTIVE_AT.le(dueAt.toOffsetDateTime())))
+            .and(table.EXPIRES_AT.isNull.or(table.EXPIRES_AT.gt(dueAt.toOffsetDateTime())))
 
     private fun Record.toDomain(): LimitRuleChangeRequest {
         val requestedBy = when (requireNotNull(get(table.REQUESTED_BY_ACTOR_TYPE))) {

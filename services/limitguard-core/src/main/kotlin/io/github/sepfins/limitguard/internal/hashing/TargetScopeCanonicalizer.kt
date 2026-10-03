@@ -10,7 +10,9 @@ import io.github.sepfins.limitguard.domain.limit.LimitRuleTargetScope
 import io.github.sepfins.limitguard.domain.mandate.MandateScope
 
 internal object TargetScopeCanonicalizer {
-    fun hash(scope: LimitRuleTargetScope): ScopeHash = ScopeHash.of(StableJsonHasher.sha256Hex(canonicalize(scope)))
+    fun hash(scope: LimitRuleTargetScope): ScopeHash = hash(snapshot(scope))
+
+    fun hash(snapshot: Metadata): ScopeHash = ScopeHash.of(StableJsonHasher.sha256Hex(CanonicalJson.encodeObject(snapshot.value)))
 
     fun canonicalize(scope: LimitRuleTargetScope): String = CanonicalJson.encodeObject(snapshot(scope).value)
 

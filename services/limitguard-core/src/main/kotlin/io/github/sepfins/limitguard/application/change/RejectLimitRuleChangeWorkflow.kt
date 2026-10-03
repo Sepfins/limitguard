@@ -18,6 +18,7 @@ internal class RejectLimitRuleChangeWorkflow(
     private val changeEventFactory: LimitChangeEventFactory,
     private val changeRequestRepository: LimitChangeRequestRepository,
     private val changeEventRepository: LimitRuleChangeEventRepository,
+    private val locks: LimitChangeLocks,
     private val clockProvider: ClockProvider,
     private val transactionRunner: TransactionRunner,
 ) {
@@ -29,8 +30,7 @@ internal class RejectLimitRuleChangeWorkflow(
         val now = clockProvider.now()
 
         transactionRunner.inTransaction {
-            val request = changeRequestRepository.findByIdForUpdate(tenantId, changeRequestId)
-                ?: throw NotFoundException("limit change request not found: ${changeRequestId.value}")
+            val request = locks.acquireRequest(tenantId, changeRequestId).request
             if (request.status != LimitRuleChangeStatus.REQUESTED) {
                 throw ConflictException("limit change request is not awaiting a decision: ${request.id.value}")
             }

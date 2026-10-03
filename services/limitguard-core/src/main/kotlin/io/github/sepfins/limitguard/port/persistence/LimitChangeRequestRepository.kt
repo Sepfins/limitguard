@@ -27,11 +27,29 @@ interface LimitChangeRequestRepository {
      */
     fun lockTarget(tenantId: TenantId, targetScopeHash: ScopeHash)
 
+    /** Nonblocking logical target acquisition for batch workers; false means skip this work. */
+    fun tryLockTarget(tenantId: TenantId, targetScopeHash: ScopeHash): Boolean
+
+    /** Discovers bounded, stably ordered due candidates without acquiring request-row locks. */
+    fun findDueForApplication(tenantId: TenantId, dueAt: Instant, limit: Int): List<LimitRuleChangeRequest>
+
+    /**
+     * Claims one discovered row without waiting, rechecking its due state. The caller
+     * must acquire all of its logical targets before this claim, then lock rule rows.
+     */
+    fun claimForApplication(
+        tenantId: TenantId,
+        id: LimitChangeRequestId,
+        dueAt: Instant,
+    ): LimitRuleChangeRequest?
+
     /**
      * Claims due request rows for the surrounding transaction. Database
      * implementations must use non-blocking row claims (for example,
      * FOR UPDATE SKIP LOCKED) so concurrent schedulers receive disjoint work.
      * The returned requests must be processed before that transaction ends.
+     * Callers must already hold every affected logical target. Core workflows use
+     * discovery and individual claims instead so they can gather the complete lock set.
      */
     fun claimDueForApplication(
         tenantId: TenantId,

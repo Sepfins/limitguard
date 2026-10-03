@@ -42,6 +42,7 @@ internal class DefaultLimitChangeService(
     private val mandates = LimitRuleMandateValidator(mandateRepository)
     private val candidates = LimitRuleCandidateFactory()
     private val targets = LimitChangeTargets(limitConfigurationRepository, limitRuleRepository, changeRequestRepository)
+    private val locks = LimitChangeLocks(targets, changeRequestRepository, limitRuleRepository)
     private val application = LimitChangeApplicationWorkflow(
         changeRequestRepository = changeRequestRepository,
         changeEventRepository = changeEventRepository,
@@ -70,6 +71,7 @@ internal class DefaultLimitChangeService(
         changeRequestRepository = changeRequestRepository,
         changeEventRepository = changeEventRepository,
         targets = targets,
+        locks = locks,
         idGenerator = idGenerator,
         clockProvider = clockProvider,
         transactionRunner = transactionRunner,
@@ -79,6 +81,7 @@ internal class DefaultLimitChangeService(
         mandateValidator = mandates,
         applicationWorkflow = application,
         targets = targets,
+        locks = locks,
         changeRequestRepository = changeRequestRepository,
         limitConfigurationRepository = limitConfigurationRepository,
         limitRuleRepository = limitRuleRepository,
@@ -89,6 +92,7 @@ internal class DefaultLimitChangeService(
         changeEventFactory = events,
         changeRequestRepository = changeRequestRepository,
         changeEventRepository = changeEventRepository,
+        locks = locks,
         clockProvider = clockProvider,
         transactionRunner = transactionRunner,
     )
@@ -96,6 +100,7 @@ internal class DefaultLimitChangeService(
         changeEventFactory = events,
         changeRequestRepository = changeRequestRepository,
         changeEventRepository = changeEventRepository,
+        locks = locks,
         clockProvider = clockProvider,
         transactionRunner = transactionRunner,
     )
@@ -107,6 +112,7 @@ internal class DefaultLimitChangeService(
         changeEventRepository = changeEventRepository,
         limitConfigurationRepository = limitConfigurationRepository,
         limitRuleRepository = limitRuleRepository,
+        locks = locks,
         clockProvider = clockProvider,
         transactionRunner = transactionRunner,
     )

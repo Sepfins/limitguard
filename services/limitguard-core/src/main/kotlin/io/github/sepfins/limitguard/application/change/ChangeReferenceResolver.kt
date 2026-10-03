@@ -26,7 +26,7 @@ internal class ChangeReferenceResolver(
     fun resolve(command: RequestLimitRuleChangeCommand): ResolvedLimitChangeFacts {
         val tenantId = TenantId.of(command.tenantId)
         val currentRule = command.limitRuleId?.let {
-            limitRuleRepository.findByIdForUpdate(tenantId, LimitRuleId.of(it))
+            limitRuleRepository.findById(tenantId, LimitRuleId.of(it))
                 ?: throw NotFoundException("limit rule not found: $it")
         }
         if (command.changeType != LimitRuleChangeType.CREATE) {
