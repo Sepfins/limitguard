@@ -13,6 +13,7 @@ import io.github.sepfins.limitguard.port.persistence.LimitChangeRequestRepositor
 import io.github.sepfins.limitguard.port.persistence.LimitRuleRepository
 
 /**
+ * A keyed decision acquires its tenant/key lock before entering this protocol.
  * Target hashes, then request IDs, then rule IDs, each sorted.
  * Affected catalog/authority rows come last, ordered by table, tenant, and ID.
  */

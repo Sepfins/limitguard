@@ -29,6 +29,7 @@ internal class LimitChangeApplicationWorkflow(
     private val limitRuleRevisionRepository: LimitRuleRevisionRepository,
     private val changeEventFactory: LimitChangeEventFactory,
     private val targets: LimitChangeTargets,
+    private val eligibility: LimitChangeEligibilityValidator,
     private val idGenerator: IdGenerator,
 ) {
     fun approveAndApply(
@@ -41,6 +42,7 @@ internal class LimitChangeApplicationWorkflow(
         eventPayload: Metadata = Metadata.EMPTY,
         policyId: LimitChangePolicyId? = null,
     ): LimitRuleChangeRequest {
+        eligibility.validateApprovedIntent(request, candidate, at)
         val target = targets.requireAvailable(candidate, request.id, at, lockedTargets)
         val approved = changeRequestRepository.update(request.tenantId, request.approve(
             approvedRule = LimitRuleSnapshotter.ruleSnapshot(candidate),
@@ -81,6 +83,7 @@ internal class LimitChangeApplicationWorkflow(
             throw ConflictException("limit change request has expired: ${request.id.value}")
         }
         targets.requireApplicable(request, candidate, lockedTargets)
+        eligibility.validateApprovedIntent(request, candidate, applicationTime)
 
         val candidateAtApplication = candidate.copy(updatedAt = applicationTime)
         val persistedRule = when (request.changeType) {

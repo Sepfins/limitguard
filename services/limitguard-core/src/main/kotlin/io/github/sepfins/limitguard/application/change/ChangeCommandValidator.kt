@@ -42,6 +42,7 @@ internal class ChangeCommandValidator {
 
         val actor = command.toChangeActor()
         command.toRequestActorContext(actor)
+        command.toRequesterPartyProfileId(actor)
         if (command.requestedRule != null) {
             command.toTargetMandateId()
         }

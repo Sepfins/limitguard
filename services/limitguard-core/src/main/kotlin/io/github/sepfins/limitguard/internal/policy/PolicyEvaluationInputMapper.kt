@@ -55,16 +55,21 @@ private fun ChangeActor.toPolicyInput(): Map<String, Any?> =
 
 private fun RequestActorContext.toPolicyInput(): Map<String, Any?> =
     when (this) {
-        RequestActorContext.System -> mapOf("actorType" to "SYSTEM")
+        is RequestActorContext.System -> mapOf(
+            "shapeVersion" to 2,
+            "actorType" to "SYSTEM",
+            "requestChannelId" to requestChannelId?.value?.toString(),
+        )
         is RequestActorContext.PartyProfile -> mapOf(
+            "shapeVersion" to 2,
             "actorType" to "PARTY_PROFILE",
-            "requesterPartyProfileId" to requesterPartyProfileId.value.toString(),
-            "requesterChannelId" to requesterChannelId.value.toString(),
+            "actorPartyProfileId" to actorPartyProfileId.value.toString(),
+            "requestChannelId" to requestChannelId.value.toString(),
         )
         is RequestActorContext.BankWorker -> mapOf(
+            "shapeVersion" to 2,
             "actorType" to "BANK_WORKER",
             "bankWorkerId" to bankWorkerId.value.toString(),
-            "requesterChannelId" to requesterChannelId.value.toString(),
+            "requestChannelId" to requestChannelId.value.toString(),
         )
-        else -> mapOf("actorType" to (this::class.simpleName ?: "UNKNOWN"))
     }

@@ -19,6 +19,7 @@ import io.github.sepfins.limitguard.port.transactions.TransactionRunner
 import java.time.Instant
 
 internal class ApplyDueLimitChangesWorkflow(
+    private val eligibility: LimitChangeEligibilityValidator,
     private val applicationWorkflow: LimitChangeApplicationWorkflow,
     private val mandateValidator: LimitRuleMandateValidator,
     private val changeEventFactory: LimitChangeEventFactory,
@@ -36,6 +37,7 @@ internal class ApplyDueLimitChangesWorkflow(
         val dueAt = command.dueAt ?: clockProvider.now()
 
         transactionRunner.inTransaction {
+            eligibility.validateTenant(tenantId)
             val candidates = changeRequestRepository.findDueForApplication(
                 tenantId = tenantId,
                 dueAt = dueAt,
@@ -64,6 +66,9 @@ internal class ApplyDueLimitChangesWorkflow(
                     markFailed(request, dueAt, exception)
                     failedRequestIds += request.id
                 } catch (exception: NotFoundException) {
+                    markFailed(request, dueAt, exception)
+                    failedRequestIds += request.id
+                } catch (exception: ValidationException) {
                     markFailed(request, dueAt, exception)
                     failedRequestIds += request.id
                 } catch (exception: IllegalArgumentException) {

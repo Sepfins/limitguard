@@ -1,5 +1,6 @@
 package io.github.sepfins.limitguard.infrastructure.jooq
 
+import io.github.sepfins.limitguard.api.TrustedChangeActorContext
 import io.github.sepfins.limitguard.api.FundingSourceCategory
 import io.github.sepfins.limitguard.api.LimitChangeActorType
 import io.github.sepfins.limitguard.api.LimitChangePolicyDecision
@@ -23,6 +24,7 @@ import io.github.sepfins.limitguard.api.commands.RejectLimitRuleChangeCommand
 import io.github.sepfins.limitguard.api.commands.RequestLimitRuleChangeCommand
 import io.github.sepfins.limitguard.api.errors.ConflictException
 import io.github.sepfins.limitguard.api.queries.GetLimitChangeQuery
+import io.github.sepfins.limitguard.api.results.LimitChangeRequestResult
 import io.github.sepfins.limitguard.support.FixedClockProvider
 import org.flywaydb.core.Flyway
 import org.junit.jupiter.api.BeforeAll
@@ -71,26 +73,33 @@ class ChangeWorkflowLockingIntegrationTest {
         val fixture = fixture()
         val savings = configuration(fixture.tenant, "SAVINGS", FundingSourceCategory.SAVINGS)
         val credit = configuration(fixture.tenant, "CREDIT", FundingSourceCategory.CREDIT)
-        val original = facade.limitChangeService.requestLimitRuleChange(fixture.create(credit, "Credit limit"))
+        val original = facade.limitChangeService.requestLimitRuleChange(fixture.create(credit, "Credit limit"), trustedActorContext = TrustedChangeActorContext.InternalSystem)
         facade.limitChangeService.approveLimitRuleChange(ApproveLimitRuleChangeCommand(
             fixture.tenant, original.id, SYSTEM,
-        ))
+        ),
+            trustedActorContext = TrustedChangeActorContext.InternalSystem,
+        )
         val scheduledCreate = facade.limitChangeService.requestLimitRuleChange(
             fixture.create(savings, "Savings limit").copy(effectiveAt = DUE),
+            trustedActorContext = TrustedChangeActorContext.InternalSystem,
         )
         facade.limitChangeService.approveLimitRuleChange(ApproveLimitRuleChangeCommand(
             fixture.tenant, scheduledCreate.id, SYSTEM,
-        ))
+        ),
+            trustedActorContext = TrustedChangeActorContext.InternalSystem,
+        )
         clock.advanceBy(Duration.ofSeconds(1))
         val existingRule = facade.limitInquiryService.getLimitChange(GetLimitChangeQuery(fixture.tenant, original.id))
             .request.limitRuleId!!
         val update = fixture.create(credit, "Credit limit").copy(
             changeType = LimitRuleChangeType.UPDATE, limitRuleId = existingRule, expectedVersion = 1,
         )
-        val scheduledUpdate = facade.limitChangeService.requestLimitRuleChange(update.copy(effectiveAt = DUE))
+        val scheduledUpdate = facade.limitChangeService.requestLimitRuleChange(update.copy(effectiveAt = DUE), trustedActorContext = TrustedChangeActorContext.InternalSystem)
         facade.limitChangeService.approveLimitRuleChange(ApproveLimitRuleChangeCommand(
             fixture.tenant, scheduledUpdate.id, SYSTEM,
-        ))
+        ),
+            trustedActorContext = TrustedChangeActorContext.InternalSystem,
+        )
 
         val firstRevisionWritten = CountDownLatch(1)
         val continueBatch = CountDownLatch(1)
@@ -108,7 +117,7 @@ class ChangeWorkflowLockingIntegrationTest {
         val executor = Executors.newFixedThreadPool(2)
         try {
             val application = executor.submit<io.github.sepfins.limitguard.api.results.ApplyDueChangesResult> {
-                dueFacade.limitChangeService.applyDueLimitChanges(ApplyDueLimitChangesCommand(fixture.tenant, DUE))
+                dueFacade.limitChangeService.applyDueLimitChanges(ApplyDueLimitChangesCommand(fixture.tenant, DUE), trustedActorContext = TrustedChangeActorContext.InternalSystem)
             }
             await(firstRevisionWritten)
             val submission = executor.submit<Result<io.github.sepfins.limitguard.api.results.LimitChangeRequestResult>> {
@@ -116,7 +125,9 @@ class ChangeWorkflowLockingIntegrationTest {
                     submittingFacade.limitChangeService.requestLimitRuleChange(update.copy(
                         requestedRule = update.requestedRule!!.copy(configurationId = savings),
                         idempotencyKey = "move-target",
-                    ))
+                    ),
+                        trustedActorContext = TrustedChangeActorContext.InternalSystem,
+                    )
                 }
             }
             await(submissionAtTarget)
@@ -154,24 +165,26 @@ class ChangeWorkflowLockingIntegrationTest {
         val executor = Executors.newFixedThreadPool(2)
         try {
             val first = executor.submit<io.github.sepfins.limitguard.api.results.LimitChangeRequestResult> {
-                firstFacade.limitChangeService.requestLimitRuleChange(firstCommand)
+                firstFacade.limitChangeService.requestLimitRuleChange(firstCommand, trustedActorContext = TrustedChangeActorContext.InternalSystem)
             }
             await(barrier.inserted)
             val second = executor.submit<Result<io.github.sepfins.limitguard.api.results.LimitChangeRequestResult>> {
-                runCatching { secondFacade.limitChangeService.requestLimitRuleChange(secondCommand) }
+                runCatching { secondFacade.limitChangeService.requestLimitRuleChange(secondCommand, trustedActorContext = TrustedChangeActorContext.InternalSystem) }
             }
             await(barrier.contenderAtTarget)
             barrier.release.countDown()
             val winner = first.get(10, TimeUnit.SECONDS)
             assertIs<ConflictException>(second.get(10, TimeUnit.SECONDS).exceptionOrNull())
-            assertEquals(winner, facade.limitChangeService.requestLimitRuleChange(firstCommand))
+            assertEquals(winner, facade.limitChangeService.requestLimitRuleChange(firstCommand, trustedActorContext = TrustedChangeActorContext.InternalSystem))
             val details = facade.limitInquiryService.getLimitChange(GetLimitChangeQuery(fixture.tenant, winner.id))
             assertEquals(listOf("REQUESTED"), details.events.map { it.eventType.name })
             assertEquals(emptyList(), details.revisions)
 
             val recovered = facade.limitChangeService.requestLimitRuleChange(secondCommand.copy(
                 requestedRule = secondCommand.requestedRule!!.copy(configurationId = credit),
-            ))
+            ),
+                trustedActorContext = TrustedChangeActorContext.InternalSystem,
+            )
             assertEquals(LimitRuleChangeStatus.REQUESTED, recovered.status)
             assertEquals(listOf("REQUESTED"), facade.limitInquiryService
                 .getLimitChange(GetLimitChangeQuery(fixture.tenant, recovered.id)).events.map { it.eventType.name })
@@ -193,11 +206,11 @@ class ChangeWorkflowLockingIntegrationTest {
         val executor = Executors.newFixedThreadPool(2)
         try {
             val first = executor.submit<io.github.sepfins.limitguard.api.results.LimitChangeRequestResult> {
-                firstFacade.limitChangeService.requestLimitRuleChange(command)
+                firstFacade.limitChangeService.requestLimitRuleChange(command, trustedActorContext = TrustedChangeActorContext.InternalSystem)
             }
             await(barrier.inserted)
             val second = executor.submit<io.github.sepfins.limitguard.api.results.LimitChangeRequestResult> {
-                secondFacade.limitChangeService.requestLimitRuleChange(command)
+                secondFacade.limitChangeService.requestLimitRuleChange(command, trustedActorContext = TrustedChangeActorContext.InternalSystem)
             }
             await(barrier.contenderAtTarget)
             barrier.release.countDown()
@@ -217,7 +230,7 @@ class ChangeWorkflowLockingIntegrationTest {
         val fixture = fixture()
         val savings = configuration(fixture.tenant, "SAVINGS", FundingSourceCategory.SAVINGS)
         val command = fixture.create(savings, "Savings limit").copy(idempotencyKey = "original")
-        val pending = facade.limitChangeService.requestLimitRuleChange(command)
+        val pending = facade.limitChangeService.requestLimitRuleChange(command, trustedActorContext = TrustedChangeActorContext.InternalSystem)
         val approvalFacade = facade(dataSource)
         val rejectionFacade = facade(dataSource)
         val start = CyclicBarrier(2)
@@ -227,12 +240,14 @@ class ChangeWorkflowLockingIntegrationTest {
                 start.await(10, TimeUnit.SECONDS)
                 runCatching { approvalFacade.limitChangeService.approveLimitRuleChange(
                     ApproveLimitRuleChangeCommand(fixture.tenant, pending.id, SYSTEM),
+                    trustedActorContext = TrustedChangeActorContext.InternalSystem,
                 ) }
             }
             val rejection = executor.submit<Result<io.github.sepfins.limitguard.api.results.LimitChangeRequestResult>> {
                 start.await(10, TimeUnit.SECONDS)
                 runCatching { rejectionFacade.limitChangeService.rejectLimitRuleChange(
                     RejectLimitRuleChangeCommand(fixture.tenant, pending.id, SYSTEM, "Declined"),
+                    trustedActorContext = TrustedChangeActorContext.InternalSystem,
                 ) }
             }
             val results = listOf(approval.get(10, TimeUnit.SECONDS), rejection.get(10, TimeUnit.SECONDS))
@@ -244,7 +259,7 @@ class ChangeWorkflowLockingIntegrationTest {
             val revisionCount = if (winner.status == LimitRuleChangeStatus.APPLIED) 1 else 0
             assertEquals(revisionCount, details.revisions.size)
             assertEquals(revisionCount, details.events.count { it.eventType.name == "APPLIED" })
-            assertEquals(winner, facade.limitChangeService.requestLimitRuleChange(command))
+            assertEquals(winner, facade.limitChangeService.requestLimitRuleChange(command, trustedActorContext = TrustedChangeActorContext.InternalSystem))
         } finally {
             executor.shutdownNow()
             assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS))
@@ -259,7 +274,7 @@ class ChangeWorkflowLockingIntegrationTest {
             fixture.tenant, "ALLOW", "Automatic approval", LimitChangePolicyPhase.AUTHORIZATION,
             decision = LimitChangePolicyDecision.ALLOW,
         ))
-        val original = facade.limitChangeService.requestLimitRuleChange(fixture.create(savings, "Savings limit"))
+        val original = facade.limitChangeService.requestLimitRuleChange(fixture.create(savings, "Savings limit"), trustedActorContext = TrustedChangeActorContext.InternalSystem)
         val command = fixture.create(savings, "Savings limit").copy(
             changeType = LimitRuleChangeType.UPDATE, limitRuleId = original.limitRuleId, expectedVersion = 1,
             idempotencyKey = "same-update", requestedRule = fixture.create(savings, "Savings limit").requestedRule!!
@@ -278,11 +293,11 @@ class ChangeWorkflowLockingIntegrationTest {
         val executor = Executors.newFixedThreadPool(2)
         try {
             val first = executor.submit<io.github.sepfins.limitguard.api.results.LimitChangeRequestResult> {
-                firstFacade.limitChangeService.requestLimitRuleChange(command)
+                firstFacade.limitChangeService.requestLimitRuleChange(command, trustedActorContext = TrustedChangeActorContext.InternalSystem)
             }
             await(barrier.inserted)
             val second = executor.submit<io.github.sepfins.limitguard.api.results.LimitChangeRequestResult> {
-                secondFacade.limitChangeService.requestLimitRuleChange(command)
+                secondFacade.limitChangeService.requestLimitRuleChange(command, trustedActorContext = TrustedChangeActorContext.InternalSystem)
             }
             await(secondAtRuleRead)
             barrier.release.countDown()
@@ -313,11 +328,11 @@ class ChangeWorkflowLockingIntegrationTest {
         val executor = Executors.newFixedThreadPool(2)
         try {
             val first = executor.submit<io.github.sepfins.limitguard.api.results.LimitChangeRequestResult> {
-                firstFacade.limitChangeService.requestLimitRuleChange(fixture.create(savings, "Savings limit"))
+                firstFacade.limitChangeService.requestLimitRuleChange(fixture.create(savings, "Savings limit"), trustedActorContext = TrustedChangeActorContext.InternalSystem)
             }
             await(barrier.inserted)
             val second = executor.submit<io.github.sepfins.limitguard.api.results.LimitChangeRequestResult> {
-                secondFacade.limitChangeService.requestLimitRuleChange(fixture.create(credit, "Credit limit"))
+                secondFacade.limitChangeService.requestLimitRuleChange(fixture.create(credit, "Credit limit"), trustedActorContext = TrustedChangeActorContext.InternalSystem)
             }
             assertEquals(LimitRuleChangeStatus.REQUESTED, second.get(5, TimeUnit.SECONDS).status)
             barrier.release.countDown()
@@ -336,24 +351,26 @@ class ChangeWorkflowLockingIntegrationTest {
         val credit = configuration(fixture.tenant, "CREDIT", FundingSourceCategory.CREDIT)
         val firstRequest = facade.limitChangeService.requestLimitRuleChange(
             fixture.create(savings, "Savings limit").copy(effectiveAt = DUE),
+            trustedActorContext = TrustedChangeActorContext.InternalSystem,
         )
-        facade.limitChangeService.approveLimitRuleChange(ApproveLimitRuleChangeCommand(fixture.tenant, firstRequest.id, SYSTEM))
+        facade.limitChangeService.approveLimitRuleChange(ApproveLimitRuleChangeCommand(fixture.tenant, firstRequest.id, SYSTEM), trustedActorContext = TrustedChangeActorContext.InternalSystem)
         clock.advanceBy(Duration.ofSeconds(1))
         val secondRequest = facade.limitChangeService.requestLimitRuleChange(
             fixture.create(credit, "Credit limit").copy(effectiveAt = DUE),
+            trustedActorContext = TrustedChangeActorContext.InternalSystem,
         )
-        facade.limitChangeService.approveLimitRuleChange(ApproveLimitRuleChangeCommand(fixture.tenant, secondRequest.id, SYSTEM))
+        facade.limitChangeService.approveLimitRuleChange(ApproveLimitRuleChangeCommand(fixture.tenant, secondRequest.id, SYSTEM), trustedActorContext = TrustedChangeActorContext.InternalSystem)
         val barrier = WorkflowWriteBarrier(dataSource, "limit_rule_revision")
         val firstFacade = facade(barrier.first)
         val secondFacade = facade(dataSource)
         val executor = Executors.newFixedThreadPool(2)
         try {
             val first = executor.submit<io.github.sepfins.limitguard.api.results.ApplyDueChangesResult> {
-                firstFacade.limitChangeService.applyDueLimitChanges(ApplyDueLimitChangesCommand(fixture.tenant, DUE, 1))
+                firstFacade.limitChangeService.applyDueLimitChanges(ApplyDueLimitChangesCommand(fixture.tenant, DUE, 1), trustedActorContext = TrustedChangeActorContext.InternalSystem)
             }
             await(barrier.inserted)
             val second = executor.submit<io.github.sepfins.limitguard.api.results.ApplyDueChangesResult> {
-                secondFacade.limitChangeService.applyDueLimitChanges(ApplyDueLimitChangesCommand(fixture.tenant, DUE))
+                secondFacade.limitChangeService.applyDueLimitChanges(ApplyDueLimitChangesCommand(fixture.tenant, DUE), trustedActorContext = TrustedChangeActorContext.InternalSystem)
             }
             val unrelated = second.get(5, TimeUnit.SECONDS)
             assertEquals(listOf(secondRequest.id), unrelated.appliedChangeRequestIds)
@@ -376,20 +393,22 @@ class ChangeWorkflowLockingIntegrationTest {
         val savings = configuration(fixture.tenant, "SAVINGS", FundingSourceCategory.SAVINGS)
         val request = facade.limitChangeService.requestLimitRuleChange(
             fixture.create(savings, "Savings limit").copy(effectiveAt = DUE),
+            trustedActorContext = TrustedChangeActorContext.InternalSystem,
         )
-        facade.limitChangeService.approveLimitRuleChange(ApproveLimitRuleChangeCommand(fixture.tenant, request.id, SYSTEM))
+        facade.limitChangeService.approveLimitRuleChange(ApproveLimitRuleChangeCommand(fixture.tenant, request.id, SYSTEM), trustedActorContext = TrustedChangeActorContext.InternalSystem)
         val barrier = WorkflowWriteBarrier(dataSource, "limit_rule_revision")
         val applyingFacade = facade(barrier.first)
         val cancellingFacade = facade(barrier.second)
         val executor = Executors.newFixedThreadPool(2)
         try {
             val application = executor.submit<io.github.sepfins.limitguard.api.results.ApplyDueChangesResult> {
-                applyingFacade.limitChangeService.applyDueLimitChanges(ApplyDueLimitChangesCommand(fixture.tenant, DUE))
+                applyingFacade.limitChangeService.applyDueLimitChanges(ApplyDueLimitChangesCommand(fixture.tenant, DUE), trustedActorContext = TrustedChangeActorContext.InternalSystem)
             }
             await(barrier.inserted)
             val cancellation = executor.submit<Result<io.github.sepfins.limitguard.api.results.LimitChangeRequestResult>> {
                 runCatching { cancellingFacade.limitChangeService.cancelLimitRuleChange(
                     CancelLimitRuleChangeCommand(fixture.tenant, request.id, SYSTEM),
+                    trustedActorContext = TrustedChangeActorContext.InternalSystem,
                 ) }
             }
             await(barrier.contenderAtTarget)

@@ -1,5 +1,8 @@
 package io.github.sepfins.limitguard.demo
 
+import io.github.sepfins.limitguard.api.LimitChangeActorType
+import io.github.sepfins.limitguard.api.Limitguard
+import io.github.sepfins.limitguard.api.queries.GetLimitChangeQuery
 import io.github.sepfins.limitguard.demo.application.DemoScenarioService
 import io.github.sepfins.limitguard.demo.application.DueLimitChangeJob
 import org.junit.jupiter.api.Tag
@@ -38,6 +41,7 @@ class DemoJourneyIntegrationTest @Autowired constructor(
     private val jdbcClient: JdbcClient,
     private val scenarioService: DemoScenarioService,
     private val dueLimitChangeJob: DueLimitChangeJob,
+    private val limitguard: Limitguard,
 ) {
     @Test
     fun `customer journey covers lifecycle limits idempotency repair balances and errors`() {
@@ -218,6 +222,21 @@ class DemoJourneyIntegrationTest @Autowired constructor(
         assertEquals("APPLIED", changedLimit["status"].asText())
         assertEquals("3000.00", changedLimit["limit"]["currentAmount"]["amount"].asText())
         assertEquals(transferLimit["version"].asInt() + 1, changedLimit["limit"]["version"].asInt())
+        val currentScenario = scenarioService.current()
+        val changeRequestId = jdbcClient.sql(
+            "SELECT id FROM limit_rule_change_request WHERE tenant_id = :tenantId AND idempotency_key = :key",
+        ).param("tenantId", currentScenario.tenantId)
+            .param("key", "demo-limit:$transferLimitId:journey-limit-001")
+            .query(UUID::class.java).single()
+        val change = limitguard.limitInquiryService.getLimitChange(GetLimitChangeQuery(
+            requireNotNull(currentScenario.tenantId), changeRequestId,
+        )).request
+        assertEquals(LimitChangeActorType.PARTY_PROFILE, change.requestedBy.actorType)
+        assertEquals(currentScenario.customerPartyProfileId, change.requestedBy.partyProfileId)
+        assertEquals(currentScenario.customerPartyProfileId, change.requesterPartyProfileId)
+        assertEquals(currentScenario.ownerPartyProfileId, change.targetOwnerPartyProfileId)
+        assertEquals(currentScenario.authorityDelegationId, change.authorityDelegationId)
+        assertEquals(currentScenario.mandateId, change.targetMandateId)
         val repeatedLimitChange = patchJson(
             "/limitguard/demo/api/v1/customer/limits/$transferLimitId",
             "journey-limit-001",

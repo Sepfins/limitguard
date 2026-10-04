@@ -1,5 +1,6 @@
 package io.github.sepfins.limitguard.application.change
 
+import io.github.sepfins.limitguard.api.TrustedChangeActorContext
 import io.github.sepfins.limitguard.api.LimitChangeActorType
 import io.github.sepfins.limitguard.api.LimitChannelScope
 import io.github.sepfins.limitguard.api.LimitKind
@@ -31,6 +32,21 @@ import io.github.sepfins.limitguard.domain.change.LimitRuleChangeRequest
 import io.github.sepfins.limitguard.domain.change.LimitRuleRevisionEventType
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeStatus as DomainLimitRuleChangeStatus
 import io.github.sepfins.limitguard.domain.common.BankWorkerId
+import io.github.sepfins.limitguard.domain.common.ChannelId
+import io.github.sepfins.limitguard.domain.common.ExternalReference
+import io.github.sepfins.limitguard.domain.common.PartyId
+import io.github.sepfins.limitguard.domain.channel.Channel
+import io.github.sepfins.limitguard.domain.channel.ChannelCode
+import io.github.sepfins.limitguard.domain.channel.ChannelName
+import io.github.sepfins.limitguard.domain.party.PartyProfile
+import io.github.sepfins.limitguard.domain.tenant.Tenant
+import io.github.sepfins.limitguard.domain.tenant.TenantName
+import io.github.sepfins.limitguard.domain.worker.BankWorker
+import io.github.sepfins.limitguard.domain.worker.DisplayName
+import io.github.sepfins.limitguard.domain.funding.FundingSourceProduct
+import io.github.sepfins.limitguard.domain.funding.FundingSourceProductCode
+import io.github.sepfins.limitguard.domain.funding.FundingSourceProductName
+import io.github.sepfins.limitguard.domain.funding.ProductNodeType
 import io.github.sepfins.limitguard.domain.common.CurrencyCode
 import io.github.sepfins.limitguard.domain.common.EffectiveWindow
 import io.github.sepfins.limitguard.domain.common.FundingSourceProductId
@@ -186,7 +202,9 @@ class DefaultLimitChangeServiceTest {
         val approved = service.approveLimitRuleChange(ApproveLimitRuleChangeCommand(
             tenantId = tenantId.value, changeRequestId = first.id,
             approvedBy = LimitChangeActorCommand(LimitChangeActorType.SYSTEM),
-        ))
+        ),
+            trustedActorContext = TrustedChangeActorContext.InternalSystem,
+        )
         assertEquals(LimitRuleChangeStatus.APPLIED, approved.status)
         assertEquals(first.targetScopeHash, approved.targetScopeHash)
     }
@@ -205,12 +223,12 @@ class DefaultLimitChangeServiceTest {
         ))
 
         val applyBatch = ApplyDueLimitChangesCommand(tenantId.value, now.plusSeconds(60), limit = 1)
-        val batchOne = service.applyDueLimitChanges(applyBatch)
+        val batchOne = service.applyDueLimitChanges(applyBatch, trustedActorContext = TrustedChangeActorContext.InternalSystem)
         assertEquals(1, batchOne.appliedCount)
         assertEquals(0, batchOne.failedCount)
         assertEquals(1, repositories.limitRules.findByOwner(tenantId, PartyProfileId.of(ownerId)).size)
 
-        val batchTwo = service.applyDueLimitChanges(applyBatch)
+        val batchTwo = service.applyDueLimitChanges(applyBatch, trustedActorContext = TrustedChangeActorContext.InternalSystem)
         assertEquals(1, batchTwo.appliedCount)
         assertEquals(0, batchTwo.failedCount)
         assertEquals(setOf(first.id, second.id), (batchOne.appliedChangeRequestIds + batchTwo.appliedChangeRequestIds).toSet())
@@ -235,7 +253,9 @@ class DefaultLimitChangeServiceTest {
                 tenantId = tenantId.value, changeRequestId = first.id,
                 approvedBy = LimitChangeActorCommand(LimitChangeActorType.SYSTEM),
                 approvedRule = draft().copy(configurationId = otherConfigurationId.value),
-            ))
+            ),
+                trustedActorContext = TrustedChangeActorContext.InternalSystem,
+            )
         }
     }
 
@@ -585,7 +605,8 @@ class DefaultLimitChangeServiceTest {
                     bankWorkerId = approverId,
                 ),
                 decisionReason = "Approved after review",
-            )
+            ),
+            trustedActorContext = TrustedChangeActorContext.BankWorker(approverId),
         )
 
         assertEquals(LimitRuleChangeStatus.APPLIED, approved.status)
@@ -615,7 +636,8 @@ class DefaultLimitChangeServiceTest {
                 changeRequestId = requested.id,
                 rejectedBy = LimitChangeActorCommand(LimitChangeActorType.SYSTEM),
                 decisionReason = "Rejected after review",
-            )
+            ),
+            trustedActorContext = TrustedChangeActorContext.InternalSystem,
         )
 
         assertEquals(LimitRuleChangeStatus.REJECTED, rejected.status)
@@ -1476,6 +1498,7 @@ class DefaultLimitChangeServiceTest {
                     changeRequestId = request.id,
                     approvedBy = LimitChangeActorCommand(LimitChangeActorType.SYSTEM),
                 ),
+                trustedActorContext = TrustedChangeActorContext.InternalSystem,
             )
         }
         val persistedRequest = assertNotNull(
@@ -1512,7 +1535,7 @@ class DefaultLimitChangeServiceTest {
             ),
         )
 
-        val result = service.applyDueLimitChanges(ApplyDueLimitChangesCommand(tenantId.value, dueAt))
+        val result = service.applyDueLimitChanges(ApplyDueLimitChangesCommand(tenantId.value, dueAt), trustedActorContext = TrustedChangeActorContext.InternalSystem)
 
         assertEquals(0, result.appliedCount)
         assertEquals(1, result.failedCount)
@@ -1564,7 +1587,8 @@ class DefaultLimitChangeServiceTest {
                 approvedBy = approver,
                 decisionReason = "Approved by branch supervisor",
                 metadata = mapOf("caseId" to "approval-1"),
-            )
+            ),
+            trustedActorContext = TrustedChangeActorContext.BankWorker(approverId),
         )
 
         assertEquals(LimitRuleChangeStatus.APPLIED, result.status)
@@ -1603,7 +1627,8 @@ class DefaultLimitChangeServiceTest {
                 changeRequestId = request.id.value,
                 approvedBy = LimitChangeActorCommand(LimitChangeActorType.SYSTEM),
                 approvedRule = draft(amount = "750.00"),
-            )
+            ),
+            trustedActorContext = TrustedChangeActorContext.InternalSystem,
         )
 
         assertEquals(LimitRuleChangeStatus.APPLIED, result.status)
@@ -1630,7 +1655,8 @@ class DefaultLimitChangeServiceTest {
                         mandateScope = LimitMandateScope.MANDATE,
                         mandateId = mandateId.value,
                     ),
-                )
+                ),
+                trustedActorContext = TrustedChangeActorContext.InternalSystem,
             )
         }
 
@@ -1653,7 +1679,8 @@ class DefaultLimitChangeServiceTest {
                 tenantId = tenantId.value,
                 changeRequestId = request.id.value,
                 approvedBy = LimitChangeActorCommand(LimitChangeActorType.SYSTEM),
-            )
+            ),
+            trustedActorContext = TrustedChangeActorContext.InternalSystem,
         )
 
         assertEquals(LimitRuleChangeStatus.PENDING_EFFECTIVE_DATE, result.status)
@@ -1681,7 +1708,8 @@ class DefaultLimitChangeServiceTest {
                     tenantId = tenantId.value,
                     changeRequestId = applied.id,
                     approvedBy = LimitChangeActorCommand(LimitChangeActorType.SYSTEM),
-                )
+                ),
+                trustedActorContext = TrustedChangeActorContext.InternalSystem,
             )
         }
     }
@@ -1703,7 +1731,8 @@ class DefaultLimitChangeServiceTest {
                 rejectedBy = rejector,
                 decisionReason = "Requested amount exceeds branch policy",
                 metadata = mapOf("caseId" to "rejection-1"),
-            )
+            ),
+            trustedActorContext = TrustedChangeActorContext.BankWorker(approverId),
         )
 
         assertEquals(LimitRuleChangeStatus.REJECTED, result.status)
@@ -1738,15 +1767,18 @@ class DefaultLimitChangeServiceTest {
         assertFailsWith<ValidationException> {
             service.rejectLimitRuleChange(
                 RejectLimitRuleChangeCommand(tenantId.value, request.id.value, actor, " "),
+                trustedActorContext = TrustedChangeActorContext.InternalSystem,
             )
         }
 
         service.rejectLimitRuleChange(
             RejectLimitRuleChangeCommand(tenantId.value, request.id.value, actor, "Not approved"),
+            trustedActorContext = TrustedChangeActorContext.InternalSystem,
         )
         assertFailsWith<ConflictException> {
             service.rejectLimitRuleChange(
                 RejectLimitRuleChangeCommand(tenantId.value, request.id.value, actor, "Still not approved"),
+                trustedActorContext = TrustedChangeActorContext.InternalSystem,
             )
         }
     }
@@ -1764,7 +1796,8 @@ class DefaultLimitChangeServiceTest {
                 tenantId = tenantId.value,
                 changeRequestId = request.id.value,
                 approvedBy = LimitChangeActorCommand(LimitChangeActorType.SYSTEM),
-            )
+            ),
+            trustedActorContext = TrustedChangeActorContext.InternalSystem,
         )
         val scheduled = assertNotNull(repositories.limitChangeRequests.findById(tenantId, request.id))
         val canceller = LimitChangeActorCommand(
@@ -1779,7 +1812,8 @@ class DefaultLimitChangeServiceTest {
                 cancelledBy = canceller,
                 decisionReason = "Customer withdrew the request",
                 metadata = mapOf("caseId" to "cancellation-1"),
-            )
+            ),
+            trustedActorContext = TrustedChangeActorContext.BankWorker(approverId),
         )
 
         assertEquals(LimitRuleChangeStatus.CANCELLED, result.status)
@@ -1817,6 +1851,7 @@ class DefaultLimitChangeServiceTest {
         assertFailsWith<ValidationException> {
             service.cancelLimitRuleChange(
                 CancelLimitRuleChangeCommand(tenantId.value, ownerId, actor, " "),
+                trustedActorContext = TrustedChangeActorContext.InternalSystem,
             )
         }
 
@@ -1824,6 +1859,7 @@ class DefaultLimitChangeServiceTest {
         assertFailsWith<ConflictException> {
             service.cancelLimitRuleChange(
                 CancelLimitRuleChangeCommand(tenantId.value, applied.id, actor),
+                trustedActorContext = TrustedChangeActorContext.InternalSystem,
             )
         }
     }
@@ -1838,13 +1874,15 @@ class DefaultLimitChangeServiceTest {
         )
 
         val earlyResult = service.applyDueLimitChanges(
-            ApplyDueLimitChangesCommand(tenantId.value, dueAt.minusSeconds(1))
+            ApplyDueLimitChangesCommand(tenantId.value, dueAt.minusSeconds(1)),
+            trustedActorContext = TrustedChangeActorContext.InternalSystem,
         )
         assertEquals(0, earlyResult.appliedCount)
         assertEquals(0, earlyResult.failedCount)
 
         val result = service.applyDueLimitChanges(
-            ApplyDueLimitChangesCommand(tenantId.value, dueAt)
+            ApplyDueLimitChangesCommand(tenantId.value, dueAt),
+            trustedActorContext = TrustedChangeActorContext.InternalSystem,
         )
 
         assertEquals(tenantId.value, result.tenantId)
@@ -1903,7 +1941,8 @@ class DefaultLimitChangeServiceTest {
         )
 
         val result = service.applyDueLimitChanges(
-            ApplyDueLimitChangesCommand(tenantId.value, dueAt)
+            ApplyDueLimitChangesCommand(tenantId.value, dueAt),
+            trustedActorContext = TrustedChangeActorContext.InternalSystem,
         )
 
         assertEquals(0, result.appliedCount)
@@ -1946,7 +1985,8 @@ class DefaultLimitChangeServiceTest {
         repositories.mandates.update(tenantId, mandate(isActive = false))
 
         val result = service.applyDueLimitChanges(
-            ApplyDueLimitChangesCommand(tenantId.value, dueAt)
+            ApplyDueLimitChangesCommand(tenantId.value, dueAt),
+            trustedActorContext = TrustedChangeActorContext.InternalSystem,
         )
 
         assertEquals(0, result.appliedCount)
@@ -1980,6 +2020,7 @@ class DefaultLimitChangeServiceTest {
 
         val result = service.applyDueLimitChanges(
             ApplyDueLimitChangesCommand(tenantId.value, dueAt),
+            trustedActorContext = TrustedChangeActorContext.InternalSystem,
         )
 
         assertEquals(0, result.appliedCount)
@@ -1996,13 +2037,13 @@ class DefaultLimitChangeServiceTest {
     fun `applyDueLimitChanges uses the current time and validates the batch limit`() {
         val service = limitChangeService(repositoriesWithConfiguration())
 
-        val result = service.applyDueLimitChanges(ApplyDueLimitChangesCommand(tenantId.value))
+        val result = service.applyDueLimitChanges(ApplyDueLimitChangesCommand(tenantId.value), trustedActorContext = TrustedChangeActorContext.InternalSystem)
         assertEquals(now, result.dueAt)
         assertEquals(0, result.appliedCount)
         assertEquals(0, result.failedCount)
 
         assertFailsWith<ValidationException> {
-            service.applyDueLimitChanges(ApplyDueLimitChangesCommand(tenantId.value, limit = 0))
+            service.applyDueLimitChanges(ApplyDueLimitChangesCommand(tenantId.value, limit = 0), trustedActorContext = TrustedChangeActorContext.InternalSystem)
         }
     }
 
@@ -2010,6 +2051,28 @@ class DefaultLimitChangeServiceTest {
         authorizationDecision: LimitChangePolicyDecision? = LimitChangePolicyDecision.ALLOW,
     ): InMemoryLimitguardRepositories {
         val repositories = InMemoryLimitguardRepositories()
+        repositories.tenants.insert(Tenant(tenantId, TenantName.of("Change test bank")))
+        for (id in listOf(ownerId, requesterId)) {
+            repositories.partyProfiles.insert(tenantId, PartyProfile(
+                id = PartyProfileId.of(id), partyId = PartyId.of(id), tenantId = tenantId,
+            ))
+        }
+        repositories.bankWorkers.insert(tenantId, BankWorker(
+            id = BankWorkerId.of(approverId), tenantId = tenantId,
+            externalReference = ExternalReference.of("APPROVER"), displayName = DisplayName.of("Approver"),
+        ))
+        repositories.channels.insert(tenantId, Channel(
+            id = ChannelId.of(channelId), tenantId = tenantId, code = ChannelCode.of("WEB"),
+            name = ChannelName.of("Web"), isActive = true,
+        ))
+        for (id in listOf(UUID(0, 50), UUID(0, 51))) {
+            repositories.fundingSourceProducts.insert(tenantId, FundingSourceProduct(
+                id = FundingSourceProductId.of(id), tenantId = tenantId, parentId = null,
+                accountCategory = FundingSourceCategory.TRANSACTIONAL, nodeType = ProductNodeType.PRODUCT,
+                code = FundingSourceProductCode.of("PRODUCT_${id.leastSignificantBits}"),
+                name = FundingSourceProductName.of("Test product"), isLeaf = true, isActive = true,
+            ))
+        }
         repositories.limitConfigurations.insert(
             tenantId,
             LimitConfiguration(
@@ -2147,6 +2210,14 @@ class DefaultLimitChangeServiceTest {
         policyEngines: Collection<PolicyEngine> = listOf(JsonLogicPolicyEngine()),
     ): DefaultLimitChangeService {
         return DefaultLimitChangeService(
+            tenantRepository = repositories.tenants,
+            partyProfileRepository = repositories.partyProfiles,
+            partyProfileDelegationRepository = repositories.partyProfileDelegations,
+            bankWorkerRepository = repositories.bankWorkers,
+            channelRepository = repositories.channels,
+            channelGroupRepository = repositories.channelGroups,
+            operationTypeRepository = repositories.operationTypes,
+            fundingSourceProductRepository = repositories.fundingSourceProducts,
             changeRequestRepository = repositories.limitChangeRequests,
             changeEventRepository = repositories.limitRuleChangeEvents,
             limitRuleRepository = repositories.limitRules,
@@ -2226,7 +2297,7 @@ class DefaultLimitChangeServiceTest {
             changeType = changeType,
             requestedBy = LimitChangeActorCommand(
                 actorType = LimitChangeActorType.PARTY_PROFILE,
-                partyProfileId = requesterId,
+                partyProfileId = ownerId,
             ),
             targetOwnerPartyProfileId = ownerId,
             requestedRule = requestedRule ?: if (changeType == LimitRuleChangeType.UPDATE) draft() else null,
@@ -2274,7 +2345,7 @@ class DefaultLimitChangeServiceTest {
             changeType = LimitRuleChangeType.CREATE,
             requestedBy = LimitChangeActorCommand(
                 actorType = LimitChangeActorType.PARTY_PROFILE,
-                partyProfileId = requesterId,
+                partyProfileId = ownerId,
             ),
             targetOwnerPartyProfileId = ownerId,
             requestedRule = draft(

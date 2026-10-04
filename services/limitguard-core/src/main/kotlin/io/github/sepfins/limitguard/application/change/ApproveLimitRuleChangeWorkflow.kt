@@ -1,6 +1,7 @@
 package io.github.sepfins.limitguard.application.change
 
 import io.github.sepfins.limitguard.api.commands.ApproveLimitRuleChangeCommand
+import io.github.sepfins.limitguard.api.TrustedChangeActorContext
 import io.github.sepfins.limitguard.api.errors.ConflictException
 import io.github.sepfins.limitguard.api.errors.NotFoundException
 import io.github.sepfins.limitguard.api.errors.ValidationException
@@ -21,6 +22,7 @@ import io.github.sepfins.limitguard.port.transactions.TransactionRunner
 import java.time.Instant
 
 internal class ApproveLimitRuleChangeWorkflow(
+    private val eligibility: LimitChangeEligibilityValidator,
     private val candidateFactory: LimitRuleCandidateFactory,
     private val mandateValidator: LimitRuleMandateValidator,
     private val applicationWorkflow: LimitChangeApplicationWorkflow,
@@ -32,7 +34,8 @@ internal class ApproveLimitRuleChangeWorkflow(
     private val clockProvider: ClockProvider,
     private val transactionRunner: TransactionRunner,
 ) {
-    fun execute(command: ApproveLimitRuleChangeCommand): LimitChangeRequestResult = mapValidation {
+    fun execute(command: ApproveLimitRuleChangeCommand, trustedActorContext: TrustedChangeActorContext?): LimitChangeRequestResult = mapValidation {
+        command.approvedBy.requireTrustedAuthority(trustedActorContext)
         require(command.decisionReason == null || command.decisionReason.isNotBlank()) {
             "decisionReason must not be blank"
         }
@@ -49,6 +52,7 @@ internal class ApproveLimitRuleChangeWorkflow(
             }
             val request = locked.request
             requireOpenRequest(request, now)
+            eligibility.validateActionActor(tenantId, actor)
 
             val currentRule = locked.currentRule
             if (request.limitRuleId != null && currentRule == null) {

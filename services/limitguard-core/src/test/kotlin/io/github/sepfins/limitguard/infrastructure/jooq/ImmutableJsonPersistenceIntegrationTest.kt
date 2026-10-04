@@ -1,5 +1,6 @@
 package io.github.sepfins.limitguard.infrastructure.jooq
 
+import io.github.sepfins.limitguard.api.TrustedChangeActorContext
 import io.github.sepfins.limitguard.api.LimitChangeActorType
 import io.github.sepfins.limitguard.api.LimitKind
 import io.github.sepfins.limitguard.api.LimitRuleChangeType
@@ -87,11 +88,11 @@ class ImmutableJsonPersistenceIntegrationTest {
             decision = io.github.sepfins.limitguard.api.LimitChangePolicyDecision.ALLOW,
         ))
         val command = requestCommand(emptyMap())
-        assertFailsWith<ValidationException> { guarded.limitChangeService.requestLimitRuleChange(command) }
+        assertFailsWith<ValidationException> { guarded.limitChangeService.requestLimitRuleChange(command, trustedActorContext = TrustedChangeActorContext.InternalSystem) }
         malformed = false
-        val result = guarded.limitChangeService.requestLimitRuleChange(command)
+        val result = guarded.limitChangeService.requestLimitRuleChange(command, trustedActorContext = TrustedChangeActorContext.InternalSystem)
         assertEquals(io.github.sepfins.limitguard.api.LimitRuleChangeStatus.APPLIED, result.status)
-        assertEquals(result, guarded.limitChangeService.requestLimitRuleChange(command))
+        assertEquals(result, guarded.limitChangeService.requestLimitRuleChange(command, trustedActorContext = TrustedChangeActorContext.InternalSystem))
         val events = guarded.limitInquiryService.getLimitChange(GetLimitChangeQuery(tenant, result.id)).events
         assertEquals(listOf("REQUESTED", "POLICY_EVALUATED", "APPROVED", "APPLIED"), events.map { it.eventType.name })
     }
@@ -126,7 +127,7 @@ class ImmutableJsonPersistenceIntegrationTest {
             decision = io.github.sepfins.limitguard.api.LimitChangePolicyDecision.REQUIRE_APPROVAL, metadata = metadata,
         ))
         val command = requestCommand(metadata)
-        val pending = facade.limitChangeService.requestLimitRuleChange(command)
+        val pending = facade.limitChangeService.requestLimitRuleChange(command, trustedActorContext = TrustedChangeActorContext.InternalSystem)
         explanation[0] = "changed explanation"
         assertTrue(engineInputMutationBlocked)
         val normalized = metadata + mapOf("large" to BigDecimal("$large.0"), "count" to BigDecimal("1.000"))
@@ -134,7 +135,7 @@ class ImmutableJsonPersistenceIntegrationTest {
             metadata = normalized, policyContext = normalized,
             requestedRule = command.requestedRule!!.copy(amount = BigDecimal("500.0000"), currency = "EUR", metadata = normalized),
         )
-        assertEquals(pending, facade.limitChangeService.requestLimitRuleChange(retry))
+        assertEquals(pending, facade.limitChangeService.requestLimitRuleChange(retry, trustedActorContext = TrustedChangeActorContext.InternalSystem))
         val persisted = assertNotNull(JooqLimitChangeRequestRepository(JooqPersistenceContext(dataSource)).findById(
             TenantId.of(tenant), LimitChangeRequestId.of(pending.id),
         ))
@@ -149,7 +150,9 @@ class ImmutableJsonPersistenceIntegrationTest {
         val applied = facade.limitChangeService.approveLimitRuleChange(ApproveLimitRuleChangeCommand(
             tenant, pending.id, LimitChangeActorCommand(LimitChangeActorType.SYSTEM),
             approvedRule = command.requestedRule.copy(amount = BigDecimal("400")),
-        ))
+        ),
+            trustedActorContext = TrustedChangeActorContext.InternalSystem,
+        )
         val details = facade.limitInquiryService.getLimitChange(GetLimitChangeQuery(tenant, pending.id))
         val intent = details.events.first().payload["originalIntent"] as Map<*, *>
         val submission = intent["submission"] as Map<*, *>
@@ -163,10 +166,10 @@ class ImmutableJsonPersistenceIntegrationTest {
         assertFailsWith<UnsupportedOperationException> {
             (evaluation.actionResult.value["explanation"] as MutableList<*>).clear()
         }
-        assertEquals(applied, facade.limitChangeService.requestLimitRuleChange(retry))
+        assertEquals(applied, facade.limitChangeService.requestLimitRuleChange(retry, trustedActorContext = TrustedChangeActorContext.InternalSystem))
         for (different in listOf(metadata - "optional", metadata + ("large" to BigInteger(large).add(BigInteger.ONE)))) {
             assertFailsWith<IdempotencyConflictException> {
-                facade.limitChangeService.requestLimitRuleChange(command.copy(metadata = different))
+                facade.limitChangeService.requestLimitRuleChange(command.copy(metadata = different), trustedActorContext = TrustedChangeActorContext.InternalSystem)
             }
         }
         assertEquals(details, facade.limitInquiryService.getLimitChange(GetLimitChangeQuery(tenant, pending.id)))

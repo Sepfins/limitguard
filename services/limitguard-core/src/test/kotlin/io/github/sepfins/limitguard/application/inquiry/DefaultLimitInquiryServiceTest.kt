@@ -126,7 +126,7 @@ class DefaultLimitInquiryServiceTest {
                 requestedRule = Metadata(mapOf("amount" to "500.0000")),
                 status = DomainLimitRuleChangeStatus.APPLIED,
                 limitRuleId = ruleId,
-                requestActorContext = RequestActorContext.System,
+                requestActorContext = RequestActorContext.System(),
                 approvedRule = Metadata(mapOf("amount" to "500.0000")),
                 appliedAt = now.plusSeconds(2),
                 createdAt = now,

@@ -1,6 +1,7 @@
 package io.github.sepfins.limitguard.application.change
 
 import io.github.sepfins.limitguard.api.commands.CancelLimitRuleChangeCommand
+import io.github.sepfins.limitguard.api.TrustedChangeActorContext
 import io.github.sepfins.limitguard.api.errors.ConflictException
 import io.github.sepfins.limitguard.api.errors.NotFoundException
 import io.github.sepfins.limitguard.api.errors.ValidationException
@@ -15,6 +16,7 @@ import io.github.sepfins.limitguard.port.time.ClockProvider
 import io.github.sepfins.limitguard.port.transactions.TransactionRunner
 
 internal class CancelLimitRuleChangeWorkflow(
+    private val eligibility: LimitChangeEligibilityValidator,
     private val changeEventFactory: LimitChangeEventFactory,
     private val changeRequestRepository: LimitChangeRequestRepository,
     private val changeEventRepository: LimitRuleChangeEventRepository,
@@ -22,7 +24,8 @@ internal class CancelLimitRuleChangeWorkflow(
     private val clockProvider: ClockProvider,
     private val transactionRunner: TransactionRunner,
 ) {
-    fun execute(command: CancelLimitRuleChangeCommand): LimitChangeRequestResult = mapValidation {
+    fun execute(command: CancelLimitRuleChangeCommand, trustedActorContext: TrustedChangeActorContext?): LimitChangeRequestResult = mapValidation {
+        command.cancelledBy.requireTrustedAuthority(trustedActorContext)
         require(command.decisionReason == null || command.decisionReason.isNotBlank()) {
             "decisionReason must not be blank"
         }
@@ -36,6 +39,7 @@ internal class CancelLimitRuleChangeWorkflow(
             if (request.status !in CANCELLABLE_STATUSES) {
                 throw ConflictException("limit change request cannot be cancelled: ${request.id.value}")
             }
+            eligibility.validateActionActor(tenantId, actor)
 
             val persistedCancelled = changeRequestRepository.update(
                 tenantId,

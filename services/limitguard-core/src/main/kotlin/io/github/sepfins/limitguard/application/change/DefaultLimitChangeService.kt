@@ -1,6 +1,7 @@
 package io.github.sepfins.limitguard.application.change
 
 import io.github.sepfins.limitguard.api.LimitChangeService
+import io.github.sepfins.limitguard.api.TrustedChangeActorContext
 import io.github.sepfins.limitguard.api.commands.ApplyDueLimitChangesCommand
 import io.github.sepfins.limitguard.api.commands.ApproveLimitRuleChangeCommand
 import io.github.sepfins.limitguard.api.commands.CancelLimitRuleChangeCommand
@@ -20,6 +21,14 @@ import io.github.sepfins.limitguard.port.persistence.LimitRuleChangeEventReposit
 import io.github.sepfins.limitguard.port.persistence.LimitRuleRepository
 import io.github.sepfins.limitguard.port.persistence.LimitRuleRevisionRepository
 import io.github.sepfins.limitguard.port.persistence.MandateRepository
+import io.github.sepfins.limitguard.port.persistence.TenantRepository
+import io.github.sepfins.limitguard.port.persistence.PartyProfileRepository
+import io.github.sepfins.limitguard.port.persistence.PartyProfileDelegationRepository
+import io.github.sepfins.limitguard.port.persistence.BankWorkerRepository
+import io.github.sepfins.limitguard.port.persistence.ChannelRepository
+import io.github.sepfins.limitguard.port.persistence.ChannelGroupRepository
+import io.github.sepfins.limitguard.port.persistence.OperationTypeRepository
+import io.github.sepfins.limitguard.port.persistence.FundingSourceProductRepository
 import io.github.sepfins.limitguard.port.policy.PolicyEngine
 import io.github.sepfins.limitguard.port.time.ClockProvider
 import io.github.sepfins.limitguard.port.transactions.TransactionRunner
@@ -31,6 +40,14 @@ internal class DefaultLimitChangeService(
     limitRuleRevisionRepository: LimitRuleRevisionRepository,
     limitConfigurationRepository: LimitConfigurationRepository,
     mandateRepository: MandateRepository,
+    tenantRepository: TenantRepository,
+    partyProfileRepository: PartyProfileRepository,
+    partyProfileDelegationRepository: PartyProfileDelegationRepository,
+    bankWorkerRepository: BankWorkerRepository,
+    channelRepository: ChannelRepository,
+    channelGroupRepository: ChannelGroupRepository,
+    operationTypeRepository: OperationTypeRepository,
+    fundingSourceProductRepository: FundingSourceProductRepository,
     policyRepository: LimitChangePolicyRepository,
     policyEvaluationRepository: LimitChangePolicyEvaluationRepository,
     policyEngines: Collection<PolicyEngine>,
@@ -43,6 +60,18 @@ internal class DefaultLimitChangeService(
     private val candidates = LimitRuleCandidateFactory()
     private val targets = LimitChangeTargets(limitConfigurationRepository, limitRuleRepository, changeRequestRepository)
     private val locks = LimitChangeLocks(targets, changeRequestRepository, limitRuleRepository)
+    private val eligibility = LimitChangeEligibilityValidator(
+        tenants = tenantRepository,
+        profiles = partyProfileRepository,
+        delegations = partyProfileDelegationRepository,
+        workers = bankWorkerRepository,
+        channels = channelRepository,
+        channelGroups = channelGroupRepository,
+        operations = operationTypeRepository,
+        products = fundingSourceProductRepository,
+        configurations = limitConfigurationRepository,
+        mandates = mandateRepository,
+    )
     private val application = LimitChangeApplicationWorkflow(
         changeRequestRepository = changeRequestRepository,
         changeEventRepository = changeEventRepository,
@@ -50,6 +79,7 @@ internal class DefaultLimitChangeService(
         limitRuleRevisionRepository = limitRuleRevisionRepository,
         changeEventFactory = events,
         targets = targets,
+        eligibility = eligibility,
         idGenerator = idGenerator,
     )
     private val requestWorkflow = RequestLimitRuleChangeWorkflow(
@@ -57,6 +87,7 @@ internal class DefaultLimitChangeService(
         referenceResolver = ChangeReferenceResolver(limitConfigurationRepository, limitRuleRepository, limitRuleRevisionRepository),
         candidateFactory = candidates,
         mandateValidator = mandates,
+        eligibility = eligibility,
         changeRequestFactory = LimitChangeRequestFactory(),
         changeEventFactory = events,
         policyRunner = LimitChangePolicyRunner(
@@ -77,6 +108,7 @@ internal class DefaultLimitChangeService(
         transactionRunner = transactionRunner,
     )
     private val approveWorkflow = ApproveLimitRuleChangeWorkflow(
+        eligibility = eligibility,
         candidateFactory = candidates,
         mandateValidator = mandates,
         applicationWorkflow = application,
@@ -89,6 +121,7 @@ internal class DefaultLimitChangeService(
         transactionRunner = transactionRunner,
     )
     private val rejectWorkflow = RejectLimitRuleChangeWorkflow(
+        eligibility = eligibility,
         changeEventFactory = events,
         changeRequestRepository = changeRequestRepository,
         changeEventRepository = changeEventRepository,
@@ -97,6 +130,7 @@ internal class DefaultLimitChangeService(
         transactionRunner = transactionRunner,
     )
     private val cancelWorkflow = CancelLimitRuleChangeWorkflow(
+        eligibility = eligibility,
         changeEventFactory = events,
         changeRequestRepository = changeRequestRepository,
         changeEventRepository = changeEventRepository,
@@ -105,6 +139,7 @@ internal class DefaultLimitChangeService(
         transactionRunner = transactionRunner,
     )
     private val applyDueWorkflow = ApplyDueLimitChangesWorkflow(
+        eligibility = eligibility,
         applicationWorkflow = application,
         mandateValidator = mandates,
         changeEventFactory = events,
@@ -117,26 +152,47 @@ internal class DefaultLimitChangeService(
         transactionRunner = transactionRunner,
     )
 
-    override fun requestLimitRuleChange(command: RequestLimitRuleChangeCommand): LimitChangeRequestResult =
+    override fun requestLimitRuleChange(
+        command: RequestLimitRuleChangeCommand,
+        trustedActorContext: TrustedChangeActorContext?,
+    ): LimitChangeRequestResult =
         requestWorkflow.execute(command.copy(
             metadata = JsonSnapshots.objectValue(command.metadata),
             policyContext = JsonSnapshots.objectValue(command.policyContext, "policyContext"),
             requestedRule = command.requestedRule?.detachedJson("requestedRule"),
-        ))
+        ), trustedActorContext)
 
-    override fun approveLimitRuleChange(command: ApproveLimitRuleChangeCommand): LimitChangeRequestResult =
-        approveWorkflow.execute(command.copy(
+    override fun approveLimitRuleChange(
+        command: ApproveLimitRuleChangeCommand,
+        trustedActorContext: TrustedChangeActorContext?,
+    ): LimitChangeRequestResult {
+        val detached = command.copy(
             metadata = JsonSnapshots.objectValue(command.metadata),
             approvedRule = command.approvedRule?.detachedJson("approvedRule"),
-        ))
+        )
+        return approveWorkflow.execute(detached, trustedActorContext)
+    }
 
-    override fun rejectLimitRuleChange(command: RejectLimitRuleChangeCommand): LimitChangeRequestResult =
-        rejectWorkflow.execute(command.copy(metadata = JsonSnapshots.objectValue(command.metadata)))
+    override fun rejectLimitRuleChange(
+        command: RejectLimitRuleChangeCommand,
+        trustedActorContext: TrustedChangeActorContext?,
+    ): LimitChangeRequestResult {
+        val detached = command.copy(metadata = JsonSnapshots.objectValue(command.metadata))
+        return rejectWorkflow.execute(detached, trustedActorContext)
+    }
 
-    override fun cancelLimitRuleChange(command: CancelLimitRuleChangeCommand): LimitChangeRequestResult =
-        cancelWorkflow.execute(command.copy(metadata = JsonSnapshots.objectValue(command.metadata)))
+    override fun cancelLimitRuleChange(
+        command: CancelLimitRuleChangeCommand,
+        trustedActorContext: TrustedChangeActorContext?,
+    ): LimitChangeRequestResult {
+        val detached = command.copy(metadata = JsonSnapshots.objectValue(command.metadata))
+        return cancelWorkflow.execute(detached, trustedActorContext)
+    }
 
-    override fun applyDueLimitChanges(command: ApplyDueLimitChangesCommand): ApplyDueChangesResult =
+    override fun applyDueLimitChanges(
+        command: ApplyDueLimitChangesCommand,
+        trustedActorContext: TrustedChangeActorContext.InternalSystem,
+    ): ApplyDueChangesResult =
         applyDueWorkflow.execute(command)
 
     private fun LimitRuleDraft.detachedJson(field: String): LimitRuleDraft =

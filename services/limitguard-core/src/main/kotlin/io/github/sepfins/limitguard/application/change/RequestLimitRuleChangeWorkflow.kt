@@ -1,6 +1,7 @@
 package io.github.sepfins.limitguard.application.change
 
 import io.github.sepfins.limitguard.api.LimitRuleChangeType
+import io.github.sepfins.limitguard.api.TrustedChangeActorContext
 import io.github.sepfins.limitguard.api.commands.RequestLimitRuleChangeCommand
 import io.github.sepfins.limitguard.api.errors.ConflictException
 import io.github.sepfins.limitguard.api.errors.IdempotencyConflictException
@@ -31,6 +32,7 @@ internal class RequestLimitRuleChangeWorkflow(
     private val referenceResolver: ChangeReferenceResolver,
     private val candidateFactory: LimitRuleCandidateFactory,
     private val mandateValidator: LimitRuleMandateValidator,
+    private val eligibility: LimitChangeEligibilityValidator,
     private val changeRequestFactory: LimitChangeRequestFactory,
     private val changeEventFactory: LimitChangeEventFactory,
     private val policyRunner: LimitChangePolicyRunner,
@@ -43,7 +45,8 @@ internal class RequestLimitRuleChangeWorkflow(
     private val clockProvider: ClockProvider,
     private val transactionRunner: TransactionRunner,
 ) {
-    fun execute(command: RequestLimitRuleChangeCommand): LimitChangeRequestResult = mapValidation {
+    fun execute(command: RequestLimitRuleChangeCommand, trustedActorContext: TrustedChangeActorContext?): LimitChangeRequestResult = mapValidation {
+        command.requestedBy.requireTrustedAuthority(trustedActorContext)
         val now = clockProvider.now()
         commandValidator.validateStructure(command)
         val tenantId = TenantId.of(command.tenantId)
@@ -51,6 +54,7 @@ internal class RequestLimitRuleChangeWorkflow(
         transactionRunner.inTransaction {
             replay(command, tenantId)?.let { return@inTransaction it }
 
+            eligibility.validateTenant(tenantId)
             commandValidator.validateEligibility(command, now)
 
             val futureRuleId = if (command.changeType == LimitRuleChangeType.CREATE) {
@@ -70,6 +74,7 @@ internal class RequestLimitRuleChangeWorkflow(
             locks.acquireRules(tenantId, listOf(plan))
             val facts = referenceResolver.resolve(command)
             val candidate = candidateFactory.createCandidate(command, facts, futureRuleId, now)
+            eligibility.validateSubmission(command, candidate, now)
             mandateValidator.validate(candidate, command.effectiveAt ?: now)
             val requestId = LimitChangeRequestId.of(idGenerator.newId())
             val target = targets.requireAvailable(candidate, requestId, now, lockedTargets)
@@ -226,6 +231,7 @@ internal class RequestLimitRuleChangeWorkflow(
             )
         }
         mandateValidator.validate(candidate, policyRequest.effectiveAt ?: now)
+        eligibility.validateApprovedIntent(policyRequest, candidate, now)
         targets.requireAvailable(candidate, policyRequest.id, now, lockedTargets)
         return candidate
     }

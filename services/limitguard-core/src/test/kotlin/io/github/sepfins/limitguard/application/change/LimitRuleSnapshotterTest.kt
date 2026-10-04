@@ -128,7 +128,7 @@ class LimitRuleSnapshotterTest {
             targetScope = TargetScopeCanonicalizer.snapshot(requestedRule.toTargetScope(LimitConfigurationFundingScope.AllFundingSources)),
             targetScopeHash = ScopeHash.of("a".repeat(64)),
             requestedRule = snapshot,
-            requestActorContext = RequestActorContext.System,
+            requestActorContext = RequestActorContext.System(),
         )
         val cap = Money.positive("400", requestedRule.amount.currency)
         val result = LimitChangePolicyActionExecutor().execute(

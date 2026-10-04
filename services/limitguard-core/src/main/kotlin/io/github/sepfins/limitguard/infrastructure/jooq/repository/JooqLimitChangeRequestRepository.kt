@@ -137,16 +137,17 @@ class JooqLimitChangeRequestRepository(
         requestActorContext: RequestActorContext,
     ): List<LimitRuleChangeRequest> = jooqOperation("find limit changes by requester context") {
         val condition = when (requestActorContext) {
-            RequestActorContext.System -> table.REQUESTED_BY_ACTOR_TYPE.eq(GeneratedLimitChangeActorType.SYSTEM)
+            is RequestActorContext.System -> table.REQUESTED_BY_ACTOR_TYPE.eq(GeneratedLimitChangeActorType.SYSTEM)
+                .and(requestActorContext.requestChannelId?.let { table.REQUEST_CHANNEL_ID.eq(it.value) }
+                    ?: table.REQUEST_CHANNEL_ID.isNull)
             is RequestActorContext.PartyProfile -> table.REQUESTED_BY_ACTOR_TYPE
                 .eq(GeneratedLimitChangeActorType.PARTY_PROFILE)
-                .and(table.REQUESTED_BY_PARTY_PROFILE_ID.eq(requestActorContext.requesterPartyProfileId.value))
-                .and(table.REQUEST_CHANNEL_ID.eq(requestActorContext.requesterChannelId.value))
+                .and(table.REQUESTED_BY_PARTY_PROFILE_ID.eq(requestActorContext.actorPartyProfileId.value))
+                .and(table.REQUEST_CHANNEL_ID.eq(requestActorContext.requestChannelId.value))
             is RequestActorContext.BankWorker -> table.REQUESTED_BY_ACTOR_TYPE
                 .eq(GeneratedLimitChangeActorType.BANK_WORKER)
                 .and(table.REQUESTED_BY_BANK_WORKER_ID.eq(requestActorContext.bankWorkerId.value))
-                .and(table.REQUEST_CHANNEL_ID.eq(requestActorContext.requesterChannelId.value))
-            else -> error("unsupported request actor context: ${requestActorContext::class.qualifiedName}")
+                .and(table.REQUEST_CHANNEL_ID.eq(requestActorContext.requestChannelId.value))
         }
         selectRequests()
             .where(table.TENANT_ID.eq(tenantId.value))
@@ -274,14 +275,14 @@ class JooqLimitChangeRequestRepository(
             )
         }
         val requestActorContext = when (requestedBy) {
-            ChangeActor.System -> RequestActorContext.System
+            ChangeActor.System -> RequestActorContext.System(get(table.REQUEST_CHANNEL_ID)?.let(ChannelId::of))
             is ChangeActor.PartyProfileActor -> RequestActorContext.PartyProfile(
-                requesterPartyProfileId = requestedBy.partyProfileId,
-                requesterChannelId = ChannelId.of(requireNotNull(get(table.REQUEST_CHANNEL_ID))),
+                actorPartyProfileId = requestedBy.partyProfileId,
+                requestChannelId = ChannelId.of(requireNotNull(get(table.REQUEST_CHANNEL_ID))),
             )
             is ChangeActor.BankWorkerActor -> RequestActorContext.BankWorker(
                 bankWorkerId = requestedBy.bankWorkerId,
-                requesterChannelId = ChannelId.of(requireNotNull(get(table.REQUEST_CHANNEL_ID))),
+                requestChannelId = ChannelId.of(requireNotNull(get(table.REQUEST_CHANNEL_ID))),
             )
         }
 
@@ -333,12 +334,7 @@ class JooqLimitChangeRequestRepository(
     private fun LimitRuleChangeRequest.actorBankWorkerId(): java.util.UUID? =
         (requestedBy as? ChangeActor.BankWorkerActor)?.bankWorkerId?.value
 
-    private fun LimitRuleChangeRequest.requestChannelId(): java.util.UUID? = when (val context = requestActorContext) {
-        RequestActorContext.System -> null
-        is RequestActorContext.PartyProfile -> context.requesterChannelId.value
-        is RequestActorContext.BankWorker -> context.requesterChannelId.value
-        else -> error("unsupported request actor context: ${context::class.qualifiedName}")
-    }
+    private fun LimitRuleChangeRequest.requestChannelId(): java.util.UUID? = requestActorContext.requestChannelId?.value
 
     private companion object {
         val PENDING_STATUSES = listOf(

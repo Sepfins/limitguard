@@ -135,6 +135,14 @@ class DefaultLimitguard(
     )
 
     override val limitChangeService: LimitChangeService = DefaultLimitChangeService(
+        tenantRepository = tenantRepository,
+        partyProfileRepository = partyProfileRepository,
+        partyProfileDelegationRepository = partyProfileDelegationRepository,
+        bankWorkerRepository = bankWorkerRepository,
+        channelRepository = channelRepository,
+        channelGroupRepository = channelGroupRepository,
+        operationTypeRepository = operationTypeRepository,
+        fundingSourceProductRepository = fundingSourceProductRepository,
         changeRequestRepository = limitChangeRequestRepository,
         changeEventRepository = limitChangeEventRepository,
         limitRuleRepository = limitRuleRepository,

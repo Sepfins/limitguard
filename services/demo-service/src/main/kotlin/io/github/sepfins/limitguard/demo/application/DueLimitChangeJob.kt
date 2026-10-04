@@ -1,6 +1,7 @@
 package io.github.sepfins.limitguard.demo.application
 
 import io.github.sepfins.limitguard.api.Limitguard
+import io.github.sepfins.limitguard.api.TrustedChangeActorContext
 import io.github.sepfins.limitguard.api.commands.ApplyDueLimitChangesCommand
 import io.github.sepfins.limitguard.demo.persistence.DemoBankRepository
 import org.springframework.scheduling.annotation.Scheduled
@@ -22,6 +23,7 @@ class DueLimitChangeJob(
         val scenario = scenarioService.currentOrNull() ?: return
         val result = limitguard.limitChangeService.applyDueLimitChanges(
             ApplyDueLimitChangesCommand(tenantId = requireNotNull(scenario.tenantId)),
+            TrustedChangeActorContext.InternalSystem,
         )
         (result.appliedChangeRequestIds + result.failedChangeRequestIds).forEach { changeRequestId ->
             val setting = repository.findLimitSettingByPendingChange(scenario.id, changeRequestId) ?: return@forEach

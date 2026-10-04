@@ -1,6 +1,7 @@
 package io.github.sepfins.limitguard.application.change
 
 import io.github.sepfins.limitguard.api.commands.RejectLimitRuleChangeCommand
+import io.github.sepfins.limitguard.api.TrustedChangeActorContext
 import io.github.sepfins.limitguard.api.errors.ConflictException
 import io.github.sepfins.limitguard.api.errors.NotFoundException
 import io.github.sepfins.limitguard.api.errors.ValidationException
@@ -15,6 +16,7 @@ import io.github.sepfins.limitguard.port.time.ClockProvider
 import io.github.sepfins.limitguard.port.transactions.TransactionRunner
 
 internal class RejectLimitRuleChangeWorkflow(
+    private val eligibility: LimitChangeEligibilityValidator,
     private val changeEventFactory: LimitChangeEventFactory,
     private val changeRequestRepository: LimitChangeRequestRepository,
     private val changeEventRepository: LimitRuleChangeEventRepository,
@@ -22,7 +24,8 @@ internal class RejectLimitRuleChangeWorkflow(
     private val clockProvider: ClockProvider,
     private val transactionRunner: TransactionRunner,
 ) {
-    fun execute(command: RejectLimitRuleChangeCommand): LimitChangeRequestResult = mapValidation {
+    fun execute(command: RejectLimitRuleChangeCommand, trustedActorContext: TrustedChangeActorContext?): LimitChangeRequestResult = mapValidation {
+        command.rejectedBy.requireTrustedAuthority(trustedActorContext)
         require(command.decisionReason.isNotBlank()) { "decisionReason must not be blank" }
         val tenantId = TenantId.of(command.tenantId)
         val changeRequestId = LimitChangeRequestId.of(command.changeRequestId)
@@ -34,6 +37,7 @@ internal class RejectLimitRuleChangeWorkflow(
             if (request.status != LimitRuleChangeStatus.REQUESTED) {
                 throw ConflictException("limit change request is not awaiting a decision: ${request.id.value}")
             }
+            eligibility.validateActionActor(tenantId, actor)
 
             val persistedRejected = changeRequestRepository.update(
                 tenantId,

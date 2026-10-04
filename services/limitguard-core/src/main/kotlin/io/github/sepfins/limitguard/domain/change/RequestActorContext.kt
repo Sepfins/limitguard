@@ -4,9 +4,18 @@ import io.github.sepfins.limitguard.domain.common.BankWorkerId
 import io.github.sepfins.limitguard.domain.common.ChannelId
 import io.github.sepfins.limitguard.domain.common.PartyProfileId
 
-interface RequestActorContext {
-    data object System: RequestActorContext
+sealed interface RequestActorContext {
+    val requestChannelId: ChannelId?
 
-    data class PartyProfile(val requesterPartyProfileId: PartyProfileId, val requesterChannelId: ChannelId): RequestActorContext
-    data class BankWorker(val bankWorkerId: BankWorkerId, val requesterChannelId: ChannelId): RequestActorContext
+    data class System(override val requestChannelId: ChannelId? = null) : RequestActorContext
+
+    data class PartyProfile(
+        val actorPartyProfileId: PartyProfileId,
+        override val requestChannelId: ChannelId,
+    ) : RequestActorContext
+
+    data class BankWorker(
+        val bankWorkerId: BankWorkerId,
+        override val requestChannelId: ChannelId,
+    ) : RequestActorContext
 }
