@@ -36,6 +36,7 @@ internal class LimitRuleMatcher(
             tenantId = context.tenantId,
             channelId = context.channelId,
         )
+        val operationTypePath = references.operationTypePath.map { it.id }
 
         return authorities
             .asSequence()
@@ -61,7 +62,7 @@ internal class LimitRuleMatcher(
                     containingGroupIds = containingChannelGroupIds,
                 )
             }
-            .filter { it.operationScope.includes(context.operationTypeId) }
+            .filter { it.operationScope.includes(operationTypePath) }
             .filter { it.appliesToFundingScope(context, references) }
             .sortedWith(
                 compareBy<LimitRule> { it.priority.value }

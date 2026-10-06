@@ -26,6 +26,7 @@ import io.github.sepfins.limitguard.api.errors.ConflictException
 import io.github.sepfins.limitguard.api.queries.GetLimitChangeQuery
 import io.github.sepfins.limitguard.api.results.LimitChangeRequestResult
 import io.github.sepfins.limitguard.support.FixedClockProvider
+import io.github.sepfins.limitguard.support.persistence.ObservedDataSource
 import org.flywaydb.core.Flyway
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Tag
@@ -35,11 +36,7 @@ import org.postgresql.ds.PGSimpleDataSource
 import org.testcontainers.junit.jupiter.Container
 import org.testcontainers.junit.jupiter.Testcontainers
 import org.testcontainers.postgresql.PostgreSQLContainer
-import java.lang.reflect.InvocationTargetException
-import java.lang.reflect.Proxy
 import java.math.BigDecimal
-import java.sql.Connection
-import java.sql.PreparedStatement
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
@@ -467,43 +464,6 @@ class ChangeWorkflowLockingIntegrationTest {
         val second: DataSource = ObservedDataSource(source, before = { sql ->
             if (sql.contains("pg_advisory_xact_lock")) contenderAtTarget.countDown()
         })
-    }
-
-    // JDBC observation only arranges contention; results and history are checked through the public facade.
-    private class ObservedDataSource(
-        private val delegate: DataSource,
-        private val before: (String) -> Unit = {},
-        private val after: (String) -> Unit = {},
-    ) : DataSource by delegate {
-        override fun getConnection(): Connection = observe(delegate.connection)
-
-        override fun getConnection(username: String, password: String): Connection =
-            observe(delegate.getConnection(username, password))
-
-        private fun observe(connection: Connection): Connection = proxy(Connection::class.java, connection) { method, args ->
-            val result = invoke { method.invoke(connection, *args) }
-            if (method.name == "prepareStatement" && result is PreparedStatement) {
-                val sql = args[0] as String
-                proxy(PreparedStatement::class.java, result) { statementMethod, statementArgs ->
-                    val executes = statementMethod.name.startsWith("execute")
-                    if (executes) before(sql)
-                    val value = invoke { statementMethod.invoke(result, *statementArgs) }
-                    if (executes) after(sql)
-                    value
-                }
-            } else result
-        }
-
-        private fun <T> proxy(type: Class<T>, target: T, call: (java.lang.reflect.Method, Array<out Any?>) -> Any?): T =
-            type.cast(Proxy.newProxyInstance(target!!::class.java.classLoader, arrayOf(type)) { _, method, args ->
-                call(method, args ?: emptyArray())
-            })
-
-        private fun invoke(block: () -> Any?): Any? = try {
-            block()
-        } catch (exception: InvocationTargetException) {
-            throw exception.targetException
-        }
     }
 
     companion object {

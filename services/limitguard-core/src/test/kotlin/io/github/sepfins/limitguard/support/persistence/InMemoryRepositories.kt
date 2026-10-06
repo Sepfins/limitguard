@@ -425,6 +425,13 @@ class InMemoryOperationTypeRepository : OperationTypeRepository {
     override fun findByParentId(tenantId: TenantId, parentId: OperationTypeId): List<OperationType> =
         findVisibleToTenant(tenantId).filter { it.parentId == parentId }
 
+    override fun hasChildren(tenantId: TenantId, parentId: OperationTypeId): Boolean =
+        findById(tenantId, parentId) != null && operationTypes.values.any { it.parentId == parentId }
+
+    override fun findAncestry(tenantId: TenantId, selectedId: OperationTypeId) = synchronized(lock) {
+        super.findAncestry(tenantId, selectedId)
+    }
+
     override fun insert(tenantId: TenantId, operationType: OperationType): OperationType = synchronized(lock) {
         requireScopeMatchesTenant(tenantId, operationType)
         requireAbsent(

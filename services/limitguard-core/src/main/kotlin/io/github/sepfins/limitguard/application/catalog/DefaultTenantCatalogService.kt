@@ -55,6 +55,7 @@ import io.github.sepfins.limitguard.api.results.OperationTypeResult
 import io.github.sepfins.limitguard.api.results.PartyProfileDelegationResult
 import io.github.sepfins.limitguard.api.results.PartyProfileResult
 import io.github.sepfins.limitguard.api.results.TenantResult
+import io.github.sepfins.limitguard.application.operation.OperationTypeAncestry
 import io.github.sepfins.limitguard.domain.channel.Channel
 import io.github.sepfins.limitguard.domain.channel.ChannelCode
 import io.github.sepfins.limitguard.domain.channel.ChannelGroup
@@ -345,7 +346,11 @@ class DefaultTenantCatalogService(
         requireTenantExists(tenantId)
         val parentId = command.parentId?.let { OperationTypeId.of(it) }
         if (parentId != null) {
-            requireOperationTypeVisible(tenantId, parentId)
+            val parentPath = OperationTypeAncestry(operationTypeRepository).resolve(tenantId, parentId)
+            require(!command.isGlobal || parentPath.all { it.scope == OperationTypeScope.Global }) {
+                "Global operation types may have only global ancestors"
+            }
+            require(!parentPath.first().isLeaf) { "Cannot add a child beneath a declared operation leaf" }
         }
         val operationType = OperationType(
             id = OperationTypeId.of(idGenerator.newId()),

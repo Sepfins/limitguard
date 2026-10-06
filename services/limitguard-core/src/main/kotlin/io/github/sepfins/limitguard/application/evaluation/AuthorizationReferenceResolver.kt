@@ -2,11 +2,13 @@ package io.github.sepfins.limitguard.application.evaluation
 
 import io.github.sepfins.limitguard.api.errors.ConflictException
 import io.github.sepfins.limitguard.api.errors.NotFoundException
+import io.github.sepfins.limitguard.application.operation.OperationTypeAncestry
 import io.github.sepfins.limitguard.domain.channel.Channel
 import io.github.sepfins.limitguard.domain.common.FundingSourceProductId
 import io.github.sepfins.limitguard.domain.common.TenantId
 import io.github.sepfins.limitguard.domain.funding.FundingSource
 import io.github.sepfins.limitguard.domain.funding.FundingSourceProduct
+import io.github.sepfins.limitguard.domain.operation.OperationType
 import io.github.sepfins.limitguard.domain.tenant.Tenant
 import io.github.sepfins.limitguard.domain.transaction.PaymentTransaction
 import io.github.sepfins.limitguard.port.persistence.ChannelRepository
@@ -24,6 +26,8 @@ internal class AuthorizationReferenceResolver(
     private val fundingSourceRepository: FundingSourceRepository,
     private val fundingSourceProductRepository: FundingSourceProductRepository,
 ) {
+    private val operationTypeAncestry = OperationTypeAncestry(operationTypeRepository)
+
     fun resolve(transaction: PaymentTransaction): ResolvedAuthorizationReferences =
         resolve(transaction.toLimitEvaluationContext())
 
@@ -34,10 +38,7 @@ internal class AuthorizationReferenceResolver(
             ?: throw NotFoundException(
                 "Channel not found: ${context.tenantId.value} / ${context.channelId.value}",
             )
-        operationTypeRepository.findById(context.tenantId, context.operationTypeId)
-            ?: throw NotFoundException(
-                "Operation type not found: ${context.tenantId.value} / ${context.operationTypeId.value}",
-            )
+        val operationTypePath = operationTypeAncestry.resolve(context.tenantId, context.operationTypeId)
         partyProfileRepository.findById(context.tenantId, context.actingPartyProfileId)
             ?: throw NotFoundException(
                 "Party profile not found: ${context.tenantId.value} / " +
@@ -52,6 +53,7 @@ internal class AuthorizationReferenceResolver(
             tenant = tenant,
             channel = channel,
             fundingSource = fundingSource,
+            operationTypePath = operationTypePath,
             fundingSourceProductPath = requireProductPath(
                 tenantId = context.tenantId,
                 leafProductId = fundingSource.productId,
@@ -89,6 +91,7 @@ internal data class ResolvedAuthorizationReferences(
     val tenant: Tenant,
     val channel: Channel,
     val fundingSource: FundingSource,
+    val operationTypePath: List<OperationType>,
     val fundingSourceProductPath: List<FundingSourceProduct>,
 ) {
     fun unavailableReferenceViolations(): List<Pair<String, String>> = buildList {

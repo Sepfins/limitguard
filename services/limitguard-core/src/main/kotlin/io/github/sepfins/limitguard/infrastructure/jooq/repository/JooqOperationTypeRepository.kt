@@ -1,5 +1,6 @@
 package io.github.sepfins.limitguard.infrastructure.jooq.repository
 
+import io.github.sepfins.limitguard.api.errors.ConflictException
 import io.github.sepfins.limitguard.domain.common.OperationTypeId
 import io.github.sepfins.limitguard.domain.common.TenantId
 import io.github.sepfins.limitguard.domain.operation.OperationType
@@ -9,13 +10,16 @@ import io.github.sepfins.limitguard.domain.operation.OperationTypeScope
 import io.github.sepfins.limitguard.infrastructure.jooq.JooqPersistenceContext
 import io.github.sepfins.limitguard.infrastructure.jooq.jooqOperation
 import io.github.sepfins.limitguard.infrastructure.jooq.generated.tables.OperationType as GeneratedOperationTypeTable
+import io.github.sepfins.limitguard.port.persistence.OperationTypeAncestryNode
 import io.github.sepfins.limitguard.port.persistence.OperationTypeRepository
 import org.jooq.Condition
 import org.jooq.Record
 import org.jooq.SelectFieldOrAsterisk
+import org.jooq.impl.DSL
 import java.time.Instant
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
+import java.util.UUID
 
 class JooqOperationTypeRepository(
     private val context: JooqPersistenceContext,
@@ -58,6 +62,46 @@ class JooqOperationTypeRepository(
             .fetch { it.toDomain() }
     }
 
+    override fun hasChildren(tenantId: TenantId, parentId: OperationTypeId): Boolean =
+        jooqOperation("check operation type children") {
+            val parent = OperationTypeTable.table.`as`("parent")
+            context.dsl().fetchExists(
+                context.dsl().selectOne()
+                    .from(OperationTypeTable.table)
+                    .join(parent).on(OperationTypeTable.parentId.eq(parent.ID))
+                    .where(parent.ID.eq(parentId.value))
+                    .and(parent.TENANT_ID.isNull.or(parent.TENANT_ID.eq(tenantId.value))),
+            )
+        }
+
+    override fun findAncestry(tenantId: TenantId, selectedId: OperationTypeId): List<OperationTypeAncestryNode> =
+        jooqOperation("read operation type ancestry snapshot") {
+            val dsl = context.dsl()
+            val ancestor = OperationTypeTable.table.`as`("ancestor")
+            val ancestryTable = DSL.table(DSL.name("operation_ancestry"))
+            val ancestryParent = DSL.field(DSL.name("operation_ancestry", "parent_id"), UUID::class.java)
+            // UNION terminates corrupt cycles without requiring a valid hierarchy to read it.
+            val ancestry = DSL.name("operation_ancestry").fields("id", "parent_id").`as`(
+                dsl.select(OperationTypeTable.id, OperationTypeTable.parentId)
+                    .from(OperationTypeTable.table)
+                    .where(visibleTo(tenantId)).and(OperationTypeTable.id.eq(selectedId.value))
+                    .union(
+                        dsl.select(ancestor.ID, ancestor.PARENT_ID).from(ancestor)
+                            .join(ancestryTable).on(ancestor.ID.eq(ancestryParent))
+                            .where(visibleTo(tenantId, ancestor)),
+                    ),
+            )
+            val child = OperationTypeTable.table.`as`("child")
+            val hasChildren = DSL.exists(
+                dsl.selectOne().from(child).where(child.PARENT_ID.eq(OperationTypeTable.id)),
+            ).`as`("has_children")
+            dsl.withRecursive(ancestry)
+                .select(OperationTypeTable.fields + hasChildren)
+                .from(OperationTypeTable.table)
+                .where(OperationTypeTable.id.`in`(dsl.select(ancestry.field("id", UUID::class.java)).from(ancestry)))
+                .fetch { OperationTypeAncestryNode(it.toDomain(), requireNotNull(it.get(hasChildren))) }
+        }
+
     override fun insert(tenantId: TenantId, operationType: OperationType): OperationType =
         jooqOperation("insert operation type") {
             requireScopeMatchesTenant(tenantId, operationType.scope)
@@ -93,14 +137,21 @@ class JooqOperationTypeRepository(
             ) { "operation type not found: ${operationType.id.value}" }.toDomain()
         }
 
-    private fun visibleTo(tenantId: TenantId): Condition =
-        OperationTypeTable.tenantId.isNull.or(OperationTypeTable.tenantId.eq(tenantId.value))
+    private fun visibleTo(
+        tenantId: TenantId,
+        table: GeneratedOperationTypeTable = OperationTypeTable.table,
+    ): Condition = table.TENANT_ID.isNull.or(table.TENANT_ID.eq(tenantId.value))
 
     private fun selectOperationTypes() = context.dsl()
         .select(OperationTypeTable.fields)
         .from(OperationTypeTable.table)
 
     private fun Record.toDomain(): OperationType {
+        val id = OperationTypeId.of(requireNotNull(get(OperationTypeTable.id)))
+        val parentId = get(OperationTypeTable.parentId)?.let(OperationTypeId::of)
+        if (parentId == id) {
+            throw ConflictException("Operation type hierarchy contains a cycle at ${id.value}")
+        }
         val isGlobal = requireNotNull(get(OperationTypeTable.isGlobal))
         val scopedTenantId = get(OperationTypeTable.tenantId)
         val scope = if (isGlobal) {
@@ -110,9 +161,9 @@ class JooqOperationTypeRepository(
             OperationTypeScope.TenantSpecific(TenantId.of(requireNotNull(scopedTenantId)))
         }
         return OperationType(
-            id = OperationTypeId.of(requireNotNull(get(OperationTypeTable.id))),
+            id = id,
             scope = scope,
-            parentId = get(OperationTypeTable.parentId)?.let(OperationTypeId::of),
+            parentId = parentId,
             code = OperationTypeCode.of(requireNotNull(get(OperationTypeTable.code))),
             name = OperationTypeName.of(requireNotNull(get(OperationTypeTable.name))),
             isLeaf = requireNotNull(get(OperationTypeTable.isLeaf)),

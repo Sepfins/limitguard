@@ -7,9 +7,11 @@ sealed interface LimitOperationScope {
 
     data class OperationTypeSpecific(val operationTypeId: OperationTypeId) : LimitOperationScope
 
-    fun includes(operationTypeId: OperationTypeId): Boolean =
+    fun includes(operationTypeId: OperationTypeId): Boolean = includes(listOf(operationTypeId))
+
+    fun includes(operationTypePath: Collection<OperationTypeId>): Boolean =
         when (this) {
             AllOperations -> true
-            is OperationTypeSpecific -> this.operationTypeId == operationTypeId
+            is OperationTypeSpecific -> operationTypeId in operationTypePath
         }
 }
