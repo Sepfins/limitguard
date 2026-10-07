@@ -472,24 +472,30 @@ class DefaultTenantCatalogService(
         val tenantId = TenantId.of(command.tenantId)
         requireTenantExists(tenantId)
         val parentId = command.parentId?.let { FundingSourceProductId.of(it) }
-        if (parentId != null) {
-            requireFundingSourceProductExists(tenantId, parentId)
-        }
-        val fundingSourceProduct = FundingSourceProduct(
-            id = FundingSourceProductId.of(idGenerator.newId()),
-            tenantId = tenantId,
-            parentId = parentId,
-            accountCategory = FundingSourceCategory.valueOf(command.category.name),
-            nodeType = ProductNodeType.valueOf(command.nodeType.name),
-            code = FundingSourceProductCode.of(command.code),
-            name = FundingSourceProductName.of(command.name),
-            isLeaf = command.isLeaf,
-            isActive = command.isActive,
-            metadata = Metadata(command.metadata),
-            createdAt = clockProvider.now()
-        )
 
-        return fundingSourceProductRepository.insert(tenantId, fundingSourceProduct).toResult()
+        return transactionRunner.inTransaction {
+            if (parentId != null) {
+                val parent = requireFundingSourceProductExists(tenantId, parentId)
+                require(!parent.isLeaf) {
+                    "Cannot add a child beneath a declared funding source product leaf: ${parent.id.value}"
+                }
+            }
+            val fundingSourceProduct = FundingSourceProduct(
+                id = FundingSourceProductId.of(idGenerator.newId()),
+                tenantId = tenantId,
+                parentId = parentId,
+                accountCategory = FundingSourceCategory.valueOf(command.category.name),
+                nodeType = ProductNodeType.valueOf(command.nodeType.name),
+                code = FundingSourceProductCode.of(command.code),
+                name = FundingSourceProductName.of(command.name),
+                isLeaf = command.isLeaf,
+                isActive = command.isActive,
+                metadata = Metadata(command.metadata),
+                createdAt = clockProvider.now()
+            )
+
+            fundingSourceProductRepository.insert(tenantId, fundingSourceProduct).toResult()
+        }
     }
 
     override fun updateFundingSourceProduct(
@@ -539,21 +545,24 @@ class DefaultTenantCatalogService(
         val tenantId = TenantId.of(command.tenantId)
         requireTenantExists(tenantId)
         val productId = FundingSourceProductId.of(command.productId)
-        val product = requireFundingSourceProductExists(tenantId, productId)
-        if (!product.isLeaf) {
-            throw ValidationException("funding source product must be a leaf product: ${product.id.value}")
-        }
-        val fundingSource = FundingSource(
-            id = FundingSourceId.of(idGenerator.newId()),
-            tenantId = tenantId,
-            productId = productId,
-            externalReference = command.externalReference?.let { ExternalReference.of(it) },
-            isActive = command.isActive,
-            metadata = Metadata(command.metadata),
-            createdAt = clockProvider.now()
-        )
 
-        return fundingSourceRepository.insert(tenantId, fundingSource).toResult()
+        return transactionRunner.inTransaction {
+            val product = requireFundingSourceProductExists(tenantId, productId)
+            if (!product.isLeaf) {
+                throw ValidationException("funding source product must be a leaf product: ${product.id.value}")
+            }
+            val fundingSource = FundingSource(
+                id = FundingSourceId.of(idGenerator.newId()),
+                tenantId = tenantId,
+                productId = productId,
+                externalReference = command.externalReference?.let { ExternalReference.of(it) },
+                isActive = command.isActive,
+                metadata = Metadata(command.metadata),
+                createdAt = clockProvider.now()
+            )
+
+            fundingSourceRepository.insert(tenantId, fundingSource).toResult()
+        }
     }
 
     override fun updateFundingSource(command: UpdateFundingSourceCommand): FundingSourceResult = mapValidation {

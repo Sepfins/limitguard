@@ -9,6 +9,8 @@ import java.time.Instant
 
 interface FundingSourceProductRepository {
     fun findActive(tenantId: TenantId): List<FundingSourceProduct>
+
+    /** Includes inactive children; activation does not change whether a product is structurally a leaf. */
     fun findByParent(tenantId: TenantId, parentId: FundingSourceProductId): List<FundingSourceProduct>
     fun findByAccountCategory(tenantId: TenantId, accountCategory: FundingSourceCategory): List<FundingSourceProduct>
     fun findByCode(tenantId: TenantId, code: FundingSourceProductCode): FundingSourceProduct?
