@@ -1,5 +1,6 @@
 package io.github.sepfins.limitguard.infrastructure.jooq.repository
 
+import io.github.sepfins.limitguard.api.errors.InfrastructureException
 import io.github.sepfins.limitguard.domain.common.ChannelGroupId
 import io.github.sepfins.limitguard.domain.common.ChannelId
 import io.github.sepfins.limitguard.domain.common.CurrencyCode
@@ -33,6 +34,7 @@ import io.github.sepfins.limitguard.port.persistence.LimitConfigurationRepositor
 import org.jooq.Condition
 import org.jooq.Record
 import org.jooq.impl.DSL
+import java.sql.Connection
 import java.time.Instant
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
@@ -41,6 +43,25 @@ class JooqLimitConfigurationRepository(
     private val context: JooqPersistenceContext,
 ) : LimitConfigurationRepository {
     private val table = GeneratedLimitConfigurationTable.LIMIT_CONFIGURATION
+
+    override fun lockFundingEnvelopes(tenantId: TenantId) = jooqOperation("lock funding configuration envelopes") {
+        context.requireTransaction("locking funding configuration envelopes")
+        val isolation = context.dsl().connectionResult { it.transactionIsolation }
+        if (isolation != Connection.TRANSACTION_READ_COMMITTED) {
+            throw InfrastructureException("funding configuration envelopes require READ COMMITTED transaction isolation")
+        }
+        val lockKey = "LimitGuard funding envelopes:${tenantId.value}"
+        context.dsl().fetch("select pg_advisory_xact_lock(hashtextextended(?, 0))", lockKey)
+        Unit
+    }
+
+    override fun findAll(tenantId: TenantId): List<LimitConfiguration> =
+        jooqOperation("find all limit configurations") {
+            selectConfigurations()
+                .where(table.TENANT_ID.eq(tenantId.value))
+                .orderBy(table.CODE, table.ID)
+                .fetch { it.toDomain() }
+        }
 
     override fun findAllActive(tenantId: TenantId, at: Instant): List<LimitConfiguration> =
         findActive(tenantId, at, DSL.trueCondition(), "find active limit configurations")

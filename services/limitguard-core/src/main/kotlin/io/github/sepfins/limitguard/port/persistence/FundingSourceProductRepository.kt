@@ -8,6 +8,8 @@ import io.github.sepfins.limitguard.domain.funding.FundingSourceProductCode
 import java.time.Instant
 
 interface FundingSourceProductRepository {
+    /** Includes inactive products: availability does not change configuration coverage. */
+    fun findAll(tenantId: TenantId): List<FundingSourceProduct>
     fun findActive(tenantId: TenantId): List<FundingSourceProduct>
 
     /** Includes inactive children; activation does not change whether a product is structurally a leaf. */

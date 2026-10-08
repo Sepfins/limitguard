@@ -55,6 +55,7 @@ import io.github.sepfins.limitguard.api.results.OperationTypeResult
 import io.github.sepfins.limitguard.api.results.PartyProfileDelegationResult
 import io.github.sepfins.limitguard.api.results.PartyProfileResult
 import io.github.sepfins.limitguard.api.results.TenantResult
+import io.github.sepfins.limitguard.application.configuration.FundingConfigurationEnvelopes
 import io.github.sepfins.limitguard.application.operation.OperationTypeAncestry
 import io.github.sepfins.limitguard.domain.channel.Channel
 import io.github.sepfins.limitguard.domain.channel.ChannelCode
@@ -204,6 +205,9 @@ class DefaultTenantCatalogService(
     private val clockProvider: ClockProvider,
     private val transactionRunner: TransactionRunner
 ) : TenantCatalogService {
+    private val fundingEnvelopes = FundingConfigurationEnvelopes(
+        limitConfigurationRepository, fundingSourceProductRepository,
+    )
 
     override fun registerTenant(command: RegisterTenantCommand): TenantResult = mapValidation {
         val tenant = Tenant(
@@ -474,6 +478,7 @@ class DefaultTenantCatalogService(
         val parentId = command.parentId?.let { FundingSourceProductId.of(it) }
 
         return transactionRunner.inTransaction {
+            limitConfigurationRepository.lockFundingEnvelopes(tenantId)
             if (parentId != null) {
                 val parent = requireFundingSourceProductExists(tenantId, parentId)
                 require(!parent.isLeaf) {
@@ -494,6 +499,7 @@ class DefaultTenantCatalogService(
                 createdAt = clockProvider.now()
             )
 
+            fundingEnvelopes.validateProductGrowth(fundingSourceProduct)
             fundingSourceProductRepository.insert(tenantId, fundingSourceProduct).toResult()
         }
     }
@@ -747,108 +753,106 @@ class DefaultTenantCatalogService(
     override fun createLimitConfiguration(command: CreateLimitConfigurationCommand): LimitConfigurationResult = mapValidation {
         val tenantId = TenantId.of(command.tenantId)
         requireTenantExists(tenantId)
-        val parentConfigurationId = command.parentConfigurationId?.let { LimitConfigurationId.of(it) }
-        val parentConfiguration = parentConfigurationId?.let {
-            requireLimitConfigurationExists(tenantId, it)
-        }
-        val now = clockProvider.now()
-        val limitConfiguration = LimitConfiguration(
-            id = LimitConfigurationId.of(idGenerator.newId()),
-            tenantId = tenantId,
-            parentConfigurationId = parentConfigurationId,
-            code = LimitConfigurationCode.of(command.code),
-            name = LimitConfigurationName.of(command.name),
-            description = command.description,
-            limitKind = when (command.limitKind) {
-                ApiLimitKind.PER_TRANSACTION -> {
-                    if (command.period != null) {
-                        throw ValidationException("Period must be null for LimitKind.PER_TRANSACTION.")
+        return transactionRunner.inTransaction {
+            limitConfigurationRepository.lockFundingEnvelopes(tenantId)
+            val parentConfigurationId = command.parentConfigurationId?.let { LimitConfigurationId.of(it) }
+            val now = clockProvider.now()
+            val limitConfiguration = LimitConfiguration(
+                id = LimitConfigurationId.of(idGenerator.newId()),
+                tenantId = tenantId,
+                parentConfigurationId = parentConfigurationId,
+                code = LimitConfigurationCode.of(command.code),
+                name = LimitConfigurationName.of(command.name),
+                description = command.description,
+                limitKind = when (command.limitKind) {
+                    ApiLimitKind.PER_TRANSACTION -> {
+                        if (command.period != null) {
+                            throw ValidationException("Period must be null for LimitKind.PER_TRANSACTION.")
+                        }
+                        DomainLimitKind.PerTransaction
                     }
-                    DomainLimitKind.PerTransaction
-                }
-                ApiLimitKind.PERIODIC -> DomainLimitKind.Periodic(
-                    LimitPeriod.valueOf(command.period?.name ?: throw ValidationException("Period must be specified for LimitKind.PERIODIC.")),
-                )
-            },
-            fundingScope = when (command.fundingScope) {
-                ApiLimitConfigurationFundingScope.ALL_FUNDING_SOURCES -> {
-                    if (command.fundingSourceCategory != null || command.fundingSourceProductId != null) {
-                        throw ValidationException("Funding source fields must be null for LimitConfigurationFundingScope.ALL_FUNDING_SOURCES.")
-                    }
-                    DomainLimitConfigurationFundingScope.AllFundingSources
-                }
-                ApiLimitConfigurationFundingScope.FUNDING_SOURCE_PRODUCT -> {
-                    if (command.fundingSourceCategory != null) {
-                        throw ValidationException("Category must be null for LimitConfigurationFundingScope.FUNDING_SOURCE_PRODUCT.")
-                    }
-                    val productId = FundingSourceProductId.of(
-                        command.fundingSourceProductId ?: throw ValidationException("ProductId must not be null for LimitConfigurationFundingScope.FUNDING_SOURCE_PRODUCT"),
+                    ApiLimitKind.PERIODIC -> DomainLimitKind.Periodic(
+                        LimitPeriod.valueOf(command.period?.name ?: throw ValidationException("Period must be specified for LimitKind.PERIODIC.")),
                     )
-                    requireFundingSourceProductExists(tenantId, productId)
-                    DomainLimitConfigurationFundingScope.FundingSourceProductSpecific(productId)
-                }
-                ApiLimitConfigurationFundingScope.FUNDING_SOURCE_CATEGORY -> {
-                    if (command.fundingSourceProductId != null) {
-                        throw ValidationException("ProductId must be null for LimitConfigurationFundingScope.FUNDING_SOURCE_CATEGORY.")
+                },
+                fundingScope = when (command.fundingScope) {
+                    ApiLimitConfigurationFundingScope.ALL_FUNDING_SOURCES -> {
+                        if (command.fundingSourceCategory != null || command.fundingSourceProductId != null) {
+                            throw ValidationException("Funding source fields must be null for LimitConfigurationFundingScope.ALL_FUNDING_SOURCES.")
+                        }
+                        DomainLimitConfigurationFundingScope.AllFundingSources
                     }
-                    DomainLimitConfigurationFundingScope.FundingSourceCategorySpecific(
-                        FundingSourceCategory.valueOf(
-                            command.fundingSourceCategory?.name ?: throw ValidationException("Category name must be specified for LimitConfigurationFundingScope.FUNDING_SOURCE_CATEGORY.")
+                    ApiLimitConfigurationFundingScope.FUNDING_SOURCE_PRODUCT -> {
+                        if (command.fundingSourceCategory != null) {
+                            throw ValidationException("Category must be null for LimitConfigurationFundingScope.FUNDING_SOURCE_PRODUCT.")
+                        }
+                        val productId = FundingSourceProductId.of(
+                            command.fundingSourceProductId ?: throw ValidationException("ProductId must not be null for LimitConfigurationFundingScope.FUNDING_SOURCE_PRODUCT"),
                         )
-                    )
-                }
-            },
-            channelScope = when (command.channelScope) {
-                ApiLimitChannelScope.ALL_CHANNELS -> {
-                    if (command.channelId != null || command.channelGroupId != null) {
-                        throw ValidationException("Channel fields must be null for LimitChannelScope.ALL_CHANNELS.")
+                        requireFundingSourceProductExists(tenantId, productId)
+                        DomainLimitConfigurationFundingScope.FundingSourceProductSpecific(productId)
                     }
-                    DomainLimitChannelScope.AllChannels
-                }
-                ApiLimitChannelScope.CHANNEL_GROUP -> {
-                    if (command.channelId != null) {
-                        throw ValidationException("ChannelId must be null for LimitChannelScope.CHANNEL_GROUP.")
+                    ApiLimitConfigurationFundingScope.FUNDING_SOURCE_CATEGORY -> {
+                        if (command.fundingSourceProductId != null) {
+                            throw ValidationException("ProductId must be null for LimitConfigurationFundingScope.FUNDING_SOURCE_CATEGORY.")
+                        }
+                        DomainLimitConfigurationFundingScope.FundingSourceCategorySpecific(
+                            FundingSourceCategory.valueOf(
+                                command.fundingSourceCategory?.name ?: throw ValidationException("Category name must be specified for LimitConfigurationFundingScope.FUNDING_SOURCE_CATEGORY.")
+                            )
+                        )
                     }
-                    val channelGroupId = ChannelGroupId.of(
-                        command.channelGroupId
-                            ?: throw ValidationException("ChannelGroupId must not be null for LimitChannelScope.CHANNEL_GROUP"),
-                    )
-                    requireChannelGroupExists(tenantId, channelGroupId)
-                    DomainLimitChannelScope.ChannelGroupSpecific(channelGroupId)
-                }
-                ApiLimitChannelScope.CHANNEL -> {
-                    if (command.channelGroupId != null) {
-                        throw ValidationException("ChannelGroupId must be null for LimitChannelScope.CHANNEL.")
+                },
+                channelScope = when (command.channelScope) {
+                    ApiLimitChannelScope.ALL_CHANNELS -> {
+                        if (command.channelId != null || command.channelGroupId != null) {
+                            throw ValidationException("Channel fields must be null for LimitChannelScope.ALL_CHANNELS.")
+                        }
+                        DomainLimitChannelScope.AllChannels
                     }
-                    val channelId = ChannelId.of(
-                        command.channelId ?: throw ValidationException("ChannelId must not be null for LimitChannelScope.CHANNEL"),
-                    )
-                    requireChannelExists(tenantId, channelId)
-                    DomainLimitChannelScope.ChannelSpecific(
-                        channelId
-                    )
-                }
-            },
-            operationScope = command.operationTypeId
-                ?.let {
-                    val operationTypeId = OperationTypeId.of(it)
-                    requireOperationTypeVisible(tenantId, operationTypeId)
-                    LimitOperationScope.OperationTypeSpecific(operationTypeId)
-                }
-                ?: LimitOperationScope.AllOperations,
-            maxAssignableAmount = Money.of(command.maxAssignableAmount, CurrencyCode.of(command.currency)),
-            defaultAmount = command.defaultAmount?.let { Money.of(it, CurrencyCode.of(command.currency)) },
-            priority = LimitPriority.of(command.priority),
-            isActive = command.isActive,
-            effectiveWindow = EffectiveWindow(command.startsAt ?: now, command.endsAt),
-            metadata = Metadata(command.metadata),
-            createdAt = now
-        )
-        if (parentConfiguration != null) {
-            limitConfiguration.validateAgainstParent(parentConfiguration)
-        }
+                    ApiLimitChannelScope.CHANNEL_GROUP -> {
+                        if (command.channelId != null) {
+                            throw ValidationException("ChannelId must be null for LimitChannelScope.CHANNEL_GROUP.")
+                        }
+                        val channelGroupId = ChannelGroupId.of(
+                            command.channelGroupId
+                                ?: throw ValidationException("ChannelGroupId must not be null for LimitChannelScope.CHANNEL_GROUP"),
+                        )
+                        requireChannelGroupExists(tenantId, channelGroupId)
+                        DomainLimitChannelScope.ChannelGroupSpecific(channelGroupId)
+                    }
+                    ApiLimitChannelScope.CHANNEL -> {
+                        if (command.channelGroupId != null) {
+                            throw ValidationException("ChannelGroupId must be null for LimitChannelScope.CHANNEL.")
+                        }
+                        val channelId = ChannelId.of(
+                            command.channelId ?: throw ValidationException("ChannelId must not be null for LimitChannelScope.CHANNEL"),
+                        )
+                        requireChannelExists(tenantId, channelId)
+                        DomainLimitChannelScope.ChannelSpecific(
+                            channelId
+                        )
+                    }
+                },
+                operationScope = command.operationTypeId
+                    ?.let {
+                        val operationTypeId = OperationTypeId.of(it)
+                        requireOperationTypeVisible(tenantId, operationTypeId)
+                        LimitOperationScope.OperationTypeSpecific(operationTypeId)
+                    }
+                    ?: LimitOperationScope.AllOperations,
+                maxAssignableAmount = Money.of(command.maxAssignableAmount, CurrencyCode.of(command.currency)),
+                defaultAmount = command.defaultAmount?.let { Money.of(it, CurrencyCode.of(command.currency)) },
+                priority = LimitPriority.of(command.priority),
+                isActive = command.isActive,
+                effectiveWindow = EffectiveWindow(command.startsAt ?: now, command.endsAt),
+                metadata = Metadata(command.metadata),
+                createdAt = now
+            )
+            fundingEnvelopes.validateHierarchy(limitConfiguration)
 
-        return limitConfigurationRepository.insert(tenantId, limitConfiguration).toResult()
+            limitConfigurationRepository.insert(tenantId, limitConfiguration).toResult()
+        }
     }
 
     override fun updateLimitConfiguration(
@@ -858,6 +862,7 @@ class DefaultTenantCatalogService(
         requireTenantExists(tenantId)
 
         transactionRunner.inTransaction {
+            limitConfigurationRepository.lockFundingEnvelopes(tenantId)
             val configuration = requireLimitConfigurationForUpdate(
                 tenantId,
                 LimitConfigurationId.of(command.limitConfigurationId),
@@ -871,9 +876,7 @@ class DefaultTenantCatalogService(
                 metadata = Metadata(command.metadata),
                 updatedAt = clockProvider.now(),
             )
-            configuration.parentConfigurationId?.let { parentId ->
-                updated.validateAgainstParent(requireLimitConfigurationExists(tenantId, parentId))
-            }
+            fundingEnvelopes.validateHierarchy(updated)
 
             limitConfigurationRepository.update(tenantId, updated).toResult()
         }
@@ -886,10 +889,12 @@ class DefaultTenantCatalogService(
         requireTenantExists(tenantId)
 
         transactionRunner.inTransaction {
+            limitConfigurationRepository.lockFundingEnvelopes(tenantId)
             val configuration = requireLimitConfigurationForUpdate(
                 tenantId,
                 LimitConfigurationId.of(command.limitConfigurationId),
             )
+            fundingEnvelopes.validateHierarchy(configuration)
             if (configuration.isActive == command.isActive) {
                 configuration.toResult()
             } else {

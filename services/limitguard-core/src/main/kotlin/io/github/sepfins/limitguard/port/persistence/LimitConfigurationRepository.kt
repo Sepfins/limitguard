@@ -11,6 +11,14 @@ import io.github.sepfins.limitguard.domain.limit.LimitOperationScope
 import java.time.Instant
 
 interface LimitConfigurationRepository {
+    /**
+     * Serializes tenant funding-envelope reads and writes through transaction completion.
+     * Acquire before product/configuration row locks, then read the current catalog and hierarchy.
+     */
+    fun lockFundingEnvelopes(tenantId: TenantId)
+
+    /** Includes disabled configurations and every effective window. */
+    fun findAll(tenantId: TenantId): List<LimitConfiguration>
     fun findAllActive(tenantId: TenantId, at: Instant): List<LimitConfiguration>
     fun findActiveByChannelScope(tenantId: TenantId, scope: LimitChannelScope, at: Instant): List<LimitConfiguration>
     fun findActiveByLimitKind(tenantId: TenantId, kind: LimitKind, at: Instant): List<LimitConfiguration>

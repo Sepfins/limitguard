@@ -48,6 +48,14 @@ import java.time.ZoneOffset
 class JooqFundingSourceProductRepository(
     private val context: JooqPersistenceContext,
 ) : FundingSourceProductRepository {
+    override fun findAll(tenantId: TenantId): List<FundingSourceProduct> =
+        jooqOperation("find all funding source products") {
+            selectProducts()
+                .where(FundingSourceProductTable.tenantId.eq(tenantId.value))
+                .orderBy(FundingSourceProductTable.code, FundingSourceProductTable.id)
+                .fetch { it.toProduct() }
+        }
+
     override fun findActive(tenantId: TenantId): List<FundingSourceProduct> =
         jooqOperation("find active funding source products") {
             selectProducts()

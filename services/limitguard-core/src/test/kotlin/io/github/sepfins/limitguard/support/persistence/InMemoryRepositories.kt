@@ -464,6 +464,8 @@ class InMemoryFundingSourceProductRepository : FundingSourceProductRepository {
     private val lock = Any()
     private val products = ConcurrentHashMap<TenantScopedKey<FundingSourceProductId>, FundingSourceProduct>()
 
+    override fun findAll(tenantId: TenantId): List<FundingSourceProduct> = products.tenantValues(tenantId)
+
     override fun findActive(tenantId: TenantId): List<FundingSourceProduct> =
         products.tenantValues(tenantId).filter { it.isActive }
 
@@ -1043,6 +1045,10 @@ class InMemoryMandateRepository : MandateRepository {
 class InMemoryLimitConfigurationRepository : LimitConfigurationRepository {
     private val lock = Any()
     private val configurations = ConcurrentHashMap<TenantScopedKey<LimitConfigurationId>, LimitConfiguration>()
+
+    override fun lockFundingEnvelopes(tenantId: TenantId) = Unit
+
+    override fun findAll(tenantId: TenantId): List<LimitConfiguration> = configurations.tenantValues(tenantId)
 
     override fun findAllActive(tenantId: TenantId, at: Instant): List<LimitConfiguration> =
         configurations.tenantValues(tenantId).filter { it.isEffectiveAt(at) }

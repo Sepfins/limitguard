@@ -54,6 +54,12 @@ data class LimitConfiguration(
         require(parent.tenantId == tenantId) {
             "parent configuration tenant must match child tenant"
         }
+        require(
+            fundingScope != LimitConfigurationFundingScope.AllFundingSources ||
+                parent.fundingScope == LimitConfigurationFundingScope.AllFundingSources
+        ) {
+            "all-funding child configuration cannot fit a narrower parent funding envelope"
+        }
         require(parent.limitKind == limitKind) {
             "child configuration limit kind must match parent limit kind"
         }
