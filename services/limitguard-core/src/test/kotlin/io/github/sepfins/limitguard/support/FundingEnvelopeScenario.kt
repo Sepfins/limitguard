@@ -2,6 +2,7 @@ package io.github.sepfins.limitguard.support
 
 import io.github.sepfins.limitguard.api.FundingSourceCategory
 import io.github.sepfins.limitguard.api.LimitChangeActorType
+import io.github.sepfins.limitguard.api.LimitChannelScope
 import io.github.sepfins.limitguard.api.LimitConfigurationFundingScope
 import io.github.sepfins.limitguard.api.LimitKind
 import io.github.sepfins.limitguard.api.Limitguard
@@ -10,9 +11,11 @@ import io.github.sepfins.limitguard.api.PartyType
 import io.github.sepfins.limitguard.api.ProductNodeType
 import io.github.sepfins.limitguard.api.TrustedChangeActorContext
 import io.github.sepfins.limitguard.api.commands.ApproveLimitRuleChangeCommand
+import io.github.sepfins.limitguard.api.commands.AddChannelGroupMemberCommand
 import io.github.sepfins.limitguard.api.commands.AssignFundingSourceOwnerCommand
 import io.github.sepfins.limitguard.api.commands.AuthorizeTransactionCommand
 import io.github.sepfins.limitguard.api.commands.CreateLimitConfigurationCommand
+import io.github.sepfins.limitguard.api.commands.CreateChannelGroupCommand
 import io.github.sepfins.limitguard.api.commands.LimitChangeActorCommand
 import io.github.sepfins.limitguard.api.commands.LimitRuleDraft
 import io.github.sepfins.limitguard.api.commands.RegisterChannelCommand
@@ -45,6 +48,18 @@ class FundingEnvelopeScenario(val facade: Limitguard, val now: Instant) {
         facade.tenantCatalogService.registerOperationType(RegisterOperationTypeCommand(tenant, "TRANSFER", "Transfer")).id
     }
 
+    fun registerChannel(code: String, active: Boolean = true) = facade.tenantCatalogService.registerChannel(
+        RegisterChannelCommand(tenant, code, code, isActive = active),
+    )
+
+    fun channelGroup(code: String, vararg channels: UUID) = facade.tenantCatalogService.createChannelGroup(
+        CreateChannelGroupCommand(tenant, code, code),
+    ).also { group -> channels.forEach { addChannelMember(group.id, it) } }
+
+    fun addChannelMember(group: UUID, channel: UUID) = facade.tenantCatalogService.addChannelGroupMember(
+        AddChannelGroupMemberCommand(tenant, group, channel),
+    )
+
     fun product(
         code: String,
         parent: UUID? = null,
@@ -62,6 +77,8 @@ class FundingEnvelopeScenario(val facade: Limitguard, val now: Instant) {
         category: FundingSourceCategory? = null,
         product: UUID? = null,
         active: Boolean = true,
+        channelId: UUID? = null,
+        channelGroupId: UUID? = null,
     ) = CreateLimitConfigurationCommand(
         tenantId = tenant, code = code, name = code, parentConfigurationId = parent,
         limitKind = LimitKind.PER_TRANSACTION, currency = "EUR", maxAssignableAmount = BigDecimal("1000"),
@@ -71,6 +88,12 @@ class FundingEnvelopeScenario(val facade: Limitguard, val now: Instant) {
             else -> LimitConfigurationFundingScope.ALL_FUNDING_SOURCES
         },
         fundingSourceCategory = category, fundingSourceProductId = product, isActive = active, startsAt = now,
+        channelScope = when {
+            channelId != null -> LimitChannelScope.CHANNEL
+            channelGroupId != null -> LimitChannelScope.CHANNEL_GROUP
+            else -> LimitChannelScope.ALL_CHANNELS
+        },
+        channelId = channelId, channelGroupId = channelGroupId,
     )
 
     fun configuration(
@@ -79,7 +102,11 @@ class FundingEnvelopeScenario(val facade: Limitguard, val now: Instant) {
         category: FundingSourceCategory? = null,
         product: UUID? = null,
         active: Boolean = true,
-    ) = facade.tenantCatalogService.createLimitConfiguration(configurationCommand(code, parent, category, product, active))
+        channelId: UUID? = null,
+        channelGroupId: UUID? = null,
+    ) = facade.tenantCatalogService.createLimitConfiguration(configurationCommand(
+        code, parent, category, product, active, channelId, channelGroupId,
+    ))
 
     fun findConfiguration(code: String) = facade.limitInquiryService.findLimitConfigurationByCode(
         FindLimitConfigurationByCodeQuery(tenant, code),
@@ -119,7 +146,7 @@ class FundingEnvelopeScenario(val facade: Limitguard, val now: Instant) {
 
     fun details(request: UUID) = facade.limitInquiryService.getLimitChange(GetLimitChangeQuery(tenant, request))
 
-    fun authorize(source: UUID, amount: String) = facade.limitEvaluationService.authorizeTransaction(
-        AuthorizeTransactionCommand(tenant, owner, source, operation, channel, BigDecimal(amount), "EUR"),
+    fun authorize(source: UUID, amount: String, channelId: UUID = channel) = facade.limitEvaluationService.authorizeTransaction(
+        AuthorizeTransactionCommand(tenant, owner, source, operation, channelId, BigDecimal(amount), "EUR"),
     )
 }

@@ -12,8 +12,9 @@ import java.time.Instant
 
 interface LimitConfigurationRepository {
     /**
-     * Serializes tenant funding-envelope reads and writes through transaction completion.
-     * Acquire before product/configuration row locks, then read the current catalog and hierarchy.
+     * Serializes tenant configuration-envelope reads and live funding/channel coverage writes
+     * through transaction completion. Acquire before catalog/configuration row locks, then
+     * read current coverage and hierarchies.
      */
     fun lockFundingEnvelopes(tenantId: TenantId)
 

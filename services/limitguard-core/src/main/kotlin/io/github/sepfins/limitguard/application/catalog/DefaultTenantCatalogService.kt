@@ -55,6 +55,7 @@ import io.github.sepfins.limitguard.api.results.OperationTypeResult
 import io.github.sepfins.limitguard.api.results.PartyProfileDelegationResult
 import io.github.sepfins.limitguard.api.results.PartyProfileResult
 import io.github.sepfins.limitguard.api.results.TenantResult
+import io.github.sepfins.limitguard.application.configuration.ChannelConfigurationEnvelopes
 import io.github.sepfins.limitguard.application.configuration.FundingConfigurationEnvelopes
 import io.github.sepfins.limitguard.application.operation.OperationTypeAncestry
 import io.github.sepfins.limitguard.domain.channel.Channel
@@ -208,6 +209,9 @@ class DefaultTenantCatalogService(
     private val fundingEnvelopes = FundingConfigurationEnvelopes(
         limitConfigurationRepository, fundingSourceProductRepository,
     )
+    private val channelEnvelopes = ChannelConfigurationEnvelopes(
+        limitConfigurationRepository, channelRepository, channelGroupRepository, channelGroupMemberRepository,
+    )
 
     override fun registerTenant(command: RegisterTenantCommand): TenantResult = mapValidation {
         val tenant = Tenant(
@@ -331,18 +335,22 @@ class DefaultTenantCatalogService(
     ): ChannelGroupMemberResult = mapValidation {
         val tenantId = TenantId.of(command.tenantId)
         requireTenantExists(tenantId)
-        val groupId = ChannelGroupId.of(command.channelGroupId)
-        val channelId = ChannelId.of(command.channelId)
-        requireChannelGroupExists(tenantId, groupId)
-        requireChannelExists(tenantId, channelId)
-        val member = ChannelGroupMember(
-            tenantId = tenantId,
-            groupId = groupId,
-            channelId = channelId,
-            createdAt = clockProvider.now(),
-        )
+        return transactionRunner.inTransaction {
+            limitConfigurationRepository.lockFundingEnvelopes(tenantId)
+            val groupId = ChannelGroupId.of(command.channelGroupId)
+            val channelId = ChannelId.of(command.channelId)
+            requireChannelGroupExists(tenantId, groupId)
+            requireChannelExists(tenantId, channelId)
+            val member = ChannelGroupMember(
+                tenantId = tenantId,
+                groupId = groupId,
+                channelId = channelId,
+                createdAt = clockProvider.now(),
+            )
+            channelEnvelopes.validateMembershipGrowth(member)
 
-        return channelGroupMemberRepository.insert(tenantId, member).toResult()
+            channelGroupMemberRepository.insert(tenantId, member).toResult()
+        }
     }
 
     override fun registerOperationType(command: RegisterOperationTypeCommand): OperationTypeResult = mapValidation {
@@ -850,6 +858,7 @@ class DefaultTenantCatalogService(
                 createdAt = now
             )
             fundingEnvelopes.validateHierarchy(limitConfiguration)
+            channelEnvelopes.validateHierarchy(limitConfiguration)
 
             limitConfigurationRepository.insert(tenantId, limitConfiguration).toResult()
         }
@@ -877,6 +886,7 @@ class DefaultTenantCatalogService(
                 updatedAt = clockProvider.now(),
             )
             fundingEnvelopes.validateHierarchy(updated)
+            channelEnvelopes.validateHierarchy(updated)
 
             limitConfigurationRepository.update(tenantId, updated).toResult()
         }
@@ -895,6 +905,7 @@ class DefaultTenantCatalogService(
                 LimitConfigurationId.of(command.limitConfigurationId),
             )
             fundingEnvelopes.validateHierarchy(configuration)
+            channelEnvelopes.validateHierarchy(configuration)
             if (configuration.isActive == command.isActive) {
                 configuration.toResult()
             } else {

@@ -60,6 +60,9 @@ data class LimitConfiguration(
         ) {
             "all-funding child configuration cannot fit a narrower parent funding envelope"
         }
+        require(channelScope != LimitChannelScope.AllChannels || parent.channelScope == LimitChannelScope.AllChannels) {
+            "all-channel child configuration cannot fit a narrower parent channel envelope"
+        }
         require(parent.limitKind == limitKind) {
             "child configuration limit kind must match parent limit kind"
         }
