@@ -116,17 +116,25 @@ class OperationSubtreePersistenceTest {
         for (corruption in listOf("HIDDEN", "MISSING", "CYCLE", "SELF_CYCLE", "GLOBAL_PRIVATE", "LEAF")) {
             val fixture = fixture(target = "2")
             val s = fixture.scenario
-            val root = s.operation("ROOT", global = corruption == "GLOBAL_PRIVATE")
-            val selected = s.operation("SELECTED", root)
+            // Seed legacy rows directly: current catalog admission requires the V4 guard.
+            fun legacyOperation(code: String, parent: UUID? = null, global: Boolean = false, tenant: UUID = s.tenant): UUID {
+                val id = UUID.randomUUID()
+                execute(fixture.source,
+                    "insert into operation_type (id, tenant_id, parent_id, code, name, is_global) values (?, ?, ?, ?, ?, ?)",
+                    id, if (global) null else tenant, parent, code, code, global)
+                return id
+            }
+            val root = legacyOperation("ROOT", global = corruption == "GLOBAL_PRIVATE")
+            val selected = legacyOperation("SELECTED", root)
             val originalCommand = s.command(selected, key = "historical")
             val original = s.facade.limitEvaluationService.authorizeTransaction(originalCommand)
             val other = OperationSubtreeScenario(s.facade, NOW)
             val parent = when (corruption) {
-                "HIDDEN" -> other.operation("PRIVATE")
+                "HIDDEN" -> legacyOperation("PRIVATE", tenant = other.tenant)
                 "MISSING" -> UUID.randomUUID()
                 "CYCLE" -> selected
                 "SELF_CYCLE" -> root
-                "GLOBAL_PRIVATE" -> s.operation("LOCAL")
+                "GLOBAL_PRIVATE" -> legacyOperation("LOCAL")
                 else -> null
             }
             corrupt(fixture.source, "update operation_type set parent_id = ?, is_leaf = ? where id = ?",
@@ -174,7 +182,7 @@ class OperationSubtreePersistenceTest {
                 awaitTaxonomyWriter(fixture.source)
                 blocker.commit()
                 val failure = assertFailsWith<ExecutionException> { child.get(10, TimeUnit.SECONDS) }
-                assertTrue(failure.cause is ConflictException)
+                assertTrue(failure.cause is ValidationException)
             }
             assertFailsWith<ValidationException> { s.operation("RETRY_CHILD", parent) }
             assertEquals(AuthorizationDecision.ALLOWED, s.authorize(parent).decision)

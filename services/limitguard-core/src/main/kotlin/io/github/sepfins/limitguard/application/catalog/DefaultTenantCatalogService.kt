@@ -57,6 +57,7 @@ import io.github.sepfins.limitguard.api.results.PartyProfileResult
 import io.github.sepfins.limitguard.api.results.TenantResult
 import io.github.sepfins.limitguard.application.configuration.ChannelConfigurationEnvelopes
 import io.github.sepfins.limitguard.application.configuration.FundingConfigurationEnvelopes
+import io.github.sepfins.limitguard.application.configuration.OperationConfigurationEnvelopes
 import io.github.sepfins.limitguard.application.operation.OperationTypeAncestry
 import io.github.sepfins.limitguard.domain.channel.Channel
 import io.github.sepfins.limitguard.domain.channel.ChannelCode
@@ -212,6 +213,7 @@ class DefaultTenantCatalogService(
     private val channelEnvelopes = ChannelConfigurationEnvelopes(
         limitConfigurationRepository, channelRepository, channelGroupRepository, channelGroupMemberRepository,
     )
+    private val operationEnvelopes = OperationConfigurationEnvelopes(limitConfigurationRepository, operationTypeRepository)
 
     override fun registerTenant(command: RegisterTenantCommand): TenantResult = mapValidation {
         val tenant = Tenant(
@@ -357,24 +359,32 @@ class DefaultTenantCatalogService(
         val tenantId = TenantId.of(command.tenantId)
         requireTenantExists(tenantId)
         val parentId = command.parentId?.let { OperationTypeId.of(it) }
-        if (parentId != null) {
-            val parentPath = OperationTypeAncestry(operationTypeRepository).resolve(tenantId, parentId)
-            require(!command.isGlobal || parentPath.all { it.scope == OperationTypeScope.Global }) {
-                "Global operation types may have only global ancestors"
+        return transactionRunner.inTransaction {
+            operationTypeRepository.lockCatalog()
+            if (parentId != null) {
+                val parentPath = OperationTypeAncestry(operationTypeRepository).resolve(tenantId, parentId)
+                require(!command.isGlobal || parentPath.all { it.scope == OperationTypeScope.Global }) {
+                    "Global operation types may have only global ancestors"
+                }
+                require(!parentPath.first().isLeaf) { "Cannot add a child beneath a declared operation leaf" }
             }
-            require(!parentPath.first().isLeaf) { "Cannot add a child beneath a declared operation leaf" }
-        }
-        val operationType = OperationType(
-            id = OperationTypeId.of(idGenerator.newId()),
-            scope = if (command.isGlobal) OperationTypeScope.Global else OperationTypeScope.TenantSpecific(tenantId),
-            parentId = parentId,
-            code = OperationTypeCode.of(command.code),
-            name = OperationTypeName.of(command.name),
-            isLeaf = command.isLeaf,
-            createdAt = clockProvider.now()
-        )
+            val operationType = OperationType(
+                id = OperationTypeId.of(idGenerator.newId()),
+                scope = if (command.isGlobal) OperationTypeScope.Global else OperationTypeScope.TenantSpecific(tenantId),
+                parentId = parentId,
+                code = OperationTypeCode.of(command.code),
+                name = OperationTypeName.of(command.name),
+                isLeaf = command.isLeaf,
+                createdAt = clockProvider.now()
+            )
 
-        return operationTypeRepository.insert(tenantId, operationType).toResult()
+            val affectedTenants = if (command.isGlobal) {
+                tenantRepository.findPage(null, 0, Int.MAX_VALUE).map { it.id }.sortedBy { it.value }
+            } else listOf(tenantId)
+            affectedTenants.forEach { operationEnvelopes.validateOperationGrowth(it) }
+
+            operationTypeRepository.insert(tenantId, operationType).toResult()
+        }
     }
 
     override fun registerPartyProfile(command: RegisterPartyProfileCommand): PartyProfileResult = mapValidation {
@@ -762,6 +772,7 @@ class DefaultTenantCatalogService(
         val tenantId = TenantId.of(command.tenantId)
         requireTenantExists(tenantId)
         return transactionRunner.inTransaction {
+            operationTypeRepository.lockCatalog()
             limitConfigurationRepository.lockFundingEnvelopes(tenantId)
             val parentConfigurationId = command.parentConfigurationId?.let { LimitConfigurationId.of(it) }
             val now = clockProvider.now()
@@ -859,6 +870,7 @@ class DefaultTenantCatalogService(
             )
             fundingEnvelopes.validateHierarchy(limitConfiguration)
             channelEnvelopes.validateHierarchy(limitConfiguration)
+            operationEnvelopes.validateHierarchy(limitConfiguration)
 
             limitConfigurationRepository.insert(tenantId, limitConfiguration).toResult()
         }
@@ -871,6 +883,7 @@ class DefaultTenantCatalogService(
         requireTenantExists(tenantId)
 
         transactionRunner.inTransaction {
+            operationTypeRepository.lockCatalog()
             limitConfigurationRepository.lockFundingEnvelopes(tenantId)
             val configuration = requireLimitConfigurationForUpdate(
                 tenantId,
@@ -887,6 +900,7 @@ class DefaultTenantCatalogService(
             )
             fundingEnvelopes.validateHierarchy(updated)
             channelEnvelopes.validateHierarchy(updated)
+            operationEnvelopes.validateHierarchy(updated)
 
             limitConfigurationRepository.update(tenantId, updated).toResult()
         }
@@ -899,6 +913,7 @@ class DefaultTenantCatalogService(
         requireTenantExists(tenantId)
 
         transactionRunner.inTransaction {
+            operationTypeRepository.lockCatalog()
             limitConfigurationRepository.lockFundingEnvelopes(tenantId)
             val configuration = requireLimitConfigurationForUpdate(
                 tenantId,
@@ -906,6 +921,7 @@ class DefaultTenantCatalogService(
             )
             fundingEnvelopes.validateHierarchy(configuration)
             channelEnvelopes.validateHierarchy(configuration)
+            operationEnvelopes.validateHierarchy(configuration)
             if (configuration.isActive == command.isActive) {
                 configuration.toResult()
             } else {

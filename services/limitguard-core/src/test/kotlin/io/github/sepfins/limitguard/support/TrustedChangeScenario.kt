@@ -25,7 +25,11 @@ import java.math.BigDecimal
 import java.time.Instant
 import java.util.UUID
 
-class TrustedChangeScenario(val facade: Limitguard, val now: Instant) {
+class TrustedChangeScenario(
+    val facade: Limitguard,
+    val now: Instant,
+    createConfiguration: (CreateLimitConfigurationCommand) -> UUID = { facade.tenantCatalogService.createLimitConfiguration(it).id },
+) {
     val tenant = facade.tenantCatalogService.registerTenant(RegisterTenantCommand("Actor bank ${UUID.randomUUID()}")).id
     val owner = profile("Owner")
     val representative = profile("Representative")
@@ -34,11 +38,11 @@ class TrustedChangeScenario(val facade: Limitguard, val now: Instant) {
     val replacementWorker = facade.tenantCatalogService.registerBankWorker(RegisterBankWorkerCommand(tenant, "REPLACEMENT", "Replacement")).id
     val channel = facade.tenantCatalogService.registerChannel(RegisterChannelCommand(tenant, "BRANCH", "Branch")).id
     val ruleChannel = facade.tenantCatalogService.registerChannel(RegisterChannelCommand(tenant, "ATM", "ATM")).id
-    val configuration = facade.tenantCatalogService.createLimitConfiguration(CreateLimitConfigurationCommand(
+    val configuration = createConfiguration(CreateLimitConfigurationCommand(
         tenantId = tenant, code = "GENERAL", name = "General", limitKind = LimitKind.PER_TRANSACTION,
         currency = "EUR", maxAssignableAmount = BigDecimal("1000"),
         channelScope = LimitChannelScope.CHANNEL, channelId = ruleChannel,
-    )).id
+    ))
     val delegation = facade.tenantCatalogService.createPartyProfileDelegation(CreatePartyProfileDelegationCommand(
         tenant, owner, representative, PartyProfileDelegationType.LEGAL_REPRESENTATIVE,
         startsAt = now.minusSeconds(60),

@@ -1,6 +1,7 @@
 package io.github.sepfins.limitguard.infrastructure.jooq.repository
 
 import io.github.sepfins.limitguard.api.errors.ConflictException
+import io.github.sepfins.limitguard.api.errors.InfrastructureException
 import io.github.sepfins.limitguard.domain.common.OperationTypeId
 import io.github.sepfins.limitguard.domain.common.TenantId
 import io.github.sepfins.limitguard.domain.operation.OperationType
@@ -10,12 +11,14 @@ import io.github.sepfins.limitguard.domain.operation.OperationTypeScope
 import io.github.sepfins.limitguard.infrastructure.jooq.JooqPersistenceContext
 import io.github.sepfins.limitguard.infrastructure.jooq.jooqOperation
 import io.github.sepfins.limitguard.infrastructure.jooq.generated.tables.OperationType as GeneratedOperationTypeTable
+import io.github.sepfins.limitguard.infrastructure.jooq.generated.tables.OperationTypeCatalogGuard
 import io.github.sepfins.limitguard.port.persistence.OperationTypeAncestryNode
 import io.github.sepfins.limitguard.port.persistence.OperationTypeRepository
 import org.jooq.Condition
 import org.jooq.Record
 import org.jooq.SelectFieldOrAsterisk
 import org.jooq.impl.DSL
+import java.sql.Connection
 import java.time.Instant
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
@@ -24,6 +27,18 @@ import java.util.UUID
 class JooqOperationTypeRepository(
     private val context: JooqPersistenceContext,
 ) : OperationTypeRepository {
+    override fun lockCatalog() = jooqOperation("lock operation configuration envelopes") {
+        context.requireTransaction("locking operation configuration envelopes")
+        val isolation = context.dsl().connectionResult { it.transactionIsolation }
+        if (isolation != Connection.TRANSACTION_READ_COMMITTED) {
+            throw InfrastructureException("operation configuration envelopes require READ COMMITTED transaction isolation")
+        }
+        val guard = OperationTypeCatalogGuard.OPERATION_TYPE_CATALOG_GUARD
+        val locked = context.dsl().update(guard).set(guard.SINGLETON, guard.SINGLETON).where(guard.SINGLETON.isTrue).execute()
+        if (locked != 1) throw InfrastructureException("operation taxonomy serialization row is missing")
+        Unit
+    }
+
     override fun findVisibleToTenant(tenantId: TenantId): List<OperationType> =
         jooqOperation("find operation types visible to tenant") {
             selectOperationTypes()

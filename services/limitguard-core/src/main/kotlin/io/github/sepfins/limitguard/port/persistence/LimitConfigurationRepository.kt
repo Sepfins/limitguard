@@ -15,6 +15,8 @@ interface LimitConfigurationRepository {
      * Serializes tenant configuration-envelope reads and live funding/channel coverage writes
      * through transaction completion. Acquire before catalog/configuration row locks, then
      * read current coverage and hierarchies.
+     * Configuration writers acquire OperationTypeRepository.lockCatalog() first;
+     * funding/channel growth writers use this tenant lock without later acquiring that guard.
      */
     fun lockFundingEnvelopes(tenantId: TenantId)
 

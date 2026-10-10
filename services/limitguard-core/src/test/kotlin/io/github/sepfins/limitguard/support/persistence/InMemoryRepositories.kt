@@ -413,6 +413,8 @@ class InMemoryOperationTypeRepository : OperationTypeRepository {
     private val lock = Any()
     private val operationTypes = ConcurrentHashMap<OperationTypeId, OperationType>()
 
+    override fun lockCatalog() = Unit
+
     override fun findVisibleToTenant(tenantId: TenantId): List<OperationType> =
         operationTypes.values.filter { it.isVisibleTo(tenantId) }
 

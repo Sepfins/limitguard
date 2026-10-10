@@ -6,6 +6,13 @@ import io.github.sepfins.limitguard.domain.operation.OperationType
 import io.github.sepfins.limitguard.domain.operation.OperationTypeCode
 
 interface OperationTypeRepository {
+    /**
+     * Serializes operation growth and configuration admission across the shared taxonomy
+     * through transaction completion. Acquire before tenant envelope/catalog row locks,
+     * then read fresh ancestry and configurations, including all tenants for global growth.
+     */
+    fun lockCatalog()
+
     fun findVisibleToTenant(tenantId: TenantId): List<OperationType>
     fun findById(tenantId: TenantId, id: OperationTypeId): OperationType?
     fun findByCodeVisibleToTenant(tenantId: TenantId, code: OperationTypeCode): List<OperationType>
