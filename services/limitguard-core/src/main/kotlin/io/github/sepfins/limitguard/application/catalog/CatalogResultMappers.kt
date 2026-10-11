@@ -11,7 +11,6 @@ import io.github.sepfins.limitguard.api.LimitConfigurationFundingScope as ApiLim
 import io.github.sepfins.limitguard.api.LimitFundingScope as ApiLimitFundingScope
 import io.github.sepfins.limitguard.api.LimitKind as ApiLimitKind
 import io.github.sepfins.limitguard.api.LimitPeriod as ApiLimitPeriod
-import io.github.sepfins.limitguard.api.PartyType as ApiPartyType
 import io.github.sepfins.limitguard.api.ProductNodeType as ApiProductNodeType
 import io.github.sepfins.limitguard.api.PartyProfileDelegationType as ApiPartyProfileDelegationType
 import io.github.sepfins.limitguard.api.results.BankWorkerResult
@@ -29,7 +28,6 @@ import io.github.sepfins.limitguard.api.results.LimitChangePolicyResult
 import io.github.sepfins.limitguard.api.results.LimitConfigurationResult
 import io.github.sepfins.limitguard.api.results.MandateResult
 import io.github.sepfins.limitguard.api.results.OperationTypeResult
-import io.github.sepfins.limitguard.api.results.PartyLegalIdentifierResult
 import io.github.sepfins.limitguard.api.results.PartyProfileDelegationResult
 import io.github.sepfins.limitguard.api.results.PartyProfileResult
 import io.github.sepfins.limitguard.api.results.TenantResult
@@ -54,10 +52,6 @@ import io.github.sepfins.limitguard.domain.limit.LimitOperationScope
 import io.github.sepfins.limitguard.domain.mandate.Mandate
 import io.github.sepfins.limitguard.domain.operation.OperationType
 import io.github.sepfins.limitguard.domain.operation.OperationTypeScope
-import io.github.sepfins.limitguard.domain.party.Individual
-import io.github.sepfins.limitguard.domain.party.LegalEntity
-import io.github.sepfins.limitguard.domain.party.Party
-import io.github.sepfins.limitguard.domain.party.PartyLegalIdentifier
 import io.github.sepfins.limitguard.domain.party.PartyProfile
 import io.github.sepfins.limitguard.domain.party.PartyProfileDelegation
 import io.github.sepfins.limitguard.domain.tenant.Tenant
@@ -152,43 +146,17 @@ internal fun OperationType.toResult(): OperationTypeResult =
     )
 
 internal fun PartyProfile.toResult(
-    party: Party,
-    individual: Individual?,
-    legalEntity: LegalEntity?,
-    legalIdentifiers: List<PartyLegalIdentifier>,
     externalIdentifiers: List<EntityIdentifierResult> = emptyList(),
-    partyCreated: Boolean,
 ): PartyProfileResult =
     PartyProfileResult(
         id = id.value,
         tenantId = tenantId.value,
         partyId = partyId.value,
-        partyType = ApiPartyType.valueOf(party.partyType.name),
-        partyCreated = partyCreated,
-        firstName = individual?.firstName?.value,
-        lastName = individual?.lastName?.value,
-        birthDate = individual?.birthDate,
-        legalName = legalEntity?.legalName?.value,
-        legalForm = legalEntity?.legalForm?.value,
-        legalIdentifiers = legalIdentifiers.map { it.toResult() },
         externalIdentifiers = externalIdentifiers,
         createdAt = requireNotNull(createdAt) {
             "PartyProfile.createdAt is required when mapping to PartyProfileResult"
         },
         metadata = metadata.value,
-    )
-
-internal fun PartyLegalIdentifier.toResult(): PartyLegalIdentifierResult =
-    PartyLegalIdentifierResult(
-        id = id.value,
-        partyId = partyId.value,
-        jurisdictionCountry = jurisdictionCountry.value,
-        identifierType = identifierType.value,
-        normalizedIdentifier = normalizedIdentifier.value,
-        metadata = metadata.value,
-        createdAt = requireNotNull(createdAt) {
-            "PartyLegalIdentifier.createdAt is required when mapping to PartyLegalIdentifierResult"
-        },
     )
 
 internal fun BankWorker.toResult(): BankWorkerResult =

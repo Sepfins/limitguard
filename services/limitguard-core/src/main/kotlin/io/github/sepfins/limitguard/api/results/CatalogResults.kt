@@ -11,12 +11,10 @@ import io.github.sepfins.limitguard.api.LimitFundingScope
 import io.github.sepfins.limitguard.api.LimitKind
 import io.github.sepfins.limitguard.api.LimitPeriod
 import io.github.sepfins.limitguard.api.NoMatchingRuleBehavior
-import io.github.sepfins.limitguard.api.PartyType
 import io.github.sepfins.limitguard.api.PartyProfileDelegationType
 import io.github.sepfins.limitguard.api.ProductNodeType
 import java.math.BigDecimal
 import java.time.Instant
-import java.time.LocalDate
 import java.util.UUID
 
 data class TenantResult(
@@ -90,27 +88,9 @@ data class PartyProfileResult(
     val id: UUID,
     val tenantId: UUID,
     val partyId: UUID,
-    val partyType: PartyType,
-    val partyCreated: Boolean = false,
-    val firstName: String? = null,
-    val lastName: String? = null,
-    val birthDate: LocalDate? = null,
-    val legalName: String? = null,
-    val legalForm: String? = null,
-    val legalIdentifiers: List<PartyLegalIdentifierResult> = emptyList(),
     val externalIdentifiers: List<EntityIdentifierResult> = emptyList(),
     val createdAt: Instant,
     val metadata: Map<String, Any?> = emptyMap(),
-)
-
-data class PartyLegalIdentifierResult(
-    val id: UUID,
-    val partyId: UUID,
-    val jurisdictionCountry: String,
-    val identifierType: String,
-    val normalizedIdentifier: String,
-    val metadata: Map<String, Any?>,
-    val createdAt: Instant,
 )
 
 data class BankWorkerResult(

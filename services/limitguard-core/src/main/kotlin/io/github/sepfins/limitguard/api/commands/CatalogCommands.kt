@@ -85,11 +85,10 @@ data class RegisterOperationTypeCommand(
     val isGlobal: Boolean = false,
 )
 
+/** Host-verified onboarding details are required on both new registration and canonical reuse. */
 data class RegisterPartyProfileCommand(
     val tenantId: UUID,
     val partyType: PartyType,
-    val partyId: UUID? = null,
-    val createPartyIfMissing: Boolean = true,
     val firstName: String? = null,
     val lastName: String? = null,
     val birthDate: LocalDate? = null,

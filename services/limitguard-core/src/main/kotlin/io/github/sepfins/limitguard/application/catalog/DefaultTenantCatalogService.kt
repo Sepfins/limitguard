@@ -35,6 +35,7 @@ import io.github.sepfins.limitguard.api.commands.UpdateFundingSourceCommand
 import io.github.sepfins.limitguard.api.commands.UpdateFundingSourceProductCommand
 import io.github.sepfins.limitguard.api.commands.UpdateLimitConfigurationCommand
 import io.github.sepfins.limitguard.api.errors.ConflictException
+import io.github.sepfins.limitguard.api.errors.InfrastructureException
 import io.github.sepfins.limitguard.api.errors.NotFoundException
 import io.github.sepfins.limitguard.api.errors.ValidationException
 import io.github.sepfins.limitguard.api.results.BankWorkerResult
@@ -391,7 +392,9 @@ class DefaultTenantCatalogService(
         val tenantId = TenantId.of(command.tenantId)
         requireTenantExists(tenantId)
         val now = clockProvider.now()
-        val partyType = command.partyType.toDomain()
+        val newParty = Party(PartyId.of(idGenerator.newId()), command.partyType.toDomain(), now)
+        val verifiedDetails = verifiedPartyDetails(command, newParty)
+        val profileMetadata = Metadata(command.metadata)
         val legalIdentifierInputs = command.legalIdentifiers.map { legalIdentifier ->
             LegalIdentifierInput(
                 jurisdictionCountry = JurisdictionCountry.of(legalIdentifier.jurisdictionCountry),
@@ -400,6 +403,7 @@ class DefaultTenantCatalogService(
                 metadata = Metadata(legalIdentifier.metadata),
             )
         }
+            .distinctBy { Triple(it.jurisdictionCountry, it.identifierType, it.normalizedIdentifier) }
         val externalIdentifierInputs = command.externalIdentifiers.map { externalIdentifier ->
             ExternalIdentifierInput(
                 schemeName = SchemeName.of(externalIdentifier.schemeName),
@@ -407,45 +411,43 @@ class DefaultTenantCatalogService(
             )
         }
 
-        return transactionRunner.inTransaction {
-            val resolvedParty = resolveParty(command, partyType, legalIdentifierInputs, now)
-            val profile = PartyProfile(
-                id = PartyProfileId.of(idGenerator.newId()),
-                partyId = resolvedParty.party.id,
-                tenantId = tenantId,
-                createdAt = now,
-                metadata = Metadata(command.metadata),
-            )
+        return try {
+            transactionRunner.inTransaction {
+                val resolvedParty = resolveParty(newParty, verifiedDetails, legalIdentifierInputs, now)
+                val profile = PartyProfile(
+                    id = PartyProfileId.of(idGenerator.newId()),
+                    partyId = resolvedParty.id,
+                    tenantId = tenantId,
+                    createdAt = now,
+                    metadata = profileMetadata,
+                )
 
-            val insertedProfile = partyProfileRepository.insert(tenantId, profile)
-            val externalIdentifiers = externalIdentifierInputs
-                .map { input ->
-                    val scheme = requireIdentifierScheme(
-                        tenantId = tenantId,
-                        entityType = EntityType.PARTY_PROFILE,
-                        schemeName = input.schemeName,
-                    )
-                    val identifier = attachEntityIdentifier(
-                        tenantId = tenantId,
-                        entityType = EntityType.PARTY_PROFILE,
-                        entityId = insertedProfile.id.value,
-                        scheme = scheme,
-                        identifier = input.identifier,
-                        now = now,
-                    )
-                    identifier.toResult(scheme)
-                }
-                .distinctBy { it.id }
-            val details = loadPartyDetails(resolvedParty.party)
-
-            insertedProfile.toResult(
-                party = resolvedParty.party,
-                individual = details.individual,
-                legalEntity = details.legalEntity,
-                legalIdentifiers = partyLegalIdentifierRepository.findByPartyId(resolvedParty.party.id),
-                externalIdentifiers = externalIdentifiers,
-                partyCreated = resolvedParty.partyCreated,
-            )
+                val insertedProfile = partyProfileRepository.insert(tenantId, profile)
+                val externalIdentifiers = externalIdentifierInputs
+                    .map { input ->
+                        val scheme = requireIdentifierScheme(
+                            tenantId = tenantId,
+                            entityType = EntityType.PARTY_PROFILE,
+                            schemeName = input.schemeName,
+                        )
+                        val identifier = attachEntityIdentifier(
+                            tenantId = tenantId,
+                            entityType = EntityType.PARTY_PROFILE,
+                            entityId = insertedProfile.id.value,
+                            scheme = scheme,
+                            identifier = input.identifier,
+                            now = now,
+                        )
+                        identifier.toResult(scheme)
+                    }
+                    .distinctBy { it.id }
+                insertedProfile.toResult(externalIdentifiers = externalIdentifiers)
+            }
+        } catch (exception: ConflictException) {
+            // SQL causes can contain shared legal identifiers; they must not cross onboarding.
+            throw ConflictException("party profile registration conflicts with existing data")
+        } catch (exception: InfrastructureException) {
+            throw InfrastructureException("party profile registration failed")
         }
     }
 
@@ -989,20 +991,11 @@ class DefaultTenantCatalogService(
     }
 
     private fun resolveParty(
-        command: RegisterPartyProfileCommand,
-        partyType: DomainPartyType,
+        newParty: Party,
+        verifiedDetails: VerifiedPartyDetails,
         legalIdentifierInputs: List<LegalIdentifierInput>,
         now: Instant,
-    ): ResolvedParty {
-        if (command.partyId != null) {
-            val partyId = PartyId.of(command.partyId)
-            val party = partyRepository.findById(partyId)
-                ?: throw NotFoundException("party not found: ${partyId.value}")
-            requirePartyType(party, partyType)
-            attachLegalIdentifiers(party.id, legalIdentifierInputs, now)
-            return ResolvedParty(party = party, partyCreated = false)
-        }
-
+    ): Party {
         val matchingIdentifiers = legalIdentifierInputs.mapNotNull {
             partyLegalIdentifierRepository.findByValue(
                 it.jurisdictionCountry,
@@ -1017,42 +1010,31 @@ class DefaultTenantCatalogService(
         }
 
         if (matchingPartyIds.size == 1) {
-            val party = partyRepository.findById(matchingPartyIds.single())
-                ?: throw NotFoundException("legal identifier points to a missing party: ${matchingPartyIds.single().value}")
-            requirePartyType(party, partyType)
-            attachLegalIdentifiers(party.id, legalIdentifierInputs, now)
-            return ResolvedParty(party = party, partyCreated = false)
-        }
-
-        if (!command.createPartyIfMissing) {
-            if (legalIdentifierInputs.isEmpty()) {
-                throw ValidationException("partyId or legalIdentifiers is required when createPartyIfMissing is false")
+            if (matchingIdentifiers.size != legalIdentifierInputs.size) {
+                throw ConflictException("new legal identifiers require controlled identity maintenance")
             }
-            throw NotFoundException("party not found for supplied legal identifiers")
+            val party = partyRepository.findById(matchingPartyIds.single())
+                ?: throw ConflictException("legal identifier points to a missing party")
+            requirePartyType(party, newParty.partyType)
+            return party
         }
 
-        val party = partyRepository.insert(
-            Party(
-                id = PartyId.of(idGenerator.newId()),
-                partyType = partyType,
-                createdAt = now,
-            )
-        )
-        createPartyDetails(command, party.id, partyType)
-        attachLegalIdentifiers(party.id, legalIdentifierInputs, now)
+        val party = partyRepository.insert(newParty)
+        verifiedDetails.individual?.let { individualRepository.insert(it) }
+        verifiedDetails.legalEntity?.let { legalEntityRepository.insert(it) }
+        insertLegalIdentifiers(party.id, legalIdentifierInputs, now)
 
-        return ResolvedParty(party = party, partyCreated = true)
+        return party
     }
 
-    private fun createPartyDetails(
+    private fun verifiedPartyDetails(
         command: RegisterPartyProfileCommand,
-        partyId: PartyId,
-        partyType: DomainPartyType,
-    ) {
-        when (partyType) {
-            DomainPartyType.INDIVIDUAL -> individualRepository.insert(
-                Individual(
-                    partyId = partyId,
+        party: Party,
+    ): VerifiedPartyDetails =
+        when (party.partyType) {
+            DomainPartyType.INDIVIDUAL -> VerifiedPartyDetails(
+                individual = Individual(
+                    partyId = party.id,
                     firstName = FirstName.of(
                         command.firstName ?: throw ValidationException("firstName is required for INDIVIDUAL parties")
                     ),
@@ -1062,9 +1044,9 @@ class DefaultTenantCatalogService(
                     birthDate = command.birthDate,
                 )
             )
-            DomainPartyType.LEGAL_ENTITY -> legalEntityRepository.insert(
-                LegalEntity(
-                    partyId = partyId,
+            DomainPartyType.LEGAL_ENTITY -> VerifiedPartyDetails(
+                legalEntity = LegalEntity(
+                    partyId = party.id,
                     legalName = LegalName.of(
                         command.legalName ?: throw ValidationException("legalName is required for LEGAL_ENTITY parties")
                     ),
@@ -1072,42 +1054,26 @@ class DefaultTenantCatalogService(
                 )
             )
         }
-    }
 
-    private fun attachLegalIdentifiers(
+    private fun insertLegalIdentifiers(
         partyId: PartyId,
         legalIdentifierInputs: List<LegalIdentifierInput>,
         now: Instant,
-    ): List<PartyLegalIdentifier> =
-        legalIdentifierInputs.map { input ->
-            val existing = partyLegalIdentifierRepository.findByValue(
-                input.jurisdictionCountry,
-                input.identifierType,
-                input.normalizedIdentifier,
-            )
-
-            if (existing != null) {
-                if (existing.partyId != partyId) {
-                    throw ConflictException(
-                        "legal identifier belongs to another party: " +
-                            "${input.jurisdictionCountry.value}/${input.identifierType.value}/${input.normalizedIdentifier.value}"
-                    )
-                }
-                existing
-            } else {
-                partyLegalIdentifierRepository.insert(
-                    PartyLegalIdentifier(
-                        id = PartyLegalIdentifierId.of(idGenerator.newId()),
-                        partyId = partyId,
-                        jurisdictionCountry = input.jurisdictionCountry,
-                        identifierType = input.identifierType,
-                        normalizedIdentifier = input.normalizedIdentifier,
-                        metadata = input.metadata,
-                        createdAt = now,
-                    )
+    ) {
+        legalIdentifierInputs.forEach { input ->
+            partyLegalIdentifierRepository.insert(
+                PartyLegalIdentifier(
+                    id = PartyLegalIdentifierId.of(idGenerator.newId()),
+                    partyId = partyId,
+                    jurisdictionCountry = input.jurisdictionCountry,
+                    identifierType = input.identifierType,
+                    normalizedIdentifier = input.normalizedIdentifier,
+                    metadata = input.metadata,
+                    createdAt = now,
                 )
-            }
+            )
         }
+    }
 
     private fun attachEntityIdentifier(
         tenantId: TenantId,
@@ -1160,21 +1126,9 @@ class DefaultTenantCatalogService(
         }
     }
 
-    private fun loadPartyDetails(party: Party): PartyDetails =
-        when (party.partyType) {
-            DomainPartyType.INDIVIDUAL -> PartyDetails(
-                individual = individualRepository.findByPartyId(party.id),
-                legalEntity = null,
-            )
-            DomainPartyType.LEGAL_ENTITY -> PartyDetails(
-                individual = null,
-                legalEntity = legalEntityRepository.findByPartyId(party.id),
-            )
-        }
-
     private fun requirePartyType(party: Party, expected: DomainPartyType) {
         if (party.partyType != expected) {
-            throw ConflictException("party type mismatch: expected $expected, found ${party.partyType}")
+            throw ConflictException("party type does not match verified onboarding details")
         }
     }
 
@@ -1310,13 +1264,9 @@ class DefaultTenantCatalogService(
         val identifier: IdentifierValue,
     )
 
-    private data class ResolvedParty(
-        val party: Party,
-        val partyCreated: Boolean,
+    private data class VerifiedPartyDetails(
+        val individual: Individual? = null,
+        val legalEntity: LegalEntity? = null,
     )
 
-    private data class PartyDetails(
-        val individual: Individual?,
-        val legalEntity: LegalEntity?,
-    )
 }

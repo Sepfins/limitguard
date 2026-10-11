@@ -34,10 +34,6 @@ import io.github.sepfins.limitguard.api.errors.ValidationException
 import io.github.sepfins.limitguard.domain.common.Metadata
 import io.github.sepfins.limitguard.domain.common.PartyId
 import io.github.sepfins.limitguard.domain.common.TenantId
-import io.github.sepfins.limitguard.domain.party.FirstName
-import io.github.sepfins.limitguard.domain.party.Individual
-import io.github.sepfins.limitguard.domain.party.LastName
-import io.github.sepfins.limitguard.domain.party.Party
 import io.github.sepfins.limitguard.domain.tenant.Tenant
 import io.github.sepfins.limitguard.domain.tenant.TenantName
 import io.github.sepfins.limitguard.infrastructure.policy.jsonlogic.JsonLogicPolicyEngine
@@ -54,7 +50,6 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
-import io.github.sepfins.limitguard.domain.party.PartyType as DomainPartyType
 
 class DefaultTenantCatalogServiceTest {
     private val tenantOne = UUID(0L, 101L)
@@ -144,11 +139,9 @@ class DefaultTenantCatalogServiceTest {
 
         val result = service.registerPartyProfile(individualCommand(tenantOne))
 
-        assertTrue(result.partyCreated)
         assertEquals(1, repositories.parties.count())
         assertEquals(1, repositories.partyLegalIdentifiers.findByPartyId(PartyId.of(result.partyId)).size)
-        assertEquals("Mario", result.firstName)
-        assertEquals("Rossi", result.lastName)
+        assertEquals(tenantOne, result.tenantId)
     }
 
     @Test
@@ -161,8 +154,6 @@ class DefaultTenantCatalogServiceTest {
         val first = service.registerPartyProfile(individualCommand(tenantOne))
         val second = service.registerPartyProfile(individualCommand(tenantTwo))
 
-        assertTrue(first.partyCreated)
-        assertFalse(second.partyCreated)
         assertEquals(first.partyId, second.partyId)
         assertEquals(1, repositories.parties.count())
         assertEquals(1, repositories.partyProfiles.findByPartyId(TenantId.of(tenantOne), PartyId.of(first.partyId)).size)
@@ -170,56 +161,25 @@ class DefaultTenantCatalogServiceTest {
     }
 
     @Test
-    fun `register party profile can link an explicit existing party`() {
+    fun `register party profile always requires host verified details before matching`() {
         val repositories = InMemoryLimitguardRepositories()
         seedTenant(repositories, tenantOne)
         val service = catalogService(repositories)
-        val existingPartyId = PartyId.of(UUID(0L, 900L))
-        repositories.parties.insert(
-            Party(
-                id = existingPartyId,
-                partyType = DomainPartyType.INDIVIDUAL,
-                createdAt = Instant.parse("2026-06-20T00:00:00Z"),
-            )
-        )
-        repositories.individuals.insert(
-            Individual(
-                partyId = existingPartyId,
-                firstName = FirstName.of("Mario"),
-                lastName = LastName.of("Rossi"),
-                birthDate = LocalDate.parse("1980-01-01"),
-            )
-        )
-
-        val result = service.registerPartyProfile(
-            RegisterPartyProfileCommand(
-                tenantId = tenantOne,
-                partyType = PartyType.INDIVIDUAL,
-                partyId = existingPartyId.value,
-                createPartyIfMissing = false,
-            )
-        )
-
-        assertFalse(result.partyCreated)
-        assertEquals(existingPartyId.value, result.partyId)
-        assertEquals(1, repositories.parties.count())
-        assertEquals("Mario", result.firstName)
+        assertFailsWith<ValidationException> {
+            service.registerPartyProfile(RegisterPartyProfileCommand(tenantOne, PartyType.INDIVIDUAL))
+        }
+        assertEquals(0, repositories.parties.count())
     }
 
     @Test
-    fun `register party profile can require an existing party match`() {
+    fun `register party profile rejects duplicate registration in one tenant`() {
         val repositories = InMemoryLimitguardRepositories()
         seedTenant(repositories, tenantOne)
         val service = catalogService(repositories)
 
-        assertFailsWith<NotFoundException> {
-            service.registerPartyProfile(
-                individualCommand(
-                    tenantId = tenantOne,
-                    createPartyIfMissing = false,
-                    legalIdentifier = codiceFiscale.copy(normalizedIdentifier = "BNCLRA85C45F205Z"),
-                )
-            )
+        service.registerPartyProfile(individualCommand(tenantOne))
+        assertFailsWith<ConflictException> {
+            service.registerPartyProfile(individualCommand(tenantOne))
         }
     }
 
@@ -694,13 +654,11 @@ class DefaultTenantCatalogServiceTest {
 
     private fun individualCommand(
         tenantId: UUID,
-        createPartyIfMissing: Boolean = true,
         legalIdentifier: PartyLegalIdentifierCommand = codiceFiscale,
     ): RegisterPartyProfileCommand =
         RegisterPartyProfileCommand(
             tenantId = tenantId,
             partyType = PartyType.INDIVIDUAL,
-            createPartyIfMissing = createPartyIfMissing,
             firstName = "Mario",
             lastName = "Rossi",
             birthDate = LocalDate.parse("1980-01-01"),
