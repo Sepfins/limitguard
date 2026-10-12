@@ -17,7 +17,6 @@ import io.github.sepfins.limitguard.domain.channel.ChannelCode
 import io.github.sepfins.limitguard.domain.channel.ChannelGroup
 import io.github.sepfins.limitguard.domain.channel.ChannelGroupCode
 import io.github.sepfins.limitguard.domain.channel.ChannelGroupMember
-import io.github.sepfins.limitguard.domain.common.BankWorkerId
 import io.github.sepfins.limitguard.domain.common.AuthorizationDecisionId
 import io.github.sepfins.limitguard.domain.common.ChannelGroupId
 import io.github.sepfins.limitguard.domain.common.CurrencyCode
@@ -94,8 +93,6 @@ import io.github.sepfins.limitguard.domain.transaction.TransactionResultSnapshot
 import io.github.sepfins.limitguard.domain.usage.LimitUsageBucket
 import io.github.sepfins.limitguard.domain.usage.LimitUsageEvent
 import io.github.sepfins.limitguard.domain.usage.LimitUsageEventType
-import io.github.sepfins.limitguard.domain.worker.BankWorker
-import io.github.sepfins.limitguard.port.persistence.BankWorkerRepository
 import io.github.sepfins.limitguard.port.persistence.AuthorizationDecisionRepository
 import io.github.sepfins.limitguard.port.persistence.ChannelGroupRepository
 import io.github.sepfins.limitguard.port.persistence.ChannelRepository
@@ -141,7 +138,6 @@ class InMemoryLimitguardRepositories(
     val partyLegalIdentifiers: InMemoryPartyLegalIdentifierRepository = InMemoryPartyLegalIdentifierRepository(),
     val partyProfiles: InMemoryPartyProfileRepository = InMemoryPartyProfileRepository(),
     val partyProfileDelegations: InMemoryPartyProfileDelegationRepository = InMemoryPartyProfileDelegationRepository(),
-    val bankWorkers: InMemoryBankWorkerRepository = InMemoryBankWorkerRepository(),
     val channels: InMemoryChannelRepository = InMemoryChannelRepository(),
     val channelGroups: InMemoryChannelGroupRepository = InMemoryChannelGroupRepository(),
     val channelGroupMembers: InMemoryChannelGroupMemberRepository = InMemoryChannelGroupMemberRepository(),
@@ -952,45 +948,6 @@ class InMemoryPartyProfileDelegationRepository : PartyProfileDelegationRepositor
                     it.delegationType == delegation.delegationType
             },
             "party profile delegation already exists for owner, delegate, and type",
-        )
-    }
-}
-
-class InMemoryBankWorkerRepository : BankWorkerRepository {
-    private val lock = Any()
-    private val workers = ConcurrentHashMap<TenantScopedKey<BankWorkerId>, BankWorker>()
-
-    override fun findById(tenantId: TenantId, id: BankWorkerId): BankWorker? =
-        workers[TenantScopedKey(tenantId, id)]
-
-    override fun findByExternalReference(
-        tenantId: TenantId,
-        externalReference: ExternalReference,
-    ): BankWorker? =
-        workers.tenantValues(tenantId).firstOrNull { it.externalReference == externalReference }
-
-    override fun insert(tenantId: TenantId, bankWorker: BankWorker): BankWorker = synchronized(lock) {
-        requireSameTenant(tenantId, bankWorker.tenantId)
-        requireAbsent(findById(tenantId, bankWorker.id) != null, "bank worker id already exists: ${bankWorker.id.value}")
-        requireExternalReferenceUnique(tenantId, bankWorker)
-        workers[TenantScopedKey(tenantId, bankWorker.id)] = bankWorker
-        bankWorker
-    }
-
-    override fun update(tenantId: TenantId, bankWorker: BankWorker): BankWorker = synchronized(lock) {
-        requireSameTenant(tenantId, bankWorker.tenantId)
-        requirePresent(findById(tenantId, bankWorker.id) != null, "bank worker not found: ${bankWorker.id.value}")
-        requireExternalReferenceUnique(tenantId, bankWorker)
-        workers[TenantScopedKey(tenantId, bankWorker.id)] = bankWorker
-        bankWorker
-    }
-
-    private fun requireExternalReferenceUnique(tenantId: TenantId, bankWorker: BankWorker) {
-        requireAbsent(
-            workers.tenantValues(tenantId).any {
-                it.id != bankWorker.id && it.externalReference == bankWorker.externalReference
-            },
-            "bank worker external reference already exists: ${bankWorker.externalReference.value}",
         )
     }
 }

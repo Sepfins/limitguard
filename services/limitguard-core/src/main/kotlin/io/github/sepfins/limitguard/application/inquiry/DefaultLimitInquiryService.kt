@@ -346,10 +346,6 @@ class DefaultLimitInquiryService(
                 actorType = LimitChangeActorType.PARTY_PROFILE,
                 partyProfileId = partyProfileId.value,
             )
-            is ChangeActor.BankWorkerActor -> LimitChangeActorResult(
-                actorType = LimitChangeActorType.BANK_WORKER,
-                bankWorkerId = bankWorkerId.value,
-            )
         }
 
     private fun PaymentTransaction.toResult(): PaymentTransactionResult =

@@ -24,7 +24,6 @@ import io.github.sepfins.limitguard.port.persistence.MandateRepository
 import io.github.sepfins.limitguard.port.persistence.TenantRepository
 import io.github.sepfins.limitguard.port.persistence.PartyProfileRepository
 import io.github.sepfins.limitguard.port.persistence.PartyProfileDelegationRepository
-import io.github.sepfins.limitguard.port.persistence.BankWorkerRepository
 import io.github.sepfins.limitguard.port.persistence.ChannelRepository
 import io.github.sepfins.limitguard.port.persistence.ChannelGroupRepository
 import io.github.sepfins.limitguard.port.persistence.OperationTypeRepository
@@ -43,7 +42,6 @@ internal class DefaultLimitChangeService(
     tenantRepository: TenantRepository,
     partyProfileRepository: PartyProfileRepository,
     partyProfileDelegationRepository: PartyProfileDelegationRepository,
-    bankWorkerRepository: BankWorkerRepository,
     channelRepository: ChannelRepository,
     channelGroupRepository: ChannelGroupRepository,
     operationTypeRepository: OperationTypeRepository,
@@ -64,7 +62,6 @@ internal class DefaultLimitChangeService(
         tenants = tenantRepository,
         profiles = partyProfileRepository,
         delegations = partyProfileDelegationRepository,
-        workers = bankWorkerRepository,
         channels = channelRepository,
         channelGroups = channelGroupRepository,
         operations = operationTypeRepository,

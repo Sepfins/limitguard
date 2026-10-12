@@ -25,7 +25,6 @@ fun InMemoryLimitguardRepositories.createFacade(
     partyLegalIdentifierRepository = partyLegalIdentifiers,
     partyProfileRepository = partyProfiles,
     partyProfileDelegationRepository = partyProfileDelegations,
-    bankWorkerRepository = bankWorkers,
     fundingSourceRepository = fundingSources,
     fundingSourceProductRepository = fundingSourceProducts,
     fundingSourceOwnerRepository = fundingSourceOwners,

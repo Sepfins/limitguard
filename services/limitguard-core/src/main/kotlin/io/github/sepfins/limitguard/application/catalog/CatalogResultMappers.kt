@@ -13,7 +13,6 @@ import io.github.sepfins.limitguard.api.LimitKind as ApiLimitKind
 import io.github.sepfins.limitguard.api.LimitPeriod as ApiLimitPeriod
 import io.github.sepfins.limitguard.api.ProductNodeType as ApiProductNodeType
 import io.github.sepfins.limitguard.api.PartyProfileDelegationType as ApiPartyProfileDelegationType
-import io.github.sepfins.limitguard.api.results.BankWorkerResult
 import io.github.sepfins.limitguard.api.results.ChannelGroupMemberResult
 import io.github.sepfins.limitguard.api.results.ChannelGroupResult
 import io.github.sepfins.limitguard.api.results.ChannelResult
@@ -55,7 +54,6 @@ import io.github.sepfins.limitguard.domain.operation.OperationTypeScope
 import io.github.sepfins.limitguard.domain.party.PartyProfile
 import io.github.sepfins.limitguard.domain.party.PartyProfileDelegation
 import io.github.sepfins.limitguard.domain.tenant.Tenant
-import io.github.sepfins.limitguard.domain.worker.BankWorker
 
 internal fun Tenant.toResult(): TenantResult =
     TenantResult(
@@ -157,20 +155,6 @@ internal fun PartyProfile.toResult(
             "PartyProfile.createdAt is required when mapping to PartyProfileResult"
         },
         metadata = metadata.value,
-    )
-
-internal fun BankWorker.toResult(): BankWorkerResult =
-    BankWorkerResult(
-        id = id.value,
-        tenantId = tenantId.value,
-        externalReference = externalReference.value,
-        displayName = displayName.value,
-        branchCode = branchCode?.value,
-        isActive = isActive,
-        metadata = metadata.value,
-        createdAt = requireNotNull(createdAt) {
-            "BankWorker.createdAt is required when mapping to BankWorkerResult"
-        },
     )
 
 internal fun PartyProfileDelegation.toResult(): PartyProfileDelegationResult =

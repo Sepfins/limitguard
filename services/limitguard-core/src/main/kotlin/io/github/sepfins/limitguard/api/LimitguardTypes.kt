@@ -84,7 +84,6 @@ enum class LimitUsageConsumptionMode {
 
 enum class LimitChangeActorType {
     PARTY_PROFILE,
-    BANK_WORKER,
     SYSTEM,
 }
 

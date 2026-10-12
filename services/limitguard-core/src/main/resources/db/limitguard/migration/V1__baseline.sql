@@ -174,22 +174,6 @@ CREATE INDEX idx_party_profile_delegation_owner
 CREATE INDEX idx_party_profile_delegation_delegate
     ON party_profile_delegation (tenant_id, delegate_party_profile_id);
 
-CREATE TABLE bank_worker (
-    id UUID PRIMARY KEY DEFAULT uuidv7(),
-    tenant_id UUID NOT NULL REFERENCES tenant(id),
-    external_reference VARCHAR(255) NOT NULL,
-    display_name VARCHAR(255) NOT NULL,
-    branch_code VARCHAR(100),
-    is_active BOOLEAN NOT NULL DEFAULT true,
-    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (tenant_id, id),
-    UNIQUE (tenant_id, external_reference)
-);
-
-COMMENT ON TABLE bank_worker IS
-    'Tenant-scoped bank staff who can perform assisted limit changes for customers.';
-
 -- ============================================================================
 -- Funding sources and owner-defined groups
 -- ============================================================================
@@ -1056,7 +1040,6 @@ CREATE INDEX idx_limit_rule_channel_group
 
 CREATE TYPE limit_change_actor_type AS ENUM (
     'PARTY_PROFILE',
-    'BANK_WORKER',
     'SYSTEM'
 );
 
@@ -1143,7 +1126,6 @@ CREATE TABLE limit_rule_change_request (
     status limit_rule_change_status NOT NULL DEFAULT 'REQUESTED',
     requested_by_actor_type limit_change_actor_type NOT NULL,
     requested_by_party_profile_id UUID,
-    requested_by_bank_worker_id UUID,
     requester_party_profile_id UUID,
     authority_delegation_id UUID,
     request_channel_id UUID,
@@ -1171,8 +1153,6 @@ CREATE TABLE limit_rule_change_request (
         REFERENCES limit_rule(tenant_id, id),
     FOREIGN KEY (tenant_id, requested_by_party_profile_id)
         REFERENCES party_profile(tenant_id, id),
-    FOREIGN KEY (tenant_id, requested_by_bank_worker_id)
-        REFERENCES bank_worker(tenant_id, id),
     FOREIGN KEY (tenant_id, requester_party_profile_id)
         REFERENCES party_profile(tenant_id, id),
     FOREIGN KEY (tenant_id, authority_delegation_id)
@@ -1188,18 +1168,11 @@ CREATE TABLE limit_rule_change_request (
     CONSTRAINT chk_limit_rule_change_request_actor CHECK (
         (
             requested_by_actor_type = 'PARTY_PROFILE' AND
-            requested_by_party_profile_id IS NOT NULL AND
-            requested_by_bank_worker_id IS NULL
-        ) OR
-        (
-            requested_by_actor_type = 'BANK_WORKER' AND
-            requested_by_party_profile_id IS NULL AND
-            requested_by_bank_worker_id IS NOT NULL
+            requested_by_party_profile_id IS NOT NULL
         ) OR
         (
             requested_by_actor_type = 'SYSTEM' AND
-            requested_by_party_profile_id IS NULL AND
-            requested_by_bank_worker_id IS NULL
+            requested_by_party_profile_id IS NULL
         )
     ),
     CONSTRAINT chk_limit_rule_change_request_channel CHECK (
@@ -1233,10 +1206,10 @@ COMMENT ON TABLE limit_rule_change_request IS
     'Auditable workflow request for creating, changing, scheduling, cancelling, or applying a limit_rule.';
 
 COMMENT ON COLUMN limit_rule_change_request.requested_by_actor_type IS
-    'Technical actor that submitted the change: a party profile, a bank worker, or an automated system policy.';
+    'Technical actor that submitted the change: a party profile or an automated system policy.';
 
 COMMENT ON COLUMN limit_rule_change_request.requester_party_profile_id IS
-    'Customer or legal person whose intent the change represents; for worker-assisted changes this is the customer behind the branch or phone request.';
+    'Customer or legal person whose intent the change represents.';
 
 COMMENT ON COLUMN limit_rule_change_request.authority_delegation_id IS
     'Delegation record used when the requester acts for another profile, such as a legal representative changing a company delegate limit.';
@@ -1248,7 +1221,7 @@ COMMENT ON COLUMN limit_rule_change_request.policy_context IS
     'Extra facts supplied to policy evaluation, such as mandate identifiers, funding-source identifiers, IBAN country prefix, channel family, configuration matches, or representative role metadata.';
 
 COMMENT ON COLUMN limit_rule_change_request.request_channel_id IS
-    'Channel through which the change was requested; required for party and bank-worker changes, optional for system-generated defaults.';
+    'Channel through which the change was requested; required for party changes, optional for system-generated defaults.';
 
 CREATE UNIQUE INDEX uq_limit_rule_change_request_idempotency
     ON limit_rule_change_request (tenant_id, idempotency_key)
@@ -1282,14 +1255,6 @@ CREATE INDEX idx_limit_rule_change_request_party_actor
     )
     WHERE requested_by_party_profile_id IS NOT NULL;
 
-CREATE INDEX idx_limit_rule_change_request_worker_actor
-    ON limit_rule_change_request (
-        tenant_id,
-        requested_by_bank_worker_id,
-        created_at
-    )
-    WHERE requested_by_bank_worker_id IS NOT NULL;
-
 CREATE INDEX idx_limit_rule_change_request_requester
     ON limit_rule_change_request (
         tenant_id,
@@ -1319,8 +1284,8 @@ CREATE INDEX idx_limit_rule_change_request_channel
 --    channel, operation type, funding-source attributes, or IBAN country.
 -- 3. Evaluate condition_expression with the configured engine against the full
 --    request context: current limit_rule, requested rule, pending requests,
---    channel, requester, mandate, configuration, delegation, worker, and
---    policy_context facts.
+--    channel, requester, mandate, configuration, delegation, and policy_context
+--    facts.
 -- 4. Apply action_expression/decision, for example deny the request, mutate the
 --    requested rule, set a delayed effective_at, cancel older pending requests,
 --    create a default rule from limit_configuration, or require extra approval.
@@ -1441,7 +1406,6 @@ CREATE TABLE limit_rule_change_event (
     event_type limit_rule_change_event_type NOT NULL,
     actor_type limit_change_actor_type NOT NULL DEFAULT 'SYSTEM',
     actor_party_profile_id UUID,
-    actor_bank_worker_id UUID,
     policy_id UUID,
     before_status limit_rule_change_status,
     after_status limit_rule_change_status,
@@ -1463,25 +1427,16 @@ CREATE TABLE limit_rule_change_event (
         ON DELETE CASCADE,
     FOREIGN KEY (tenant_id, actor_party_profile_id)
         REFERENCES party_profile(tenant_id, id),
-    FOREIGN KEY (tenant_id, actor_bank_worker_id)
-        REFERENCES bank_worker(tenant_id, id),
     FOREIGN KEY (tenant_id, policy_id)
         REFERENCES limit_change_policy(tenant_id, id),
     CONSTRAINT chk_limit_rule_change_event_actor CHECK (
         (
             actor_type = 'PARTY_PROFILE' AND
-            actor_party_profile_id IS NOT NULL AND
-            actor_bank_worker_id IS NULL
-        ) OR
-        (
-            actor_type = 'BANK_WORKER' AND
-            actor_party_profile_id IS NULL AND
-            actor_bank_worker_id IS NOT NULL
+            actor_party_profile_id IS NOT NULL
         ) OR
         (
             actor_type = 'SYSTEM' AND
-            actor_party_profile_id IS NULL AND
-            actor_bank_worker_id IS NULL
+            actor_party_profile_id IS NULL
         )
     ),
     CONSTRAINT chk_limit_rule_change_event_json CHECK (
@@ -1498,10 +1453,6 @@ CREATE INDEX idx_limit_rule_change_event_party_actor
     ON limit_rule_change_event (tenant_id, actor_party_profile_id, created_at)
     WHERE actor_party_profile_id IS NOT NULL;
 
-CREATE INDEX idx_limit_rule_change_event_worker_actor
-    ON limit_rule_change_event (tenant_id, actor_bank_worker_id, created_at)
-    WHERE actor_bank_worker_id IS NOT NULL;
-
 -- Immutable version history for the persisted limit_rule row, with exactly one
 -- revision each time a change is applied. Rejected, cancelled, pending, and
 -- policy-only steps belong in limit_rule_change_event.
@@ -1514,7 +1465,6 @@ CREATE TABLE limit_rule_revision (
     revision_event_type limit_rule_revision_event_type NOT NULL,
     actor_type limit_change_actor_type NOT NULL DEFAULT 'SYSTEM',
     actor_party_profile_id UUID,
-    actor_bank_worker_id UUID,
     -- Full JSON snapshot of the persisted limit_rule before this revision.
     -- NULL for CREATED revisions because no prior rule existed.
     before_rule JSONB,
@@ -1534,24 +1484,15 @@ CREATE TABLE limit_rule_revision (
         REFERENCES limit_rule_change_request(tenant_id, id),
     FOREIGN KEY (tenant_id, actor_party_profile_id)
         REFERENCES party_profile(tenant_id, id),
-    FOREIGN KEY (tenant_id, actor_bank_worker_id)
-        REFERENCES bank_worker(tenant_id, id),
     CONSTRAINT chk_limit_rule_revision_number CHECK (revision_number > 0),
     CONSTRAINT chk_limit_rule_revision_actor CHECK (
         (
             actor_type = 'PARTY_PROFILE' AND
-            actor_party_profile_id IS NOT NULL AND
-            actor_bank_worker_id IS NULL
-        ) OR
-        (
-            actor_type = 'BANK_WORKER' AND
-            actor_party_profile_id IS NULL AND
-            actor_bank_worker_id IS NOT NULL
+            actor_party_profile_id IS NOT NULL
         ) OR
         (
             actor_type = 'SYSTEM' AND
-            actor_party_profile_id IS NULL AND
-            actor_bank_worker_id IS NULL
+            actor_party_profile_id IS NULL
         )
     ),
     CONSTRAINT chk_limit_rule_revision_json CHECK (

@@ -18,7 +18,6 @@ import io.github.sepfins.limitguard.api.commands.CreateLimitChangePolicyCommand
 import io.github.sepfins.limitguard.api.commands.CreateLimitConfigurationCommand
 import io.github.sepfins.limitguard.api.commands.CreateMandateCommand
 import io.github.sepfins.limitguard.api.commands.CreatePartyProfileDelegationCommand
-import io.github.sepfins.limitguard.api.commands.RegisterBankWorkerCommand
 import io.github.sepfins.limitguard.api.commands.RegisterChannelCommand
 import io.github.sepfins.limitguard.api.commands.RegisterFundingSourceCommand
 import io.github.sepfins.limitguard.api.commands.RegisterFundingSourceProductCommand
@@ -38,7 +37,6 @@ import io.github.sepfins.limitguard.api.errors.ConflictException
 import io.github.sepfins.limitguard.api.errors.InfrastructureException
 import io.github.sepfins.limitguard.api.errors.NotFoundException
 import io.github.sepfins.limitguard.api.errors.ValidationException
-import io.github.sepfins.limitguard.api.results.BankWorkerResult
 import io.github.sepfins.limitguard.api.results.ChannelGroupMemberResult
 import io.github.sepfins.limitguard.api.results.ChannelGroupResult
 import io.github.sepfins.limitguard.api.results.ChannelResult
@@ -74,7 +72,6 @@ import io.github.sepfins.limitguard.domain.change.LimitChangePolicyDecision
 import io.github.sepfins.limitguard.domain.change.LimitChangePolicyEngine
 import io.github.sepfins.limitguard.domain.change.LimitChangePolicyName
 import io.github.sepfins.limitguard.domain.change.LimitChangePolicyPhase
-import io.github.sepfins.limitguard.domain.common.BankWorkerId
 import io.github.sepfins.limitguard.domain.common.ChannelGroupId
 import io.github.sepfins.limitguard.domain.common.ChannelId
 import io.github.sepfins.limitguard.domain.common.CurrencyCode
@@ -149,11 +146,7 @@ import io.github.sepfins.limitguard.domain.party.PartyType as DomainPartyType
 import io.github.sepfins.limitguard.domain.tenant.Tenant
 import io.github.sepfins.limitguard.domain.tenant.TenantName
 import io.github.sepfins.limitguard.domain.tenant.NoMatchingRuleBehavior
-import io.github.sepfins.limitguard.domain.worker.BankWorker
-import io.github.sepfins.limitguard.domain.worker.BranchCode
-import io.github.sepfins.limitguard.domain.worker.DisplayName
 import io.github.sepfins.limitguard.port.ids.IdGenerator
-import io.github.sepfins.limitguard.port.persistence.BankWorkerRepository
 import io.github.sepfins.limitguard.port.persistence.ChannelGroupMemberRepository
 import io.github.sepfins.limitguard.port.persistence.ChannelGroupRepository
 import io.github.sepfins.limitguard.port.persistence.ChannelRepository
@@ -194,7 +187,6 @@ class DefaultTenantCatalogService(
     private val partyLegalIdentifierRepository: PartyLegalIdentifierRepository,
     private val partyProfileRepository: PartyProfileRepository,
     private val partyProfileDelegationRepository: PartyProfileDelegationRepository,
-    private val bankWorkerRepository: BankWorkerRepository,
     private val fundingSourceRepository: FundingSourceRepository,
     private val fundingSourceProductRepository: FundingSourceProductRepository,
     private val fundingSourceOwnerRepository: FundingSourceOwnerRepository,
@@ -449,23 +441,6 @@ class DefaultTenantCatalogService(
         } catch (exception: InfrastructureException) {
             throw InfrastructureException("party profile registration failed")
         }
-    }
-
-    override fun registerBankWorker(command: RegisterBankWorkerCommand): BankWorkerResult = mapValidation {
-        val tenantId = TenantId.of(command.tenantId)
-        requireTenantExists(tenantId)
-        val bankWorker = BankWorker(
-            id = BankWorkerId.of(idGenerator.newId()),
-            tenantId = tenantId,
-            externalReference = ExternalReference.of(command.externalReference),
-            displayName = DisplayName.of(command.displayName),
-            branchCode = command.branchCode?.let(BranchCode::of),
-            isActive = command.isActive,
-            metadata = Metadata(command.metadata),
-            createdAt = clockProvider.now(),
-        )
-
-        return bankWorkerRepository.insert(tenantId, bankWorker).toResult()
     }
 
     override fun createPartyProfileDelegation(

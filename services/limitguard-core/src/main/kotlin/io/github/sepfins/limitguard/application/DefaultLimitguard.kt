@@ -23,7 +23,6 @@ import io.github.sepfins.limitguard.application.usage.UsageMutationService
 import io.github.sepfins.limitguard.application.usage.UsageReservationService
 import io.github.sepfins.limitguard.application.usage.UsageWindowCalculator
 import io.github.sepfins.limitguard.port.ids.IdGenerator
-import io.github.sepfins.limitguard.port.persistence.BankWorkerRepository
 import io.github.sepfins.limitguard.port.persistence.AuthorizationDecisionRepository
 import io.github.sepfins.limitguard.port.persistence.ChannelGroupMemberRepository
 import io.github.sepfins.limitguard.port.persistence.ChannelGroupRepository
@@ -73,7 +72,6 @@ class DefaultLimitguard(
     partyLegalIdentifierRepository: PartyLegalIdentifierRepository,
     partyProfileRepository: PartyProfileRepository,
     partyProfileDelegationRepository: PartyProfileDelegationRepository,
-    bankWorkerRepository: BankWorkerRepository,
     fundingSourceRepository: FundingSourceRepository,
     fundingSourceProductRepository: FundingSourceProductRepository,
     fundingSourceOwnerRepository: FundingSourceOwnerRepository,
@@ -111,7 +109,6 @@ class DefaultLimitguard(
         partyLegalIdentifierRepository = partyLegalIdentifierRepository,
         partyProfileRepository = partyProfileRepository,
         partyProfileDelegationRepository = partyProfileDelegationRepository,
-        bankWorkerRepository = bankWorkerRepository,
         fundingSourceRepository = fundingSourceRepository,
         fundingSourceProductRepository = fundingSourceProductRepository,
         fundingSourceOwnerRepository = fundingSourceOwnerRepository,
@@ -138,7 +135,6 @@ class DefaultLimitguard(
         tenantRepository = tenantRepository,
         partyProfileRepository = partyProfileRepository,
         partyProfileDelegationRepository = partyProfileDelegationRepository,
-        bankWorkerRepository = bankWorkerRepository,
         channelRepository = channelRepository,
         channelGroupRepository = channelGroupRepository,
         operationTypeRepository = operationTypeRepository,

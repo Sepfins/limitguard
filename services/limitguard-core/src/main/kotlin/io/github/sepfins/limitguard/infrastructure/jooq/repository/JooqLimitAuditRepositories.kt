@@ -7,7 +7,6 @@ import io.github.sepfins.limitguard.domain.change.LimitRuleChangeStatus
 import io.github.sepfins.limitguard.domain.change.LimitRuleRevision
 import io.github.sepfins.limitguard.domain.change.LimitRuleRevisionEventType
 import io.github.sepfins.limitguard.domain.change.RevisionNumber
-import io.github.sepfins.limitguard.domain.common.BankWorkerId
 import io.github.sepfins.limitguard.domain.common.LimitChangePolicyId
 import io.github.sepfins.limitguard.domain.common.LimitChangeRequestId
 import io.github.sepfins.limitguard.domain.common.LimitRuleChangeEventId
@@ -67,7 +66,6 @@ class JooqLimitRuleChangeEventRepository(
                 .set(table.EVENT_TYPE, event.eventType.toGenerated())
                 .set(table.ACTOR_TYPE, event.actor.toGenerated())
                 .set(table.ACTOR_PARTY_PROFILE_ID, event.actor.partyProfileId())
-                .set(table.ACTOR_BANK_WORKER_ID, event.actor.bankWorkerId())
                 .set(table.POLICY_ID, event.policyId?.value)
                 .set(table.BEFORE_STATUS, event.beforeStatus?.toGenerated())
                 .set(table.AFTER_STATUS, event.afterStatus?.toGenerated())
@@ -91,7 +89,6 @@ class JooqLimitRuleChangeEventRepository(
         actor = actorOf(
             requireNotNull(get(table.ACTOR_TYPE)),
             get(table.ACTOR_PARTY_PROFILE_ID),
-            get(table.ACTOR_BANK_WORKER_ID),
         ),
         policyId = get(table.POLICY_ID)?.let(LimitChangePolicyId::of),
         beforeStatus = get(table.BEFORE_STATUS)?.let { LimitRuleChangeStatus.valueOf(it.name) },
@@ -152,7 +149,6 @@ class JooqLimitRuleRevisionRepository(
                 .set(table.REVISION_EVENT_TYPE, revision.revisionEventType.toGenerated())
                 .set(table.ACTOR_TYPE, revision.actor.toGenerated())
                 .set(table.ACTOR_PARTY_PROFILE_ID, revision.actor.partyProfileId())
-                .set(table.ACTOR_BANK_WORKER_ID, revision.actor.bankWorkerId())
                 .set(table.BEFORE_RULE, revision.beforeRule?.toJsonb())
                 .set(table.AFTER_RULE, revision.afterRule?.toJsonb())
                 .set(table.METADATA, revision.metadata.toJsonb())
@@ -176,7 +172,6 @@ class JooqLimitRuleRevisionRepository(
         actor = actorOf(
             requireNotNull(get(table.ACTOR_TYPE)),
             get(table.ACTOR_PARTY_PROFILE_ID),
-            get(table.ACTOR_BANK_WORKER_ID),
         ),
         changeRequestId = get(table.CHANGE_REQUEST_ID)?.let(LimitChangeRequestId::of),
         beforeRule = get(table.BEFORE_RULE)?.toMetadata(),
@@ -190,25 +185,18 @@ class JooqLimitRuleRevisionRepository(
 private fun ChangeActor.toGenerated(): GeneratedLimitChangeActorType = when (this) {
     ChangeActor.System -> GeneratedLimitChangeActorType.SYSTEM
     is ChangeActor.PartyProfileActor -> GeneratedLimitChangeActorType.PARTY_PROFILE
-    is ChangeActor.BankWorkerActor -> GeneratedLimitChangeActorType.BANK_WORKER
 }
 
 private fun ChangeActor.partyProfileId(): java.util.UUID? =
     (this as? ChangeActor.PartyProfileActor)?.partyProfileId?.value
 
-private fun ChangeActor.bankWorkerId(): java.util.UUID? =
-    (this as? ChangeActor.BankWorkerActor)?.bankWorkerId?.value
-
 private fun actorOf(
     type: GeneratedLimitChangeActorType,
     partyProfileId: java.util.UUID?,
-    bankWorkerId: java.util.UUID?,
 ): ChangeActor = when (type) {
     GeneratedLimitChangeActorType.SYSTEM -> ChangeActor.System
     GeneratedLimitChangeActorType.PARTY_PROFILE ->
         ChangeActor.PartyProfileActor(PartyProfileId.of(requireNotNull(partyProfileId)))
-    GeneratedLimitChangeActorType.BANK_WORKER ->
-        ChangeActor.BankWorkerActor(BankWorkerId.of(requireNotNull(bankWorkerId)))
 }
 
 private fun LimitRuleChangeEventType.toGenerated() = GeneratedLimitRuleChangeEventType.valueOf(name)

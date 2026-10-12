@@ -47,10 +47,6 @@ private fun ChangeActor.toPolicyInput(): Map<String, Any?> =
             "actorType" to "PARTY_PROFILE",
             "partyProfileId" to partyProfileId.value.toString(),
         )
-        is ChangeActor.BankWorkerActor -> mapOf(
-            "actorType" to "BANK_WORKER",
-            "bankWorkerId" to bankWorkerId.value.toString(),
-        )
     }
 
 private fun RequestActorContext.toPolicyInput(): Map<String, Any?> =
@@ -64,12 +60,6 @@ private fun RequestActorContext.toPolicyInput(): Map<String, Any?> =
             "shapeVersion" to 2,
             "actorType" to "PARTY_PROFILE",
             "actorPartyProfileId" to actorPartyProfileId.value.toString(),
-            "requestChannelId" to requestChannelId.value.toString(),
-        )
-        is RequestActorContext.BankWorker -> mapOf(
-            "shapeVersion" to 2,
-            "actorType" to "BANK_WORKER",
-            "bankWorkerId" to bankWorkerId.value.toString(),
             "requestChannelId" to requestChannelId.value.toString(),
         )
     }

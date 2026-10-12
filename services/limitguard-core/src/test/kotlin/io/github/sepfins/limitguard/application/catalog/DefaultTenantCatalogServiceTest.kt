@@ -680,7 +680,6 @@ class DefaultTenantCatalogServiceTest {
             partyLegalIdentifierRepository = repositories.partyLegalIdentifiers,
             partyProfileRepository = repositories.partyProfiles,
             partyProfileDelegationRepository = repositories.partyProfileDelegations,
-            bankWorkerRepository = repositories.bankWorkers,
             fundingSourceRepository = repositories.fundingSources,
             fundingSourceProductRepository = repositories.fundingSourceProducts,
             fundingSourceOwnerRepository = repositories.fundingSourceOwners,

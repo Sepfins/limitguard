@@ -15,7 +15,6 @@ import io.github.sepfins.limitguard.api.commands.CreateMandateCommand
 import io.github.sepfins.limitguard.api.commands.CreatePartyProfileDelegationCommand
 import io.github.sepfins.limitguard.api.commands.LimitChangeActorCommand
 import io.github.sepfins.limitguard.api.commands.LimitRuleDraft
-import io.github.sepfins.limitguard.api.commands.RegisterBankWorkerCommand
 import io.github.sepfins.limitguard.api.commands.RegisterChannelCommand
 import io.github.sepfins.limitguard.api.commands.RegisterPartyProfileCommand
 import io.github.sepfins.limitguard.api.commands.RegisterTenantCommand
@@ -34,8 +33,6 @@ class TrustedChangeScenario(
     val owner = profile("Owner")
     val representative = profile("Representative")
     val unrelated = profile("Unrelated")
-    val worker = facade.tenantCatalogService.registerBankWorker(RegisterBankWorkerCommand(tenant, "STAFF", "Staff")).id
-    val replacementWorker = facade.tenantCatalogService.registerBankWorker(RegisterBankWorkerCommand(tenant, "REPLACEMENT", "Replacement")).id
     val channel = facade.tenantCatalogService.registerChannel(RegisterChannelCommand(tenant, "BRANCH", "Branch")).id
     val ruleChannel = facade.tenantCatalogService.registerChannel(RegisterChannelCommand(tenant, "ATM", "ATM")).id
     val configuration = createConfiguration(CreateLimitConfigurationCommand(
@@ -71,11 +68,7 @@ class TrustedChangeScenario(
 
     fun party(id: UUID) = LimitChangeActorCommand(LimitChangeActorType.PARTY_PROFILE, partyProfileId = id)
 
-    fun staff(id: UUID = worker) = LimitChangeActorCommand(LimitChangeActorType.BANK_WORKER, bankWorkerId = id)
-
-    fun assisted() = command.copy(
-        requestedBy = staff(), requesterPartyProfileId = representative, authorityDelegationId = delegation,
-    )
+    fun represented() = command.copy(requestedBy = party(representative), authorityDelegationId = delegation)
 
     fun details(id: UUID) = facade.limitInquiryService.getLimitChange(GetLimitChangeQuery(tenant, id))
 }

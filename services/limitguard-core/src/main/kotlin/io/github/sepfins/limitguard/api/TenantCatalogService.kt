@@ -10,7 +10,6 @@ import io.github.sepfins.limitguard.api.commands.CreateLimitChangePolicyCommand
 import io.github.sepfins.limitguard.api.commands.CreateLimitConfigurationCommand
 import io.github.sepfins.limitguard.api.commands.CreateMandateCommand
 import io.github.sepfins.limitguard.api.commands.CreatePartyProfileDelegationCommand
-import io.github.sepfins.limitguard.api.commands.RegisterBankWorkerCommand
 import io.github.sepfins.limitguard.api.commands.RegisterChannelCommand
 import io.github.sepfins.limitguard.api.commands.RegisterFundingSourceCommand
 import io.github.sepfins.limitguard.api.commands.RegisterFundingSourceProductCommand
@@ -26,7 +25,6 @@ import io.github.sepfins.limitguard.api.commands.UpdateChannelCommand
 import io.github.sepfins.limitguard.api.commands.UpdateFundingSourceCommand
 import io.github.sepfins.limitguard.api.commands.UpdateFundingSourceProductCommand
 import io.github.sepfins.limitguard.api.commands.UpdateLimitConfigurationCommand
-import io.github.sepfins.limitguard.api.results.BankWorkerResult
 import io.github.sepfins.limitguard.api.results.ChannelGroupMemberResult
 import io.github.sepfins.limitguard.api.results.ChannelGroupResult
 import io.github.sepfins.limitguard.api.results.ChannelResult
@@ -65,8 +63,6 @@ interface TenantCatalogService {
     fun registerOperationType(command: RegisterOperationTypeCommand): OperationTypeResult
 
     fun registerPartyProfile(command: RegisterPartyProfileCommand): PartyProfileResult
-
-    fun registerBankWorker(command: RegisterBankWorkerCommand): BankWorkerResult
 
     fun createPartyProfileDelegation(command: CreatePartyProfileDelegationCommand): PartyProfileDelegationResult
 

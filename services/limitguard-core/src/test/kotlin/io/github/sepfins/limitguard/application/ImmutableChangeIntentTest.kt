@@ -78,7 +78,7 @@ class ImmutableChangeIntentTest {
             command.copy(authorityDelegationId = UUID.randomUUID()),
             command.copy(targetOwnerPartyProfileId = UUID.randomUUID()),
             command.copy(
-                requestedBy = LimitChangeActorCommand(LimitChangeActorType.BANK_WORKER, bankWorkerId = UUID.randomUUID()),
+                requestedBy = LimitChangeActorCommand(LimitChangeActorType.SYSTEM),
                 requesterPartyProfileId = fixture.owner,
             ),
             command.copy(effectiveAt = effectiveAt.plusSeconds(1)),
@@ -88,7 +88,7 @@ class ImmutableChangeIntentTest {
             command.copy(requestedRule = command.requestedRule!!.copy(amount = BigDecimal("501"))),
         )
         for (retry in different) {
-            val context = retry.requestedBy.bankWorkerId?.let(TrustedChangeActorContext::BankWorker)
+            val context = TrustedChangeActorContext.InternalSystem.takeIf { retry.requestedBy.actorType == LimitChangeActorType.SYSTEM }
             assertFailsWith<IdempotencyConflictException> {
                 fixture.facade.limitChangeService.requestLimitRuleChange(retry, context)
             }
@@ -405,7 +405,6 @@ class ImmutableChangeIntentTest {
             partyLegalIdentifierRepository = repositories.partyLegalIdentifiers,
             partyProfileRepository = repositories.partyProfiles,
             partyProfileDelegationRepository = repositories.partyProfileDelegations,
-            bankWorkerRepository = repositories.bankWorkers,
             fundingSourceRepository = repositories.fundingSources,
             fundingSourceProductRepository = repositories.fundingSourceProducts,
             fundingSourceOwnerRepository = repositories.fundingSourceOwners,

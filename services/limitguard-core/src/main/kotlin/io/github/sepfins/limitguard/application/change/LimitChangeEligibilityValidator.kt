@@ -17,7 +17,6 @@ import io.github.sepfins.limitguard.domain.limit.LimitConfigurationFundingScope
 import io.github.sepfins.limitguard.domain.limit.LimitOperationScope
 import io.github.sepfins.limitguard.domain.limit.LimitRule
 import io.github.sepfins.limitguard.domain.mandate.MandateScope
-import io.github.sepfins.limitguard.port.persistence.BankWorkerRepository
 import io.github.sepfins.limitguard.port.persistence.ChannelGroupRepository
 import io.github.sepfins.limitguard.port.persistence.ChannelRepository
 import io.github.sepfins.limitguard.port.persistence.FundingSourceProductRepository
@@ -30,10 +29,8 @@ import io.github.sepfins.limitguard.port.persistence.TenantRepository
 import java.time.Instant
 
 internal fun LimitChangeActorCommand.requireTrustedAuthority(context: TrustedChangeActorContext?) {
-    val valid = when (val actor = toChangeActor()) {
+    val valid = when (toChangeActor()) {
         ChangeActor.System -> context == TrustedChangeActorContext.InternalSystem
-        is ChangeActor.BankWorkerActor -> context is TrustedChangeActorContext.BankWorker &&
-            context.bankWorkerId == actor.bankWorkerId.value
         is ChangeActor.PartyProfileActor -> context == null
     }
     if (!valid) throw ValidationException("actor requires a matching host-asserted trusted context")
@@ -43,7 +40,6 @@ internal class LimitChangeEligibilityValidator(
     private val tenants: TenantRepository,
     private val profiles: PartyProfileRepository,
     private val delegations: PartyProfileDelegationRepository,
-    private val workers: BankWorkerRepository,
     private val channels: ChannelRepository,
     private val channelGroups: ChannelGroupRepository,
     private val operations: OperationTypeRepository,
@@ -60,11 +56,6 @@ internal class LimitChangeEligibilityValidator(
         when (actor) {
             ChangeActor.System -> Unit
             is ChangeActor.PartyProfileActor -> requireProfile(tenantId, actor.partyProfileId)
-            is ChangeActor.BankWorkerActor -> {
-                val worker = workers.findById(tenantId, actor.bankWorkerId)
-                    ?: throw NotFoundException("bank worker not found: ${actor.bankWorkerId.value}")
-                if (!worker.isActive) throw ConflictException("bank worker is not active: ${actor.bankWorkerId.value}")
-            }
         }
     }
 
@@ -89,7 +80,7 @@ internal class LimitChangeEligibilityValidator(
             request.tenantId,
             listOfNotNull(request.targetOwnerPartyProfileId, request.requesterPartyProfileId, request.requestedBy.partyProfileId()),
         )
-        // The original worker/channel describe submission, not the authority of today's approver or SYSTEM.
+        // The original submitter/channel describe submission, not the authority of today's approver or SYSTEM.
         validateRepresentation(
             request.tenantId, request.requestedBy, request.requesterPartyProfileId,
             request.targetOwnerPartyProfileId, request.authorityDelegationId, at,

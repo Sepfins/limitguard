@@ -23,7 +23,6 @@ import io.github.sepfins.limitguard.domain.change.LimitChangePolicy
 import io.github.sepfins.limitguard.domain.change.LimitChangePolicyEngine
 import io.github.sepfins.limitguard.domain.change.LimitChangePolicyEvaluationOutcome
 import io.github.sepfins.limitguard.domain.change.LimitChangePolicyPhase
-import io.github.sepfins.limitguard.domain.common.BankWorkerId
 import io.github.sepfins.limitguard.domain.common.ChannelId
 import io.github.sepfins.limitguard.domain.common.ChannelGroupId
 import io.github.sepfins.limitguard.domain.common.OperationTypeId
@@ -55,21 +54,18 @@ import kotlin.test.assertTrue
 
 class TrustedChangeActorsTest {
     @Test
-    fun `self service representatives assisted workers and internal SYSTEM retain distinct identities`() {
-        for (path in listOf("OWNER", "REPRESENTATIVE", "PARTY_SUBMITTER", "ASSISTED_OWNER", "ASSISTED_REPRESENTATIVE", "SYSTEM", "SYSTEM_REPRESENTATIVE")) {
+    fun `self service representatives and internal SYSTEM retain distinct identities`() {
+        for (path in listOf("OWNER", "REPRESENTATIVE", "PARTY_SUBMITTER", "SYSTEM", "SYSTEM_REPRESENTATIVE")) {
             val fixture = Fixture()
             val s = fixture.scenario
             val command = when (path) {
                 "OWNER" -> s.command
-                "REPRESENTATIVE" -> s.command.copy(requestedBy = s.party(s.representative), authorityDelegationId = s.delegation)
+                "REPRESENTATIVE" -> s.represented()
                 "PARTY_SUBMITTER" -> s.command.copy(requestedBy = s.party(s.unrelated), requesterPartyProfileId = s.representative, authorityDelegationId = s.delegation)
-                "ASSISTED_OWNER" -> s.command.copy(requestedBy = s.staff(), requesterPartyProfileId = s.owner)
-                "ASSISTED_REPRESENTATIVE" -> s.assisted()
                 "SYSTEM" -> s.command.copy(requestedBy = SYSTEM, requestChannelId = null)
                 else -> s.command.copy(requestedBy = SYSTEM, requesterPartyProfileId = s.representative, authorityDelegationId = s.delegation)
             }
             val context = when (path) {
-                "ASSISTED_OWNER", "ASSISTED_REPRESENTATIVE" -> TrustedChangeActorContext.BankWorker(s.worker)
                 "SYSTEM", "SYSTEM_REPRESENTATIVE" -> TrustedChangeActorContext.InternalSystem
                 else -> null
             }
@@ -77,7 +73,6 @@ class TrustedChangeActorsTest {
             assertEquals(LimitRuleChangeStatus.REQUESTED, result.status)
             assertEquals(command.requestedBy.actorType, result.requestedBy.actorType)
             assertEquals(command.requestedBy.partyProfileId, result.requestedBy.partyProfileId)
-            assertEquals(command.requestedBy.bankWorkerId, result.requestedBy.bankWorkerId)
             assertEquals(command.requesterPartyProfileId ?: command.requestedBy.partyProfileId, result.requesterPartyProfileId)
             assertEquals(s.owner, result.targetOwnerPartyProfileId)
             assertEquals(command.requestChannelId, result.requestChannelId)
@@ -89,26 +84,22 @@ class TrustedChangeActorsTest {
     }
 
     @Test
-    fun `staff and SYSTEM authority cannot come from actor enums or mismatched assertions`() {
+    fun `SYSTEM authority cannot come from the actor enum and party actors cannot assert it`() {
         val fixture = Fixture()
         val s = fixture.scenario
         val pending = s.facade.limitChangeService.requestLimitRuleChange(s.command)
         fixture.resetPolicies()
-        for (actor in listOf(s.staff(), SYSTEM)) {
-            for (context in listOf(null, TrustedChangeActorContext.BankWorker(UUID.randomUUID()))) {
-                assertFailsWith<ValidationException> {
-                    s.facade.limitChangeService.requestLimitRuleChange(s.command.copy(requestedBy = actor, requesterPartyProfileId = s.owner), context)
-                }
-                assertFailsWith<ValidationException> {
-                    s.facade.limitChangeService.approveLimitRuleChange(ApproveLimitRuleChangeCommand(s.tenant, pending.id, actor), context)
-                }
-                assertFailsWith<ValidationException> {
-                    s.facade.limitChangeService.rejectLimitRuleChange(RejectLimitRuleChangeCommand(s.tenant, pending.id, actor, "Declined"), context)
-                }
-                assertFailsWith<ValidationException> {
-                    s.facade.limitChangeService.cancelLimitRuleChange(CancelLimitRuleChangeCommand(s.tenant, pending.id, actor), context)
-                }
-            }
+        assertFailsWith<ValidationException> {
+            s.facade.limitChangeService.requestLimitRuleChange(s.command.copy(requestedBy = SYSTEM, requesterPartyProfileId = s.owner))
+        }
+        assertFailsWith<ValidationException> {
+            s.facade.limitChangeService.approveLimitRuleChange(ApproveLimitRuleChangeCommand(s.tenant, pending.id, SYSTEM))
+        }
+        assertFailsWith<ValidationException> {
+            s.facade.limitChangeService.rejectLimitRuleChange(RejectLimitRuleChangeCommand(s.tenant, pending.id, SYSTEM, "Declined"))
+        }
+        assertFailsWith<ValidationException> {
+            s.facade.limitChangeService.cancelLimitRuleChange(CancelLimitRuleChangeCommand(s.tenant, pending.id, SYSTEM))
         }
         assertFailsWith<ValidationException> {
             s.facade.limitChangeService.requestLimitRuleChange(s.command, TrustedChangeActorContext.InternalSystem)
@@ -140,18 +131,15 @@ class TrustedChangeActorsTest {
             s.command.copy(requestChannelId = other.channel),
             s.command.copy(requestedRule = s.command.requestedRule!!.copy(configurationId = missing)),
             s.command.copy(requestedRule = s.command.requestedRule.copy(configurationId = other.configuration)),
-            s.assisted().copy(authorityDelegationId = missing),
-            s.assisted().copy(authorityDelegationId = other.delegation),
+            s.represented().copy(authorityDelegationId = missing),
+            s.represented().copy(authorityDelegationId = other.delegation),
             s.command.copy(requestedRule = s.command.requestedRule.copy(mandateScope = LimitMandateScope.MANDATE, mandateId = missing)),
             s.command.copy(requestedRule = s.command.requestedRule.copy(mandateScope = LimitMandateScope.MANDATE, mandateId = other.mandate)),
-            s.command.copy(requestedBy = s.staff(missing), requesterPartyProfileId = s.owner),
-            s.command.copy(requestedBy = s.staff(other.worker), requesterPartyProfileId = s.owner),
             s.command.copy(changeType = LimitRuleChangeType.UPDATE, limitRuleId = missing, expectedVersion = 1),
             s.command.copy(changeType = LimitRuleChangeType.UPDATE, limitRuleId = otherApplied.limitRuleId, expectedVersion = 1),
         )
         for (command in candidates) {
-            val context = command.requestedBy.bankWorkerId?.let(TrustedChangeActorContext::BankWorker)
-            assertFailsWith<NotFoundException> { s.facade.limitChangeService.requestLimitRuleChange(command, context) }
+            assertFailsWith<NotFoundException> { s.facade.limitChangeService.requestLimitRuleChange(command) }
             assertNull(fixture.repositories.limitChangeRequests.findByIdempotencyKey(
                 TenantId.of(s.tenant), IdempotencyKey.of("submission"),
             ))
@@ -160,17 +148,12 @@ class TrustedChangeActorsTest {
     }
 
     @Test
-    fun `human submissions require a Requester and an existing active Request Channel and worker`() {
+    fun `party submissions require an existing active Request Channel`() {
         val fixture = Fixture()
         val s = fixture.scenario
-        val staff = TrustedChangeActorContext.BankWorker(s.worker)
         assertFailsWith<ValidationException> { s.facade.limitChangeService.requestLimitRuleChange(s.command.copy(requestChannelId = null)) }
-        assertFailsWith<ValidationException> { s.facade.limitChangeService.requestLimitRuleChange(s.command.copy(requestedBy = s.staff()), staff) }
         s.facade.tenantCatalogService.setChannelActive(SetChannelActiveCommand(s.tenant, s.channel, false))
         assertFailsWith<ConflictException> { s.facade.limitChangeService.requestLimitRuleChange(s.command) }
-        s.facade.tenantCatalogService.setChannelActive(SetChannelActiveCommand(s.tenant, s.channel, true))
-        fixture.deactivateWorker(s.worker)
-        assertFailsWith<ConflictException> { s.facade.limitChangeService.requestLimitRuleChange(s.assisted(), staff) }
         fixture.assertNoPolicies()
     }
 
@@ -185,7 +168,7 @@ class TrustedChangeActorsTest {
             s.tenant, s.unrelated, s.representative, PartyProfileDelegationType.LEGAL_REPRESENTATIVE,
         )).id
         assertFailsWith<ConflictException> {
-            s.facade.limitChangeService.requestLimitRuleChange(s.assisted().copy(authorityDelegationId = unrelatedDelegation), TrustedChangeActorContext.BankWorker(s.worker))
+            s.facade.limitChangeService.requestLimitRuleChange(s.represented().copy(authorityDelegationId = unrelatedDelegation))
         }
         assertFailsWith<ValidationException> {
             s.facade.limitChangeService.requestLimitRuleChange(s.command.copy(authorityDelegationId = s.delegation))
@@ -200,7 +183,7 @@ class TrustedChangeActorsTest {
             val s = fixture.scenario
             fixture.setDelegationWindow(window)
             assertFailsWith<ConflictException> {
-                s.facade.limitChangeService.requestLimitRuleChange(s.assisted().copy(effectiveAt = NOW.plusSeconds(120)), TrustedChangeActorContext.BankWorker(s.worker))
+                s.facade.limitChangeService.requestLimitRuleChange(s.represented().copy(effectiveAt = NOW.plusSeconds(120)))
             }
             fixture.assertNoPolicies()
         }
@@ -235,16 +218,12 @@ class TrustedChangeActorsTest {
     }
 
     @Test
-    fun `approval validates today's action actor and representation but not original worker employment`() {
+    fun `approval validates today's action actor and representation but not the original Request Channel`() {
         val fixture = Fixture()
         val s = fixture.scenario
-        val pending = s.facade.limitChangeService.requestLimitRuleChange(s.assisted(), TrustedChangeActorContext.BankWorker(s.worker))
-        fixture.deactivateWorker(s.worker)
+        val pending = s.facade.limitChangeService.requestLimitRuleChange(s.represented())
         s.facade.tenantCatalogService.setChannelActive(SetChannelActiveCommand(s.tenant, s.channel, false))
         val before = s.details(pending.id)
-        assertFailsWith<ConflictException> {
-            s.facade.limitChangeService.approveLimitRuleChange(ApproveLimitRuleChangeCommand(s.tenant, pending.id, s.staff()), TrustedChangeActorContext.BankWorker(s.worker))
-        }
         assertFailsWith<NotFoundException> {
             s.facade.limitChangeService.approveLimitRuleChange(ApproveLimitRuleChangeCommand(s.tenant, pending.id, s.party(UUID.randomUUID())))
         }
@@ -261,8 +240,8 @@ class TrustedChangeActorsTest {
     fun `approval cannot bypass expired representation unavailable target Mandate or invalid adjusted references`() {
         val fixture = Fixture()
         val s = fixture.scenario
-        val command = s.assisted().copy(requestedRule = s.command.requestedRule!!.copy(mandateScope = LimitMandateScope.MANDATE, mandateId = s.mandate))
-        val pending = s.facade.limitChangeService.requestLimitRuleChange(command, TrustedChangeActorContext.BankWorker(s.worker))
+        val command = s.represented().copy(requestedRule = s.command.requestedRule!!.copy(mandateScope = LimitMandateScope.MANDATE, mandateId = s.mandate))
+        val pending = s.facade.limitChangeService.requestLimitRuleChange(command)
         val before = s.details(pending.id)
         fixture.setDelegationWindow(EffectiveWindow(NOW.minusSeconds(60), NOW))
         assertFailsWith<ConflictException> { fixture.approve(pending.id) }
@@ -278,14 +257,13 @@ class TrustedChangeActorsTest {
     }
 
     @Test
-    fun `scheduled SYSTEM application uses current representation and ignores original worker employment`() {
+    fun `scheduled SYSTEM application uses current representation`() {
         for (expired in listOf(false, true)) {
             val fixture = Fixture()
             val s = fixture.scenario
             val due = NOW.plusSeconds(60)
-            val pending = s.facade.limitChangeService.requestLimitRuleChange(s.assisted().copy(effectiveAt = due), TrustedChangeActorContext.BankWorker(s.worker))
+            val pending = s.facade.limitChangeService.requestLimitRuleChange(s.represented().copy(effectiveAt = due))
             fixture.approve(pending.id)
-            fixture.deactivateWorker(s.worker)
             if (expired) fixture.setDelegationWindow(EffectiveWindow(NOW.minusSeconds(60), due))
             fixture.clock.setTo(due)
             val result = s.facade.limitChangeService.applyDueLimitChanges(ApplyDueLimitChangesCommand(s.tenant), TrustedChangeActorContext.InternalSystem)
@@ -300,14 +278,13 @@ class TrustedChangeActorsTest {
         for (cancel in listOf(false, true)) {
             val fixture = Fixture()
             val s = fixture.scenario
-            val command = s.assisted().copy(
+            val command = s.represented().copy(
                 effectiveAt = if (cancel) NOW.plusSeconds(3600) else null,
                 requestedRule = s.command.requestedRule!!.copy(mandateScope = LimitMandateScope.MANDATE, mandateId = s.mandate),
             )
-            val pending = s.facade.limitChangeService.requestLimitRuleChange(command, TrustedChangeActorContext.BankWorker(s.worker))
+            val pending = s.facade.limitChangeService.requestLimitRuleChange(command)
             if (cancel) fixture.approve(pending.id)
             val originalEvent = s.details(pending.id).events.first()
-            fixture.deactivateWorker(s.worker)
             fixture.deactivateMandate()
             fixture.setDelegationWindow(EffectiveWindow(NOW.minusSeconds(60), NOW.plusSeconds(60)))
             fixture.clock.setTo(NOW.plusSeconds(120))
@@ -315,7 +292,7 @@ class TrustedChangeActorsTest {
             s.facade.tenantCatalogService.setLimitConfigurationActive(SetLimitConfigurationActiveCommand(s.tenant, s.configuration, false))
             fixture.resetPolicies(unavailable = true)
             val result = if (cancel) {
-                s.facade.limitChangeService.cancelLimitRuleChange(CancelLimitRuleChangeCommand(s.tenant, pending.id, s.staff(s.replacementWorker), "Withdrawn"), TrustedChangeActorContext.BankWorker(s.replacementWorker))
+                s.facade.limitChangeService.cancelLimitRuleChange(CancelLimitRuleChangeCommand(s.tenant, pending.id, SYSTEM, "Withdrawn"), TrustedChangeActorContext.InternalSystem)
             } else {
                 s.facade.limitChangeService.rejectLimitRuleChange(RejectLimitRuleChangeCommand(s.tenant, pending.id, s.party(s.unrelated), "Declined"))
             }
@@ -339,11 +316,10 @@ class TrustedChangeActorsTest {
             val ruleId = assertNotNull(applied.limitRuleId)
             val ruleBefore = s.facade.limitInquiryService.getLimitRule(GetLimitRuleQuery(s.tenant, ruleId))
             val historyBefore = s.details(created.id)
-            val pending = s.facade.limitChangeService.requestLimitRuleChange(s.assisted().copy(
+            val pending = s.facade.limitChangeService.requestLimitRuleChange(s.represented().copy(
                 changeType = LimitRuleChangeType.UPDATE, limitRuleId = ruleId, expectedVersion = ruleBefore.version,
                 requestedRule = s.command.requestedRule!!.copy(amount = BigDecimal("600")), idempotencyKey = "update",
-            ), TrustedChangeActorContext.BankWorker(s.worker))
-            fixture.deactivateWorker(s.worker)
+            ))
             fixture.setDelegationWindow(EffectiveWindow(NOW.minusSeconds(60), NOW))
             fixture.resetPolicies(unavailable = true)
             if (cancel) {
@@ -364,7 +340,6 @@ class TrustedChangeActorsTest {
         val s = fixture.scenario
         val pending = s.facade.limitChangeService.requestLimitRuleChange(s.command)
         val other = TrustedChangeScenario(s.facade, NOW)
-        fixture.deactivateWorker(s.worker)
         fixture.resetPolicies(unavailable = true)
         for (id in listOf(UUID.randomUUID(), other.owner)) {
             assertFailsWith<NotFoundException> {
@@ -373,9 +348,6 @@ class TrustedChangeActorsTest {
             assertFailsWith<NotFoundException> {
                 s.facade.limitChangeService.cancelLimitRuleChange(CancelLimitRuleChangeCommand(s.tenant, pending.id, s.party(id)))
             }
-        }
-        assertFailsWith<ConflictException> {
-            s.facade.limitChangeService.cancelLimitRuleChange(CancelLimitRuleChangeCommand(s.tenant, pending.id, s.staff()), TrustedChangeActorContext.BankWorker(s.worker))
         }
         assertFailsWith<NotFoundException> {
             s.facade.limitChangeService.cancelLimitRuleChange(CancelLimitRuleChangeCommand(other.tenant, pending.id, s.party(other.owner)))
@@ -441,12 +413,6 @@ class TrustedChangeActorsTest {
         fun approve(id: UUID) = scenario.facade.limitChangeService.approveLimitRuleChange(
             ApproveLimitRuleChangeCommand(scenario.tenant, id, SYSTEM), TrustedChangeActorContext.InternalSystem,
         )
-
-        fun deactivateWorker(id: UUID) {
-            val tenant = TenantId.of(scenario.tenant)
-            val worker = assertNotNull(repositories.bankWorkers.findById(tenant, BankWorkerId.of(id)))
-            repositories.bankWorkers.update(tenant, worker.copy(isActive = false))
-        }
 
         fun deactivateMandate() {
             val tenant = TenantId.of(scenario.tenant)

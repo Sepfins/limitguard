@@ -33,7 +33,6 @@ data class RequestLimitRuleChangeCommand(
 data class LimitChangeActorCommand(
     val actorType: LimitChangeActorType,
     val partyProfileId: UUID? = null,
-    val bankWorkerId: UUID? = null,
 )
 
 data class LimitRuleDraft(

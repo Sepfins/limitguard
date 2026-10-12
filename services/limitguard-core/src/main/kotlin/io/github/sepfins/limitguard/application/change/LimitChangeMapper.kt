@@ -14,7 +14,6 @@ import io.github.sepfins.limitguard.api.results.LimitChangeActorResult
 import io.github.sepfins.limitguard.domain.change.ChangeActor
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeRequest
 import io.github.sepfins.limitguard.domain.change.RequestActorContext
-import io.github.sepfins.limitguard.domain.common.BankWorkerId
 import io.github.sepfins.limitguard.domain.common.ChannelGroupId
 import io.github.sepfins.limitguard.domain.common.ChannelId
 import io.github.sepfins.limitguard.domain.common.CurrencyCode
@@ -132,30 +131,16 @@ internal fun LimitChangeActorCommand.toChangeActor(): ChangeActor =
     when (actorType) {
         LimitChangeActorType.SYSTEM ->
             ChangeActor.System.also {
-                require(partyProfileId == null && bankWorkerId == null) {
-                    "LimitChangeActorCommand actor identifiers must be null for LimitChangeActorType.SYSTEM"
+                require(partyProfileId == null) {
+                    "LimitChangeActorCommand.partyProfileId must be null for LimitChangeActorType.SYSTEM"
                 }
             }
-        LimitChangeActorType.PARTY_PROFILE -> {
-            require(bankWorkerId == null) {
-                "LimitChangeActorCommand.bankWorkerId must be null for LimitChangeActorType.PARTY_PROFILE"
-            }
+        LimitChangeActorType.PARTY_PROFILE ->
             ChangeActor.PartyProfileActor(PartyProfileId.of(
                 requireNotNull(partyProfileId) {
                     "LimitChangeActorCommand.partyProfileId is required for LimitChangeActorType.PARTY_PROFILE"
                 }
             ))
-        }
-        LimitChangeActorType.BANK_WORKER -> {
-            require(partyProfileId == null) {
-                "LimitChangeActorCommand.partyProfileId must be null for LimitChangeActorType.BANK_WORKER"
-            }
-            ChangeActor.BankWorkerActor(BankWorkerId.of(
-                requireNotNull(bankWorkerId) {
-                    "LimitChangeActorCommand.bankWorkerId is required for LimitChangeActorType.BANK_WORKER"
-                }
-            ))
-        }
     }
 
 internal fun RequestLimitRuleChangeCommand.toRequestActorContext(actor: ChangeActor): RequestActorContext =
@@ -170,24 +155,12 @@ internal fun RequestLimitRuleChangeCommand.toRequestActorContext(actor: ChangeAc
                     }
                 ),
             )
-        is ChangeActor.BankWorkerActor ->
-            RequestActorContext.BankWorker(
-                bankWorkerId = actor.bankWorkerId,
-                requestChannelId = ChannelId.of(
-                    requireNotNull(requestChannelId) {
-                        "RequestLimitRuleChangeCommand.requestChannelId is required for LimitChangeActorType.BANK_WORKER"
-                    }
-                ),
-            )
     }
 
 internal fun RequestLimitRuleChangeCommand.toRequesterPartyProfileId(actor: ChangeActor): PartyProfileId? =
     requesterPartyProfileId?.let { PartyProfileId.of(it) }
         ?: when (actor) {
             is ChangeActor.PartyProfileActor -> actor.partyProfileId
-            is ChangeActor.BankWorkerActor -> throw IllegalArgumentException(
-                "requesterPartyProfileId is required for assisted bank worker changes"
-            )
             ChangeActor.System -> null
         }
 
@@ -223,9 +196,6 @@ internal fun LimitRuleChangeRequest.toResult(): LimitChangeRequestResult =
             ChangeActor.System -> LimitChangeActorResult(LimitChangeActorType.SYSTEM)
             is ChangeActor.PartyProfileActor -> LimitChangeActorResult(
                 LimitChangeActorType.PARTY_PROFILE, partyProfileId = actor.partyProfileId.value,
-            )
-            is ChangeActor.BankWorkerActor -> LimitChangeActorResult(
-                LimitChangeActorType.BANK_WORKER, bankWorkerId = actor.bankWorkerId.value,
             )
         },
         requesterPartyProfileId = requesterPartyProfileId?.value,

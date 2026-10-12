@@ -19,7 +19,6 @@ import io.github.sepfins.limitguard.api.commands.CreateMandateCommand
 import io.github.sepfins.limitguard.api.commands.CreatePartyProfileDelegationCommand
 import io.github.sepfins.limitguard.api.commands.EntityIdentifierCommand
 import io.github.sepfins.limitguard.api.commands.PartyLegalIdentifierCommand
-import io.github.sepfins.limitguard.api.commands.RegisterBankWorkerCommand
 import io.github.sepfins.limitguard.api.commands.RegisterChannelCommand
 import io.github.sepfins.limitguard.api.commands.RegisterFundingSourceCommand
 import io.github.sepfins.limitguard.api.commands.RegisterFundingSourceProductCommand
@@ -218,7 +217,7 @@ class TenantCatalogCoverageTest {
     }
 
     @Test
-    fun `catalog creates staff delegation groups memberships and a group scoped mandate`() {
+    fun `catalog creates delegation groups memberships and a group scoped mandate`() {
         val fixture = fixture()
         val tenant = fixture.service.registerTenant(RegisterTenantCommand(name = "Full Catalog Bank"))
         val channel = fixture.service.registerChannel(
@@ -238,16 +237,6 @@ class TenantCatalogCoverageTest {
         val delegate = fixture.service.registerPartyProfile(
             individualProfileCommand(tenant.id, "BNCLRA85C45F205Z")
         )
-        val worker = fixture.service.registerBankWorker(
-            RegisterBankWorkerCommand(
-                tenantId = tenant.id,
-                externalReference = "EMP-100",
-                displayName = "Giulia Bianchi",
-                branchCode = "rm-01",
-            )
-        )
-        assertEquals("RM-01", worker.branchCode)
-
         val delegation = fixture.service.createPartyProfileDelegation(
             CreatePartyProfileDelegationCommand(
                 tenantId = tenant.id,
@@ -504,7 +493,6 @@ class TenantCatalogCoverageTest {
                 partyLegalIdentifierRepository = repositories.partyLegalIdentifiers,
                 partyProfileRepository = repositories.partyProfiles,
                 partyProfileDelegationRepository = repositories.partyProfileDelegations,
-                bankWorkerRepository = repositories.bankWorkers,
                 fundingSourceRepository = repositories.fundingSources,
                 fundingSourceProductRepository = repositories.fundingSourceProducts,
                 fundingSourceOwnerRepository = repositories.fundingSourceOwners,

@@ -31,9 +31,7 @@ import io.github.sepfins.limitguard.domain.change.LimitRuleChangeEventType
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeRequest
 import io.github.sepfins.limitguard.domain.change.LimitRuleRevisionEventType
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeStatus as DomainLimitRuleChangeStatus
-import io.github.sepfins.limitguard.domain.common.BankWorkerId
 import io.github.sepfins.limitguard.domain.common.ChannelId
-import io.github.sepfins.limitguard.domain.common.ExternalReference
 import io.github.sepfins.limitguard.domain.common.PartyId
 import io.github.sepfins.limitguard.domain.channel.Channel
 import io.github.sepfins.limitguard.domain.channel.ChannelCode
@@ -41,8 +39,6 @@ import io.github.sepfins.limitguard.domain.channel.ChannelName
 import io.github.sepfins.limitguard.domain.party.PartyProfile
 import io.github.sepfins.limitguard.domain.tenant.Tenant
 import io.github.sepfins.limitguard.domain.tenant.TenantName
-import io.github.sepfins.limitguard.domain.worker.BankWorker
-import io.github.sepfins.limitguard.domain.worker.DisplayName
 import io.github.sepfins.limitguard.domain.funding.FundingSourceProduct
 import io.github.sepfins.limitguard.domain.funding.FundingSourceProductCode
 import io.github.sepfins.limitguard.domain.funding.FundingSourceProductName
@@ -109,7 +105,6 @@ class DefaultLimitChangeServiceTest {
     private val existingRuleId = LimitRuleId.of(UUID.fromString("00000000-0000-0000-0000-000000000006"))
     private val pendingRuleId = LimitRuleId.of(UUID.fromString("00000000-0000-0000-0000-000000000007"))
     private val pendingRequestId = LimitChangeRequestId.of(UUID.fromString("00000000-0000-0000-0000-000000000008"))
-    private val approverId = UUID.fromString("00000000-0000-0000-0000-000000000009")
     private val mandateId = MandateId.of(UUID.fromString("00000000-0000-0000-0000-000000000010"))
     private val authorizationPolicyId =
         LimitChangePolicyId.of(UUID.fromString("00000000-0000-0000-0000-000000000011"))
@@ -600,13 +595,10 @@ class DefaultLimitChangeServiceTest {
             ApproveLimitRuleChangeCommand(
                 tenantId = tenantId.value,
                 changeRequestId = requested.id,
-                approvedBy = LimitChangeActorCommand(
-                    actorType = LimitChangeActorType.BANK_WORKER,
-                    bankWorkerId = approverId,
-                ),
+                approvedBy = LimitChangeActorCommand(LimitChangeActorType.SYSTEM),
                 decisionReason = "Approved after review",
             ),
-            trustedActorContext = TrustedChangeActorContext.BankWorker(approverId),
+            trustedActorContext = TrustedChangeActorContext.InternalSystem,
         )
 
         assertEquals(LimitRuleChangeStatus.APPLIED, approved.status)
@@ -1575,10 +1567,7 @@ class DefaultLimitChangeServiceTest {
         val repositories = repositoriesWithConfiguration()
         val request = insertRequestedCreate(repositories)
         val service = limitChangeService(repositories)
-        val approver = LimitChangeActorCommand(
-            actorType = LimitChangeActorType.BANK_WORKER,
-            bankWorkerId = approverId,
-        )
+        val approver = LimitChangeActorCommand(LimitChangeActorType.SYSTEM)
 
         val result = service.approveLimitRuleChange(
             ApproveLimitRuleChangeCommand(
@@ -1588,7 +1577,7 @@ class DefaultLimitChangeServiceTest {
                 decisionReason = "Approved by branch supervisor",
                 metadata = mapOf("caseId" to "approval-1"),
             ),
-            trustedActorContext = TrustedChangeActorContext.BankWorker(approverId),
+            trustedActorContext = TrustedChangeActorContext.InternalSystem,
         )
 
         assertEquals(LimitRuleChangeStatus.APPLIED, result.status)
@@ -1607,11 +1596,11 @@ class DefaultLimitChangeServiceTest {
             events.map { it.eventType },
         )
         val approvalEvent = events[1]
-        assertEquals(ChangeActor.BankWorkerActor(BankWorkerId.of(approverId)), approvalEvent.actor)
+        assertEquals(ChangeActor.System, approvalEvent.actor)
         assertEquals(mapOf("caseId" to "approval-1"), approvalEvent.eventPayload.value)
 
         val revision = repositories.limitRuleRevisions.findByChangeRequest(tenantId, request.id).single()
-        assertEquals(ChangeActor.BankWorkerActor(BankWorkerId.of(approverId)), revision.actor)
+        assertEquals(ChangeActor.System, revision.actor)
         assertEquals(pendingRuleId, revision.limitRuleId)
     }
 
@@ -1719,10 +1708,7 @@ class DefaultLimitChangeServiceTest {
         val repositories = repositoriesWithConfiguration()
         val request = insertRequestedCreate(repositories)
         val service = limitChangeService(repositories)
-        val rejector = LimitChangeActorCommand(
-            actorType = LimitChangeActorType.BANK_WORKER,
-            bankWorkerId = approverId,
-        )
+        val rejector = LimitChangeActorCommand(LimitChangeActorType.SYSTEM)
 
         val result = service.rejectLimitRuleChange(
             RejectLimitRuleChangeCommand(
@@ -1732,7 +1718,7 @@ class DefaultLimitChangeServiceTest {
                 decisionReason = "Requested amount exceeds branch policy",
                 metadata = mapOf("caseId" to "rejection-1"),
             ),
-            trustedActorContext = TrustedChangeActorContext.BankWorker(approverId),
+            trustedActorContext = TrustedChangeActorContext.InternalSystem,
         )
 
         assertEquals(LimitRuleChangeStatus.REJECTED, result.status)
@@ -1749,7 +1735,7 @@ class DefaultLimitChangeServiceTest {
             events.map { it.eventType },
         )
         val rejectionEvent = events.last()
-        assertEquals(ChangeActor.BankWorkerActor(BankWorkerId.of(approverId)), rejectionEvent.actor)
+        assertEquals(ChangeActor.System, rejectionEvent.actor)
         assertEquals(DomainLimitRuleChangeStatus.REQUESTED, rejectionEvent.beforeStatus)
         assertEquals(DomainLimitRuleChangeStatus.REJECTED, rejectionEvent.afterStatus)
         assertEquals(request.requestedRule, rejectionEvent.beforeRule)
@@ -1800,10 +1786,7 @@ class DefaultLimitChangeServiceTest {
             trustedActorContext = TrustedChangeActorContext.InternalSystem,
         )
         val scheduled = assertNotNull(repositories.limitChangeRequests.findById(tenantId, request.id))
-        val canceller = LimitChangeActorCommand(
-            actorType = LimitChangeActorType.BANK_WORKER,
-            bankWorkerId = approverId,
-        )
+        val canceller = LimitChangeActorCommand(LimitChangeActorType.SYSTEM)
 
         val result = service.cancelLimitRuleChange(
             CancelLimitRuleChangeCommand(
@@ -1813,7 +1796,7 @@ class DefaultLimitChangeServiceTest {
                 decisionReason = "Customer withdrew the request",
                 metadata = mapOf("caseId" to "cancellation-1"),
             ),
-            trustedActorContext = TrustedChangeActorContext.BankWorker(approverId),
+            trustedActorContext = TrustedChangeActorContext.InternalSystem,
         )
 
         assertEquals(LimitRuleChangeStatus.CANCELLED, result.status)
@@ -1834,7 +1817,7 @@ class DefaultLimitChangeServiceTest {
             events.map { it.eventType },
         )
         val cancellationEvent = events.last()
-        assertEquals(ChangeActor.BankWorkerActor(BankWorkerId.of(approverId)), cancellationEvent.actor)
+        assertEquals(ChangeActor.System, cancellationEvent.actor)
         assertEquals(DomainLimitRuleChangeStatus.PENDING_EFFECTIVE_DATE, cancellationEvent.beforeStatus)
         assertEquals(DomainLimitRuleChangeStatus.CANCELLED, cancellationEvent.afterStatus)
         assertEquals(scheduled.approvedRule, cancellationEvent.beforeRule)
@@ -2057,10 +2040,6 @@ class DefaultLimitChangeServiceTest {
                 id = PartyProfileId.of(id), partyId = PartyId.of(id), tenantId = tenantId,
             ))
         }
-        repositories.bankWorkers.insert(tenantId, BankWorker(
-            id = BankWorkerId.of(approverId), tenantId = tenantId,
-            externalReference = ExternalReference.of("APPROVER"), displayName = DisplayName.of("Approver"),
-        ))
         repositories.channels.insert(tenantId, Channel(
             id = ChannelId.of(channelId), tenantId = tenantId, code = ChannelCode.of("WEB"),
             name = ChannelName.of("Web"), isActive = true,
@@ -2213,7 +2192,6 @@ class DefaultLimitChangeServiceTest {
             tenantRepository = repositories.tenants,
             partyProfileRepository = repositories.partyProfiles,
             partyProfileDelegationRepository = repositories.partyProfileDelegations,
-            bankWorkerRepository = repositories.bankWorkers,
             channelRepository = repositories.channels,
             channelGroupRepository = repositories.channelGroups,
             operationTypeRepository = repositories.operationTypes,

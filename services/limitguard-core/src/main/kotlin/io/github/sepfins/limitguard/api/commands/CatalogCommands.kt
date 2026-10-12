@@ -112,15 +112,6 @@ data class EntityIdentifierCommand(
     val identifier: String,
 )
 
-data class RegisterBankWorkerCommand(
-    val tenantId: UUID,
-    val externalReference: String,
-    val displayName: String,
-    val branchCode: String? = null,
-    val isActive: Boolean = true,
-    val metadata: Map<String, Any?> = emptyMap(),
-)
-
 data class CreatePartyProfileDelegationCommand(
     val tenantId: UUID,
     val ownerPartyProfileId: UUID,

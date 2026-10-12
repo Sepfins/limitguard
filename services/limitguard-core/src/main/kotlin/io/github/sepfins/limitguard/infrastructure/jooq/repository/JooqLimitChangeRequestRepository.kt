@@ -6,7 +6,6 @@ import io.github.sepfins.limitguard.domain.change.LimitRuleChangeStatus
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeType
 import io.github.sepfins.limitguard.domain.change.RequestActorContext
 import io.github.sepfins.limitguard.domain.change.ScopeHash
-import io.github.sepfins.limitguard.domain.common.BankWorkerId
 import io.github.sepfins.limitguard.domain.common.ChannelId
 import io.github.sepfins.limitguard.domain.common.IdempotencyKey
 import io.github.sepfins.limitguard.domain.common.LimitChangeRequestId
@@ -144,10 +143,6 @@ class JooqLimitChangeRequestRepository(
                 .eq(GeneratedLimitChangeActorType.PARTY_PROFILE)
                 .and(table.REQUESTED_BY_PARTY_PROFILE_ID.eq(requestActorContext.actorPartyProfileId.value))
                 .and(table.REQUEST_CHANNEL_ID.eq(requestActorContext.requestChannelId.value))
-            is RequestActorContext.BankWorker -> table.REQUESTED_BY_ACTOR_TYPE
-                .eq(GeneratedLimitChangeActorType.BANK_WORKER)
-                .and(table.REQUESTED_BY_BANK_WORKER_ID.eq(requestActorContext.bankWorkerId.value))
-                .and(table.REQUEST_CHANNEL_ID.eq(requestActorContext.requestChannelId.value))
         }
         selectRequests()
             .where(table.TENANT_ID.eq(tenantId.value))
@@ -184,7 +179,6 @@ class JooqLimitChangeRequestRepository(
             .set(table.STATUS, request.status.toGenerated())
             .set(table.REQUESTED_BY_ACTOR_TYPE, request.requestedBy.toGenerated())
             .set(table.REQUESTED_BY_PARTY_PROFILE_ID, request.actorPartyProfileId())
-            .set(table.REQUESTED_BY_BANK_WORKER_ID, request.actorBankWorkerId())
             .set(table.REQUESTER_PARTY_PROFILE_ID, request.requesterPartyProfileId?.value)
             .set(table.AUTHORITY_DELEGATION_ID, request.authorityDelegationId?.value)
             .set(table.REQUEST_CHANNEL_ID, request.requestChannelId())
@@ -270,18 +264,11 @@ class JooqLimitChangeRequestRepository(
             GeneratedLimitChangeActorType.PARTY_PROFILE -> ChangeActor.PartyProfileActor(
                 PartyProfileId.of(requireNotNull(get(table.REQUESTED_BY_PARTY_PROFILE_ID)))
             )
-            GeneratedLimitChangeActorType.BANK_WORKER -> ChangeActor.BankWorkerActor(
-                BankWorkerId.of(requireNotNull(get(table.REQUESTED_BY_BANK_WORKER_ID)))
-            )
         }
         val requestActorContext = when (requestedBy) {
             ChangeActor.System -> RequestActorContext.System(get(table.REQUEST_CHANNEL_ID)?.let(ChannelId::of))
             is ChangeActor.PartyProfileActor -> RequestActorContext.PartyProfile(
                 actorPartyProfileId = requestedBy.partyProfileId,
-                requestChannelId = ChannelId.of(requireNotNull(get(table.REQUEST_CHANNEL_ID))),
-            )
-            is ChangeActor.BankWorkerActor -> RequestActorContext.BankWorker(
-                bankWorkerId = requestedBy.bankWorkerId,
                 requestChannelId = ChannelId.of(requireNotNull(get(table.REQUEST_CHANNEL_ID))),
             )
         }
@@ -325,14 +312,10 @@ class JooqLimitChangeRequestRepository(
     private fun ChangeActor.toGenerated(): GeneratedLimitChangeActorType = when (this) {
         ChangeActor.System -> GeneratedLimitChangeActorType.SYSTEM
         is ChangeActor.PartyProfileActor -> GeneratedLimitChangeActorType.PARTY_PROFILE
-        is ChangeActor.BankWorkerActor -> GeneratedLimitChangeActorType.BANK_WORKER
     }
 
     private fun LimitRuleChangeRequest.actorPartyProfileId(): java.util.UUID? =
         (requestedBy as? ChangeActor.PartyProfileActor)?.partyProfileId?.value
-
-    private fun LimitRuleChangeRequest.actorBankWorkerId(): java.util.UUID? =
-        (requestedBy as? ChangeActor.BankWorkerActor)?.bankWorkerId?.value
 
     private fun LimitRuleChangeRequest.requestChannelId(): java.util.UUID? = requestActorContext.requestChannelId?.value
 

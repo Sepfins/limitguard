@@ -86,7 +86,6 @@ data class LimitRuleRevisionResult(
 data class LimitChangeActorResult(
     val actorType: LimitChangeActorType,
     val partyProfileId: UUID? = null,
-    val bankWorkerId: UUID? = null,
 )
 
 data class TransactionHistoryResult(

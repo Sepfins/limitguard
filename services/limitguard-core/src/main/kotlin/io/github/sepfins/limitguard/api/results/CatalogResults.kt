@@ -93,17 +93,6 @@ data class PartyProfileResult(
     val metadata: Map<String, Any?> = emptyMap(),
 )
 
-data class BankWorkerResult(
-    val id: UUID,
-    val tenantId: UUID,
-    val externalReference: String,
-    val displayName: String,
-    val branchCode: String?,
-    val isActive: Boolean,
-    val metadata: Map<String, Any?>,
-    val createdAt: Instant,
-)
-
 data class PartyProfileDelegationResult(
     val id: UUID,
     val tenantId: UUID,

@@ -43,7 +43,6 @@ internal object LimitChangeCreationIntent {
             "requestedBy" to mapOf(
                 "actorType" to command.requestedBy.actorType.name,
                 "partyProfileId" to command.requestedBy.partyProfileId?.toString(),
-                "bankWorkerId" to command.requestedBy.bankWorkerId?.toString(),
             ),
             "requesterPartyProfileId" to command.toRequesterPartyProfileId(actor)?.value?.toString(),
             "requestChannelId" to command.requestChannelId?.toString(),

@@ -4,7 +4,6 @@ import io.github.sepfins.limitguard.api.Limitguard
 import io.github.sepfins.limitguard.application.DefaultLimitguard
 import io.github.sepfins.limitguard.infrastructure.ids.SystemIdGenerator
 import io.github.sepfins.limitguard.infrastructure.jooq.repository.JooqAuthorizationDecisionRepository
-import io.github.sepfins.limitguard.infrastructure.jooq.repository.JooqBankWorkerRepository
 import io.github.sepfins.limitguard.infrastructure.jooq.repository.JooqChannelGroupMemberRepository
 import io.github.sepfins.limitguard.infrastructure.jooq.repository.JooqChannelGroupRepository
 import io.github.sepfins.limitguard.infrastructure.jooq.repository.JooqChannelRepository
@@ -66,7 +65,6 @@ class JooqLimitguardFactory(
             partyLegalIdentifierRepository = JooqPartyLegalIdentifierRepository(context),
             partyProfileRepository = JooqPartyProfileRepository(context),
             partyProfileDelegationRepository = JooqPartyProfileDelegationRepository(context),
-            bankWorkerRepository = JooqBankWorkerRepository(context),
             fundingSourceRepository = JooqFundingSourceRepository(context),
             fundingSourceProductRepository = JooqFundingSourceProductRepository(context),
             fundingSourceOwnerRepository = JooqFundingSourceOwnerRepository(context),
