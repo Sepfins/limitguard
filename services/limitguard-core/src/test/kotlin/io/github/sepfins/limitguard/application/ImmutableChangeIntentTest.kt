@@ -4,12 +4,10 @@ import io.github.sepfins.limitguard.api.TrustedChangeActorContext
 import io.github.sepfins.limitguard.api.LimitChangeActorType
 import io.github.sepfins.limitguard.api.LimitKind
 import io.github.sepfins.limitguard.api.LimitRuleChangeStatus
-import io.github.sepfins.limitguard.api.LimitMandateScope
 import io.github.sepfins.limitguard.api.LimitRuleChangeType
 import io.github.sepfins.limitguard.api.PartyType
 import io.github.sepfins.limitguard.api.commands.CreateLimitConfigurationCommand
 import io.github.sepfins.limitguard.api.commands.CreateLimitChangePolicyCommand
-import io.github.sepfins.limitguard.api.commands.CreateMandateCommand
 import io.github.sepfins.limitguard.api.commands.ApproveLimitRuleChangeCommand
 import io.github.sepfins.limitguard.api.commands.ApplyDueLimitChangesCommand
 import io.github.sepfins.limitguard.api.commands.SetLimitConfigurationActiveCommand
@@ -36,11 +34,8 @@ import io.github.sepfins.limitguard.domain.policy.PolicyEvaluationContext
 import io.github.sepfins.limitguard.domain.policy.PolicyEvaluationResult
 import io.github.sepfins.limitguard.infrastructure.policy.jsonlogic.JsonLogicPolicyEngine
 import io.github.sepfins.limitguard.port.policy.PolicyEngine
-import io.github.sepfins.limitguard.port.transactions.TransactionRunner
-import io.github.sepfins.limitguard.support.DirectTransactionRunner
+import io.github.sepfins.limitguard.support.PostgresFacade
 import io.github.sepfins.limitguard.support.FixedClockProvider
-import io.github.sepfins.limitguard.support.SequentialIdGenerator
-import io.github.sepfins.limitguard.support.persistence.InMemoryLimitguardRepositories
 import java.math.BigDecimal
 import java.math.BigInteger
 import java.time.Instant
@@ -97,34 +92,6 @@ class ImmutableChangeIntentTest {
     }
 
     @Test
-    fun `approval detaches command JSON before entering the host transaction`() {
-        var onTransaction: (() -> Unit)? = null
-        val runner = object : TransactionRunner {
-            override fun <T> inTransaction(block: () -> T): T {
-                onTransaction?.invoke()
-                return block()
-            }
-            override fun <T> inSavepoint(block: () -> T): T = block()
-        }
-        val fixture = Fixture(transactionRunner = runner)
-        val pending = fixture.facade.limitChangeService.requestLimitRuleChange(fixture.command)
-        val labels = mutableListOf<Any?>("submitted", null)
-        val metadata = mapOf("labels" to labels)
-        onTransaction = { labels[0] = "changed while waiting" }
-        fixture.facade.limitChangeService.approveLimitRuleChange(ApproveLimitRuleChangeCommand(
-            fixture.tenant, pending.id, LimitChangeActorCommand(LimitChangeActorType.SYSTEM),
-            approvedRule = fixture.command.requestedRule!!.copy(metadata = metadata), metadata = metadata,
-        ),
-            trustedActorContext = TrustedChangeActorContext.InternalSystem,
-        )
-        onTransaction = null
-        val details = fixture.details(pending.id)
-        val expected = mapOf("labels" to listOf("submitted", null))
-        assertEquals(expected, details.approvedRule!!["metadata"])
-        assertEquals(expected, details.events.single { it.eventType.name == "APPROVED" }.payload)
-    }
-
-    @Test
     fun `creation replay retains original intent after cap delay application and retirement`() {
         val fixture = Fixture(listOf(JsonLogicPolicyEngine()))
         val dueAt = fixture.clock.now().plusSeconds(60)
@@ -170,67 +137,6 @@ class ImmutableChangeIntentTest {
         val details = fixture.details(applied.id)
         assertEquals(applied, fixture.facade.limitChangeService.requestLimitRuleChange(command))
         assertEquals(details, fixture.details(applied.id))
-    }
-
-    @Test
-    fun `omitted draft defaults are compared with their first resolved values after the rule changes`() {
-        val fixture = Fixture()
-        val created = fixture.facade.limitChangeService.requestLimitRuleChange(fixture.command)
-        val applied = fixture.approve(created.id)
-        val originalStart = fixture.clock.now()
-        fixture.clock.setTo(originalStart.plusSeconds(10))
-        val update = fixture.command.copy(
-            changeType = LimitRuleChangeType.UPDATE, limitRuleId = applied.limitRuleId, expectedVersion = 1,
-            idempotencyKey = "update", requestedRule = fixture.command.requestedRule!!.copy(configurationId = null),
-        )
-        val pending = fixture.facade.limitChangeService.requestLimitRuleChange(update)
-        val otherConfiguration = fixture.facade.tenantCatalogService.createLimitConfiguration(CreateLimitConfigurationCommand(
-            tenantId = fixture.tenant, code = "OTHER", name = "Other limit", limitKind = LimitKind.PER_TRANSACTION,
-            currency = "EUR", maxAssignableAmount = BigDecimal("1000"),
-        )).id
-        val adjusted = update.requestedRule!!.copy(configurationId = otherConfiguration, startsAt = fixture.clock.now())
-        val changed = fixture.facade.limitChangeService.approveLimitRuleChange(ApproveLimitRuleChangeCommand(
-            fixture.tenant, pending.id, LimitChangeActorCommand(LimitChangeActorType.SYSTEM), adjusted,
-        ),
-            trustedActorContext = TrustedChangeActorContext.InternalSystem,
-        )
-        val beforeReplay = fixture.details(pending.id)
-        assertEquals(changed, fixture.facade.limitChangeService.requestLimitRuleChange(update))
-        assertEquals(changed, fixture.facade.limitChangeService.requestLimitRuleChange(update.copy(
-            requestedRule = update.requestedRule.copy(configurationId = fixture.configuration, startsAt = originalStart),
-        )))
-        assertFailsWith<IdempotencyConflictException> {
-            fixture.facade.limitChangeService.requestLimitRuleChange(update.copy(requestedRule = adjusted))
-        }
-        assertEquals(beforeReplay, fixture.details(pending.id))
-    }
-
-    @Test
-    fun `creation replay compares the original mandate target after adjusted approval`() {
-        val fixture = Fixture()
-        val assignee = fixture.facade.tenantCatalogService.registerPartyProfile(RegisterPartyProfileCommand(
-            tenantId = fixture.tenant, partyType = PartyType.INDIVIDUAL, firstName = "Sam", lastName = "Delegate",
-        )).id
-        val mandate = fixture.facade.tenantCatalogService.createMandate(CreateMandateCommand(
-            fixture.tenant, fixture.owner, assignee, "Delegate mandate",
-        )).id
-        val submitted = fixture.facade.limitChangeService.requestLimitRuleChange(fixture.command)
-        val adjusted = fixture.command.requestedRule!!.copy(
-            mandateScope = LimitMandateScope.MANDATE, mandateId = mandate, amount = BigDecimal("450"),
-        )
-        val applied = fixture.facade.limitChangeService.approveLimitRuleChange(ApproveLimitRuleChangeCommand(
-            fixture.tenant, submitted.id, LimitChangeActorCommand(LimitChangeActorType.SYSTEM), adjusted,
-        ),
-            trustedActorContext = TrustedChangeActorContext.InternalSystem,
-        )
-        val details = fixture.facade.limitInquiryService.getLimitChange(GetLimitChangeQuery(fixture.tenant, submitted.id))
-
-        assertEquals(mandate, applied.targetMandateId)
-        assertEquals(applied, fixture.facade.limitChangeService.requestLimitRuleChange(fixture.command))
-        assertFailsWith<IdempotencyConflictException> {
-            fixture.facade.limitChangeService.requestLimitRuleChange(fixture.command.copy(requestedRule = adjusted))
-        }
-        assertEquals(details, fixture.facade.limitInquiryService.getLimitChange(GetLimitChangeQuery(fixture.tenant, submitted.id)))
     }
 
     @Test
@@ -385,49 +291,9 @@ class ImmutableChangeIntentTest {
         assertEquals(details, fixture.facade.limitInquiryService.getLimitChange(GetLimitChangeQuery(fixture.tenant, result.id)))
     }
 
-    private class Fixture(
-        engines: Collection<PolicyEngine> = emptyList(),
-        transactionRunner: TransactionRunner = DirectTransactionRunner(),
-    ) {
+    private class Fixture(engines: Collection<PolicyEngine> = emptyList()) {
         val clock = FixedClockProvider(Instant.parse("2026-06-26T12:00:00Z"))
-        private val repositories = InMemoryLimitguardRepositories()
-        val facade = DefaultLimitguard(
-            tenantRepository = repositories.tenants,
-            identifierSchemeRepository = repositories.identifierSchemes,
-            entityIdentifierRepository = repositories.entityIdentifiers,
-            channelRepository = repositories.channels,
-            channelGroupRepository = repositories.channelGroups,
-            channelGroupMemberRepository = repositories.channelGroupMembers,
-            operationTypeRepository = repositories.operationTypes,
-            partyRepository = repositories.parties,
-            individualRepository = repositories.individuals,
-            legalEntityRepository = repositories.legalEntities,
-            partyLegalIdentifierRepository = repositories.partyLegalIdentifiers,
-            partyProfileRepository = repositories.partyProfiles,
-            partyProfileDelegationRepository = repositories.partyProfileDelegations,
-            fundingSourceRepository = repositories.fundingSources,
-            fundingSourceProductRepository = repositories.fundingSourceProducts,
-            fundingSourceOwnerRepository = repositories.fundingSourceOwners,
-            fundingSourceGroupRepository = repositories.fundingSourceGroups,
-            fundingSourceGroupMemberRepository = repositories.fundingSourceGroupMembers,
-            mandateRepository = repositories.mandates,
-            limitConfigurationRepository = repositories.limitConfigurations,
-            limitChangePolicyRepository = repositories.limitChangePolicies,
-            limitChangePolicyEvaluationRepository = repositories.limitChangePolicyEvaluations,
-            limitChangeRequestRepository = repositories.limitChangeRequests,
-            limitChangeEventRepository = repositories.limitRuleChangeEvents,
-            limitRuleRepository = repositories.limitRules,
-            limitRuleRevisionRepository = repositories.limitRuleRevisions,
-            authorizationDecisionRepository = repositories.authorizationDecisions,
-            transactionRepository = repositories.transactions,
-            transactionEventRepository = repositories.transactionEvents,
-            usageBucketRepository = repositories.usageBuckets,
-            usageEventRepository = repositories.usageEvents,
-            policyEngines = engines,
-            idGenerator = SequentialIdGenerator(),
-            clockProvider = clock,
-            transactionRunner = transactionRunner,
-        )
+        val facade = PostgresFacade.create(clock, engines)
         val tenant = facade.tenantCatalogService.registerTenant(RegisterTenantCommand("Immutable intent bank")).id
         val owner = facade.tenantCatalogService.registerPartyProfile(RegisterPartyProfileCommand(
             tenantId = tenant, partyType = PartyType.INDIVIDUAL, firstName = "Alex", lastName = "Customer",

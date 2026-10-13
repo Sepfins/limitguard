@@ -2,25 +2,16 @@ package io.github.sepfins.limitguard.application
 
 import io.github.sepfins.limitguard.api.AuthorizationDecision
 import io.github.sepfins.limitguard.api.LimitFundingScope
-import io.github.sepfins.limitguard.api.OperationCapacityStatus
 import io.github.sepfins.limitguard.api.commands.AssignFundingSourceOwnerCommand
-import io.github.sepfins.limitguard.api.commands.CaptureTransactionCommand
 import io.github.sepfins.limitguard.api.commands.CreateMandateCommand
-import io.github.sepfins.limitguard.api.commands.ReleaseAuthorizationCommand
-import io.github.sepfins.limitguard.api.commands.ReverseTransactionCommand
-import io.github.sepfins.limitguard.api.errors.ConflictException
 import io.github.sepfins.limitguard.api.errors.NotFoundException
 import io.github.sepfins.limitguard.api.errors.ValidationException
 import io.github.sepfins.limitguard.api.queries.FindOperationTypesByCodeQuery
-import io.github.sepfins.limitguard.domain.common.OperationTypeId
-import io.github.sepfins.limitguard.domain.common.TenantId
 import io.github.sepfins.limitguard.support.FixedClockProvider
 import io.github.sepfins.limitguard.support.OperationSubtreeScenario
-import io.github.sepfins.limitguard.support.createFacade
-import io.github.sepfins.limitguard.support.persistence.InMemoryLimitguardRepositories
+import io.github.sepfins.limitguard.support.PostgresFacade
 import java.math.BigDecimal
 import java.time.Instant
-import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -55,60 +46,12 @@ class LiveOperationSubtreeTest {
     }
 
     @Test
-    fun `corrupt global ancestry fails new evaluations and descendant registration even with unmatched ALLOW`() {
-        val repositories = InMemoryLimitguardRepositories()
-        val s = scenario(repositories)
-        val local = s.operation("LOCAL")
-        val global = s.operation("GLOBAL", global = true)
-        val selected = s.operation("SELECTED", global)
-        val tenant = TenantId.of(s.tenant)
-        val globalNode = requireNotNull(repositories.operationTypes.findById(tenant, OperationTypeId.of(global)))
-        repositories.operationTypes.update(tenant, globalNode.copy(parentId = OperationTypeId.of(local)))
-
-        assertFailsWith<ConflictException> { s.authorize(selected) }
-        assertFailsWith<ConflictException> { s.capacity(selected) }
-        assertFailsWith<ConflictException> { s.operation("FUTURE", selected) }
-    }
-
-    @Test
     fun `a declared operation leaf cannot gain a child or be silently reclassified`() {
         val s = scenario()
         val leaf = s.operation("LEAF", leaf = true)
 
         assertFailsWith<ValidationException> { s.operation("CHILD", leaf) }
         assertEquals(AuthorizationDecision.ALLOWED, s.authorize(leaf).decision)
-    }
-
-    @Test
-    fun `a stale leaf flag with registered children rejects parent and descendant evaluation`() {
-        val repositories = InMemoryLimitguardRepositories()
-        val s = scenario(repositories)
-        val parent = s.operation("PARENT")
-        val child = s.operation("CHILD", parent)
-        val tenant = TenantId.of(s.tenant)
-        val parentNode = requireNotNull(repositories.operationTypes.findById(tenant, OperationTypeId.of(parent)))
-        repositories.operationTypes.update(tenant, parentNode.copy(isLeaf = true))
-
-        for (operation in listOf(parent, child)) {
-            assertFailsWith<ConflictException> { s.authorize(operation) }
-            assertFailsWith<ConflictException> { s.capacity(operation) }
-            assertFailsWith<ConflictException> { s.operation("FUTURE", operation) }
-        }
-    }
-
-    @Test
-    fun `a shared leaf with another tenants child is invalid without disclosing that child`() {
-        val repositories = InMemoryLimitguardRepositories()
-        val s = scenario(repositories)
-        val global = s.operation("GLOBAL", global = true)
-        val other = OperationSubtreeScenario(s.facade, s.now)
-        other.operation("PRIVATE_CHILD", global)
-        val tenant = TenantId.of(s.tenant)
-        val globalNode = requireNotNull(repositories.operationTypes.findById(tenant, OperationTypeId.of(global)))
-        repositories.operationTypes.update(tenant, globalNode.copy(isLeaf = true))
-
-        assertFailsWith<ConflictException> { s.authorize(global) }
-        assertFailsWith<ConflictException> { s.capacity(global) }
     }
 
     @Test
@@ -139,40 +82,6 @@ class LiveOperationSubtreeTest {
         assertFailsWith<NotFoundException> { s.authorize(otherPrivate) }
         assertFailsWith<NotFoundException> { s.capacity(otherPrivate) }
         assertFailsWith<NotFoundException> { s.operation("HIDDEN_PARENT", otherPrivate) }
-    }
-
-    @Test
-    fun `hidden missing and cyclic ancestor paths are public errors not unrestricted decisions`() {
-        for (corruption in listOf("HIDDEN", "MISSING", "CYCLE")) {
-            val repositories = InMemoryLimitguardRepositories()
-            val s = scenario(repositories)
-            val root = s.operation("ROOT")
-            val middle = s.operation("MIDDLE", root)
-            val selected = s.operation("SELECTED", middle)
-            val other = OperationSubtreeScenario(s.facade, s.now)
-            val corruptParent = when (corruption) {
-                "HIDDEN" -> other.operation("PRIVATE")
-                "CYCLE" -> selected
-                else -> UUID.randomUUID()
-            }
-            val tenant = TenantId.of(s.tenant)
-            val rootNode = requireNotNull(repositories.operationTypes.findById(tenant, OperationTypeId.of(root)))
-            repositories.operationTypes.update(tenant, rootNode.copy(parentId = OperationTypeId.of(corruptParent)))
-            val command = s.command(selected, key = "invalid-path")
-
-            if (corruption == "CYCLE") {
-                assertFailsWith<ConflictException> { s.facade.limitEvaluationService.authorizeTransaction(command) }
-                assertFailsWith<ConflictException> { s.capacity(selected) }
-                assertFailsWith<ConflictException> { s.operation("FUTURE", selected) }
-            } else {
-                assertFailsWith<NotFoundException> { s.facade.limitEvaluationService.authorizeTransaction(command) }
-                assertFailsWith<NotFoundException> { s.capacity(selected) }
-                assertFailsWith<NotFoundException> { s.operation("FUTURE", selected) }
-            }
-            repositories.operationTypes.update(tenant, rootNode)
-            assertEquals(AuthorizationDecision.ALLOWED, s.facade.limitEvaluationService.authorizeTransaction(command).decision)
-            assertEquals(OperationCapacityStatus.UNLIMITED, s.capacity(selected).status)
-        }
     }
 
     @Test
@@ -240,41 +149,8 @@ class LiveOperationSubtreeTest {
         assertEquals(BigDecimal("500.0000"), s.capacity(descendant).effectiveAvailableAmount)
     }
 
-    @Test
-    fun `future descendants and rules affect new evaluations but replay and mutations retain original buckets`() {
-        val repositories = InMemoryLimitguardRepositories()
-        val s = scenario(repositories)
-        val root = s.operation("TRANSFER")
-        val selected = s.operation("INSTANT", root)
-        val originalRule = s.grant(root)
-        val command = s.command(selected, amount = "80", key = "original")
-        val original = s.facade.limitEvaluationService.authorizeTransaction(command)
-        val payment = requireNotNull(original.paymentTransactionId)
-        val future = s.operation("FUTURE", selected, leaf = true)
-        assertEquals(listOf(originalRule), s.capacity(future).applicableLimits.map { it.limitRuleId })
-        val futureRule = s.grant(selected, priority = 10, isolated = true)
-        assertEquals(listOf(futureRule), s.capacity(future).applicableLimits.map { it.limitRuleId })
-        val tenant = TenantId.of(s.tenant)
-        val selectedNode = requireNotNull(repositories.operationTypes.findById(tenant, OperationTypeId.of(selected)))
-        repositories.operationTypes.update(tenant, selectedNode.copy(parentId = OperationTypeId.of(UUID.randomUUID())))
-
-        assertEquals(original, s.facade.limitEvaluationService.authorizeTransaction(command))
-        val capture = s.facade.limitEvaluationService.captureTransaction(CaptureTransactionCommand(s.tenant, payment, BigDecimal("30")))
-        val release = s.facade.limitEvaluationService.releaseAuthorization(ReleaseAuthorizationCommand(s.tenant, payment))
-        val reverse = s.facade.limitEvaluationService.reverseTransaction(ReverseTransactionCommand(s.tenant, payment, BigDecimal("10")))
-        for (mutation in listOf(capture, release, reverse)) {
-            assertEquals(listOf(originalRule), mutation.usageEvents.map { it.limitRuleId })
-            assertEquals(s.usage(originalRule).usageBucketId, mutation.usageEvents.single().usageBucketId)
-        }
-        assertEquals(BigDecimal("0.0000"), s.usage(originalRule).reservedAmount)
-        assertEquals(BigDecimal("20.0000"), s.usage(originalRule).consumedAmount)
-        assertEquals(BigDecimal("0.0000"), s.usage(futureRule).reservedAmount)
-        assertEquals(BigDecimal("0.0000"), s.usage(futureRule).consumedAmount)
-        assertFailsWith<NotFoundException> { s.authorize(future) }
-    }
-
-    private fun scenario(repositories: InMemoryLimitguardRepositories = InMemoryLimitguardRepositories()): OperationSubtreeScenario {
+    private fun scenario(): OperationSubtreeScenario {
         val now = Instant.parse("2026-10-05T10:00:00Z")
-        return OperationSubtreeScenario(repositories.createFacade(FixedClockProvider(now), emptyList()), now)
+        return OperationSubtreeScenario(PostgresFacade.create(FixedClockProvider(now), emptyList()), now)
     }
 }

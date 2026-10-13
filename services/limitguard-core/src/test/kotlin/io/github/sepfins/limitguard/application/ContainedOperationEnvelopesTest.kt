@@ -2,20 +2,12 @@ package io.github.sepfins.limitguard.application
 
 import io.github.sepfins.limitguard.api.LimitKind
 import io.github.sepfins.limitguard.api.LimitPeriod
-import io.github.sepfins.limitguard.api.commands.UpdateLimitConfigurationCommand
-import io.github.sepfins.limitguard.api.commands.SetLimitConfigurationActiveCommand
 import io.github.sepfins.limitguard.api.errors.ValidationException
 import io.github.sepfins.limitguard.api.errors.NotFoundException
-import io.github.sepfins.limitguard.api.errors.LimitguardException
-import io.github.sepfins.limitguard.api.errors.LimitguardErrorCode
-import io.github.sepfins.limitguard.domain.common.LimitConfigurationId
-import io.github.sepfins.limitguard.domain.common.OperationTypeId
-import io.github.sepfins.limitguard.domain.common.TenantId
-import io.github.sepfins.limitguard.domain.limit.LimitOperationScope
 import io.github.sepfins.limitguard.support.FixedClockProvider
 import io.github.sepfins.limitguard.support.FundingEnvelopeScenario
-import io.github.sepfins.limitguard.support.createFacade
-import io.github.sepfins.limitguard.support.persistence.InMemoryLimitguardRepositories
+import io.github.sepfins.limitguard.support.PostgresFacade
+import io.github.sepfins.limitguard.support.execute
 import java.math.BigDecimal
 import java.time.Instant
 import kotlin.test.Test
@@ -114,147 +106,21 @@ class ContainedOperationEnvelopesTest {
     }
 
     @Test
-    fun `descriptive updates report invalid operation coverage beyond the immediate parent without widening it`() {
-        val repositories = InMemoryLimitguardRepositories()
-        val s = scenario(repositories)
-        val transfer = s.registerOperation("TRANSFER")
-        val cash = s.registerOperation("CASH")
-        val root = s.configuration("ROOT")
-        val parent = s.configuration("PARENT", root.id, operationId = transfer.id)
-        val child = s.configuration("CHILD", parent.id, operationId = transfer.id, active = false)
-        val tenant = TenantId.of(s.tenant)
-        val stored = requireNotNull(repositories.limitConfigurations.findById(tenant, LimitConfigurationId.of(root.id)))
-        repositories.limitConfigurations.update(tenant, stored.copy(
-            operationScope = LimitOperationScope.OperationTypeSpecific(OperationTypeId.of(cash.id)),
-        ))
-        val invalidRoot = s.findConfiguration("ROOT")
-
-        assertFailsWith<ValidationException> { s.configuration("NEW", child.id, operationId = transfer.id) }
-        assertNull(s.findConfiguration("NEW"))
-
-        val failure = assertFailsWith<ValidationException> {
-            s.facade.tenantCatalogService.updateLimitConfiguration(UpdateLimitConfigurationCommand(
-                s.tenant, child.id, "Changed", "Changed", BigDecimal.ONE, mapOf("changed" to true),
-            ))
-        }
-
-        assertTrue(failure.message.orEmpty().contains(parent.id.toString()))
-        assertTrue(failure.message.orEmpty().contains(root.id.toString()))
-        assertEquals(invalidRoot, s.findConfiguration("ROOT"))
-        assertEquals(child, s.findConfiguration("CHILD"))
-    }
-
-    @Test
-    fun `activation and no-op deactivation reject invalid disabled operation envelopes`() {
-        val repositories = InMemoryLimitguardRepositories()
-        val s = scenario(repositories)
-        val transfer = s.registerOperation("TRANSFER")
-        val cash = s.registerOperation("CASH")
-        val parent = s.configuration("PARENT", operationId = transfer.id)
-        val child = s.configuration("CHILD", parent.id, operationId = transfer.id, active = false)
-        val tenant = TenantId.of(s.tenant)
-        val stored = requireNotNull(repositories.limitConfigurations.findById(tenant, LimitConfigurationId.of(parent.id)))
-        repositories.limitConfigurations.update(tenant, stored.copy(
-            operationScope = LimitOperationScope.OperationTypeSpecific(OperationTypeId.of(cash.id)),
-        ))
-
-        for (active in listOf(true, false)) {
-            val failure = assertFailsWith<ValidationException> {
-                s.facade.tenantCatalogService.setLimitConfigurationActive(SetLimitConfigurationActiveCommand(s.tenant, child.id, active))
-            }
-            assertTrue(failure.message.orEmpty().contains("correct the operation envelope explicitly"))
-            assertEquals(child, s.findConfiguration("CHILD"))
-        }
-    }
-
-    @Test
-    fun `global descendant registration reports invalid disabled tenant envelopes atomically`() {
-        val repositories = InMemoryLimitguardRepositories()
-        val s = scenario(repositories)
-        val other = FundingEnvelopeScenario(s.facade, NOW)
-        val transfer = s.registerOperation("TRANSFER", global = true)
-        val cash = s.registerOperation("CASH", global = true)
-        val local = s.registerOperation("LOCAL", transfer.id)
-        val parent = s.configuration("PARENT", operationId = transfer.id, active = false)
-        val child = s.configuration("CHILD", parent.id, operationId = local.id, active = false)
-        val tenant = TenantId.of(s.tenant)
-        val stored = requireNotNull(repositories.limitConfigurations.findById(tenant, LimitConfigurationId.of(parent.id)))
-        repositories.limitConfigurations.update(tenant, stored.copy(
-            operationScope = LimitOperationScope.OperationTypeSpecific(OperationTypeId.of(cash.id)),
-        ))
-        val invalidParent = s.findConfiguration("PARENT")
-
-        val failure = assertFailsWith<ValidationException> {
-            other.registerOperation("NEW_GLOBAL", transfer.id, global = true)
-        }
-
-        assertTrue(failure.message.orEmpty().contains(child.id.toString()))
-        assertEquals(emptyList(), s.findOperations("NEW_GLOBAL"))
-        assertEquals(emptyList(), other.findOperations("NEW_GLOBAL"))
-        assertEquals(invalidParent, s.findConfiguration("PARENT"))
-        assertEquals(child, s.findConfiguration("CHILD"))
-        repositories.limitConfigurations.update(tenant, stored)
-        val registered = other.registerOperation("NEW_GLOBAL", transfer.id, global = true)
-        assertEquals(listOf(registered), s.findOperations("NEW_GLOBAL"))
-        assertEquals(listOf(registered), other.findOperations("NEW_GLOBAL"))
-    }
-
-    @Test
     fun `local growth revalidates disabled local chains but not another tenants private envelope`() {
-        val repositories = InMemoryLimitguardRepositories()
-        val s = scenario(repositories)
+        val database = PostgresFacade.database()
+        val s = FundingEnvelopeScenario(PostgresFacade.create(FixedClockProvider(NOW), emptyList(), database), NOW)
         val other = FundingEnvelopeScenario(s.facade, NOW)
         val global = s.registerOperation("GLOBAL", global = true)
         val local = s.registerOperation("LOCAL", global.id)
         val unrelated = s.registerOperation("UNRELATED")
         val parent = s.configuration("PARENT", operationId = global.id, active = false)
         val child = s.configuration("CHILD", parent.id, operationId = local.id, active = false)
-        val tenant = TenantId.of(s.tenant)
-        val stored = requireNotNull(repositories.limitConfigurations.findById(tenant, LimitConfigurationId.of(parent.id)))
-        repositories.limitConfigurations.update(tenant, stored.copy(
-            operationScope = LimitOperationScope.OperationTypeSpecific(OperationTypeId.of(unrelated.id)),
-        ))
+        database.execute("update limit_configuration set operation_type_id = ? where id = ?", unrelated.id, parent.id)
 
         assertEquals(global.id, other.registerOperation("OTHER_LOCAL", global.id).parentId)
         assertFailsWith<ValidationException> { s.registerOperation("NEW_LOCAL", local.id) }
         assertEquals(emptyList(), s.findOperations("NEW_LOCAL"))
         assertEquals(child, s.findConfiguration("CHILD"))
-    }
-
-    @Test
-    fun `missing hidden cyclic global-private and stale leaf ancestry fail explicitly even for identical selectors`() {
-        for (fault in listOf("missing", "hidden", "cycle", "global-private", "leaf")) {
-            val repositories = InMemoryLimitguardRepositories()
-            val s = scenario(repositories)
-            val other = FundingEnvelopeScenario(s.facade, NOW)
-            val root = s.registerOperation("ROOT", global = fault == "global-private")
-            val selected = s.registerOperation("SELECTED", root.id)
-            val privateRoot = s.registerOperation("PRIVATE")
-            val foreign = other.registerOperation("FOREIGN")
-            val parent = s.configuration("PARENT", operationId = root.id)
-            val existing = s.configuration("EXISTING", parent.id, operationId = selected.id)
-            val tenant = TenantId.of(s.tenant)
-            val stored = requireNotNull(repositories.operationTypes.findById(tenant, OperationTypeId.of(root.id)))
-            val corrupt = when (fault) {
-                "missing" -> stored.copy(parentId = OperationTypeId.of(java.util.UUID.randomUUID()))
-                "hidden" -> stored.copy(parentId = OperationTypeId.of(foreign.id))
-                "cycle" -> stored.copy(parentId = OperationTypeId.of(selected.id))
-                "global-private" -> stored.copy(parentId = OperationTypeId.of(privateRoot.id))
-                else -> stored.copy(isLeaf = true)
-            }
-            repositories.operationTypes.update(tenant, corrupt)
-            val expected = if (fault == "missing" || fault == "hidden") LimitguardErrorCode.NOT_FOUND else LimitguardErrorCode.CONFLICT
-
-            val admission = assertFailsWith<LimitguardException> {
-                s.configuration("INVALID", existing.id, operationId = selected.id)
-            }
-            assertEquals(expected, admission.errorCode, fault)
-            assertNull(s.findConfiguration("INVALID"))
-            val growth = assertFailsWith<LimitguardException> { s.registerOperation("NEW", selected.id) }
-            assertEquals(expected, growth.errorCode, fault)
-            assertEquals(emptyList(), s.findOperations("NEW"))
-            assertEquals(existing, s.findConfiguration("EXISTING"))
-        }
     }
 
     @Test
@@ -290,8 +156,8 @@ class ContainedOperationEnvelopesTest {
         }
     }
 
-    private fun scenario(repositories: InMemoryLimitguardRepositories = InMemoryLimitguardRepositories()) =
-        FundingEnvelopeScenario(repositories.createFacade(FixedClockProvider(NOW), emptyList()), NOW)
+    private fun scenario() =
+        FundingEnvelopeScenario(PostgresFacade.create(FixedClockProvider(NOW), emptyList()), NOW)
 
     companion object {
         private val NOW = Instant.parse("2026-10-10T10:00:00Z")

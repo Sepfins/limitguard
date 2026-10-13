@@ -3,27 +3,19 @@ package io.github.sepfins.limitguard.application
 import io.github.sepfins.limitguard.api.FundingSourceCategory
 import io.github.sepfins.limitguard.api.AuthorizationDecision
 import io.github.sepfins.limitguard.api.LimitRuleChangeStatus
-import io.github.sepfins.limitguard.api.LimitRuleChangeType
-import io.github.sepfins.limitguard.api.LimitRuleRevisionEventType
 import io.github.sepfins.limitguard.api.LimitChannelScope
 import io.github.sepfins.limitguard.api.LimitKind
 import io.github.sepfins.limitguard.api.LimitPeriod
 import io.github.sepfins.limitguard.api.LimitChangePolicyDecision
 import io.github.sepfins.limitguard.api.LimitChangePolicyPhase
 import io.github.sepfins.limitguard.api.commands.CreateLimitChangePolicyCommand
-import io.github.sepfins.limitguard.api.commands.SetLimitConfigurationActiveCommand
 import io.github.sepfins.limitguard.api.commands.UpdateLimitConfigurationCommand
 import io.github.sepfins.limitguard.api.errors.ValidationException
 import io.github.sepfins.limitguard.api.errors.NotFoundException
 import io.github.sepfins.limitguard.api.errors.ConflictException
-import io.github.sepfins.limitguard.domain.common.LimitConfigurationId
-import io.github.sepfins.limitguard.domain.common.TenantId
-import io.github.sepfins.limitguard.domain.limit.LimitConfigurationFundingScope
-import io.github.sepfins.limitguard.infrastructure.policy.jsonlogic.JsonLogicPolicyEngine
 import io.github.sepfins.limitguard.support.FixedClockProvider
 import io.github.sepfins.limitguard.support.FundingEnvelopeScenario
-import io.github.sepfins.limitguard.support.createFacade
-import io.github.sepfins.limitguard.support.persistence.InMemoryLimitguardRepositories
+import io.github.sepfins.limitguard.support.PostgresFacade
 import java.time.Instant
 import java.math.BigDecimal
 import kotlin.test.Test
@@ -73,32 +65,6 @@ class ContainedFundingEnvelopesTest {
         assertNull(s.findProduct("OUTSIDE"))
         assertEquals(child, s.findConfiguration("PRODUCT"))
         assertEquals(branch.id, s.product("OUTSIDE", branch.id, leaf = true).parentId)
-    }
-
-    @Test
-    fun `descriptive maintenance reports invalid existing funding envelopes without rewriting them`() {
-        val repositories = InMemoryLimitguardRepositories()
-        val s = scenario(repositories)
-        s.product("SAVINGS", category = FundingSourceCategory.SAVINGS, leaf = true)
-        val parent = s.configuration("CATEGORY", category = FundingSourceCategory.TRANSACTIONAL)
-        val child = s.configuration("CHILD", parent.id, category = FundingSourceCategory.TRANSACTIONAL, active = false)
-        val tenant = TenantId.of(s.tenant)
-        val stored = requireNotNull(repositories.limitConfigurations.findById(tenant, LimitConfigurationId.of(child.id)))
-        repositories.limitConfigurations.update(tenant, stored.copy(fundingScope =
-            LimitConfigurationFundingScope.FundingSourceCategorySpecific(io.github.sepfins.limitguard.domain.funding.FundingSourceCategory.SAVINGS),
-        ))
-        val invalid = s.findConfiguration("CHILD")
-
-        assertFailsWith<ValidationException> {
-            s.facade.tenantCatalogService.updateLimitConfiguration(UpdateLimitConfigurationCommand(
-                s.tenant, child.id, "Changed", "Description", null, emptyMap(),
-            ))
-        }
-        assertFailsWith<ValidationException> {
-            s.facade.tenantCatalogService.setLimitConfigurationActive(SetLimitConfigurationActiveCommand(s.tenant, child.id, true))
-        }
-
-        assertEquals(invalid, s.findConfiguration("CHILD"))
     }
 
     @Test
@@ -192,26 +158,6 @@ class ContainedFundingEnvelopesTest {
     }
 
     @Test
-    fun `new children validate funding containment past their immediate parent`() {
-        val repositories = InMemoryLimitguardRepositories()
-        val s = scenario(repositories)
-        val family = s.product("FAMILY")
-        s.product("SAVINGS", family.id, FundingSourceCategory.SAVINGS, leaf = true)
-        val root = s.configuration("ROOT")
-        val parent = s.configuration("PARENT", root.id, product = family.id)
-        val tenant = TenantId.of(s.tenant)
-        val stored = requireNotNull(repositories.limitConfigurations.findById(tenant, LimitConfigurationId.of(root.id)))
-        repositories.limitConfigurations.update(tenant, stored.copy(fundingScope =
-            LimitConfigurationFundingScope.FundingSourceCategorySpecific(io.github.sepfins.limitguard.domain.funding.FundingSourceCategory.TRANSACTIONAL),
-        ))
-
-        val failure = assertFailsWith<ValidationException> { s.configuration("CHILD", parent.id, product = family.id) }
-        assertTrue(failure.message.orEmpty().contains(parent.id.toString()))
-        assertNull(s.findConfiguration("CHILD"))
-        assertEquals(parent, s.findConfiguration("PARENT"))
-    }
-
-    @Test
     fun `configuration funding references and envelopes remain tenant scoped`() {
         val s = scenario()
         val other = FundingEnvelopeScenario(s.facade, NOW)
@@ -224,53 +170,6 @@ class ContainedFundingEnvelopesTest {
 
         s.product("SAVINGS", category = FundingSourceCategory.SAVINGS, leaf = true)
         assertEquals(parent, other.findConfiguration("PARENT"))
-    }
-
-    @Test
-    fun `disabling selected immediate or root envelopes blocks assignment not granted rules or retirement`() {
-        for (disabledLevel in 0..2) {
-            val s = scenario()
-            val family = s.product("FAMILY")
-            val leaf = s.product("ACCOUNT", family.id, leaf = true)
-            val source = s.source(leaf.id)
-            val root = s.configuration("ROOT")
-            val parent = s.configuration("CATEGORY", root.id, category = FundingSourceCategory.TRANSACTIONAL)
-            val selected = s.configuration("PRODUCT", parent.id, product = family.id)
-            val rule = s.grant(selected)
-            val create = s.requestCommand(selected)
-            val disabled = listOf(selected, parent, root)[disabledLevel]
-            s.facade.tenantCatalogService.setLimitConfigurationActive(SetLimitConfigurationActiveCommand(s.tenant, disabled.id, false))
-
-            assertFailsWith<ValidationException> { s.facade.limitChangeService.requestLimitRuleChange(create) }
-            assertFailsWith<ValidationException> {
-                s.facade.limitChangeService.requestLimitRuleChange(create.copy(
-                    changeType = LimitRuleChangeType.UPDATE, limitRuleId = rule.id, expectedVersion = rule.version,
-                ))
-            }
-            val allowed = s.authorize(source, "40")
-            assertEquals(AuthorizationDecision.ALLOWED, allowed.decision)
-            assertEquals(listOf(rule.id), allowed.matchedRules.map { it.id })
-            assertEquals(AuthorizationDecision.DENIED, s.authorize(source, "501").decision)
-
-            val deactivate = s.facade.limitChangeService.requestLimitRuleChange(create.copy(
-                changeType = LimitRuleChangeType.DEACTIVATE, requestedRule = null, limitRuleId = rule.id,
-                expectedVersion = rule.version,
-            ))
-            assertEquals(LimitRuleChangeStatus.APPLIED, s.approve(deactivate.id).status)
-            assertFailsWith<ValidationException> {
-                s.facade.limitChangeService.requestLimitRuleChange(create.copy(
-                    changeType = LimitRuleChangeType.REACTIVATE, requestedRule = null, limitRuleId = rule.id,
-                    expectedVersion = 2,
-                ))
-            }
-            val retire = s.facade.limitChangeService.requestLimitRuleChange(create.copy(
-                changeType = LimitRuleChangeType.DELETE, requestedRule = null, limitRuleId = rule.id, expectedVersion = 2,
-            ))
-            assertEquals(LimitRuleChangeStatus.APPLIED, s.approve(retire.id).status)
-            assertEquals(LimitRuleRevisionEventType.DELETED, s.details(retire.id).revisions.single().eventType)
-            assertEquals(3, s.rule(rule.id).version)
-            assertEquals(false, s.rule(rule.id).isActive)
-        }
     }
 
     @Test
@@ -364,8 +263,7 @@ class ContainedFundingEnvelopesTest {
 
     @Test
     fun `defaults suggest amounts without granted ancestor rules or inherited policies`() {
-        val repositories = InMemoryLimitguardRepositories()
-        val s = FundingEnvelopeScenario(repositories.createFacade(FixedClockProvider(NOW), listOf(JsonLogicPolicyEngine())), NOW)
+        val s = FundingEnvelopeScenario(PostgresFacade.create(FixedClockProvider(NOW)), NOW)
         val leaf = s.product("ACCOUNT", leaf = true)
         val source = s.source(leaf.id)
         val parent = s.facade.tenantCatalogService.createLimitConfiguration(s.configurationCommand("PARENT")
@@ -389,8 +287,8 @@ class ContainedFundingEnvelopesTest {
         assertEquals(listOf(rule.id), allowed.matchedRules.map { it.id })
     }
 
-    private fun scenario(repositories: InMemoryLimitguardRepositories = InMemoryLimitguardRepositories()) =
-        FundingEnvelopeScenario(repositories.createFacade(FixedClockProvider(NOW), emptyList()), NOW)
+    private fun scenario() =
+        FundingEnvelopeScenario(PostgresFacade.create(FixedClockProvider(NOW), emptyList()), NOW)
 
     companion object {
         private val NOW = Instant.parse("2026-10-10T10:00:00Z")

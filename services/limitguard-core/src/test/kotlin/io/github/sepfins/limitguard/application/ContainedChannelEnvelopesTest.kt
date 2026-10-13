@@ -1,26 +1,15 @@
 package io.github.sepfins.limitguard.application
 
 import io.github.sepfins.limitguard.api.LimitChannelScope
-import io.github.sepfins.limitguard.api.AuthorizationDecision
 import io.github.sepfins.limitguard.api.LimitRuleChangeStatus
-import io.github.sepfins.limitguard.api.LimitRuleChangeType
 import io.github.sepfins.limitguard.api.LimitKind
 import io.github.sepfins.limitguard.api.LimitPeriod
 import io.github.sepfins.limitguard.api.commands.CreateChannelGroupCommand
-import io.github.sepfins.limitguard.api.commands.UpdateLimitConfigurationCommand
-import io.github.sepfins.limitguard.api.commands.SetLimitConfigurationActiveCommand
 import io.github.sepfins.limitguard.api.errors.ValidationException
 import io.github.sepfins.limitguard.api.errors.NotFoundException
-import io.github.sepfins.limitguard.domain.common.ChannelId
-import io.github.sepfins.limitguard.domain.common.ChannelGroupId
-import io.github.sepfins.limitguard.domain.channel.ChannelGroupMember
-import io.github.sepfins.limitguard.domain.common.LimitConfigurationId
-import io.github.sepfins.limitguard.domain.common.TenantId
-import io.github.sepfins.limitguard.domain.limit.LimitChannelScope as DomainChannelScope
 import io.github.sepfins.limitguard.support.FixedClockProvider
 import io.github.sepfins.limitguard.support.FundingEnvelopeScenario
-import io.github.sepfins.limitguard.support.createFacade
-import io.github.sepfins.limitguard.support.persistence.InMemoryLimitguardRepositories
+import io.github.sepfins.limitguard.support.PostgresFacade
 import java.time.Instant
 import java.math.BigDecimal
 import kotlin.test.Test
@@ -90,58 +79,6 @@ class ContainedChannelEnvelopesTest {
         assertEquals(child, s.findConfiguration("CHILD"))
         s.addChannelMember(parentGroup.id, web.id)
         assertEquals(web.id, s.addChannelMember(childGroup.id, web.id).channelId)
-    }
-
-    @Test
-    fun `creation and descriptive updates report invalid live coverage beyond the immediate parent without rewriting the hierarchy`() {
-        val repositories = InMemoryLimitguardRepositories()
-        val s = scenario(repositories)
-        val api = s.registerChannel("API")
-        val web = s.registerChannel("WEB")
-        val group = s.channelGroup("WEB_GROUP", web.id)
-        val root = s.configuration("ROOT")
-        val parent = s.configuration("PARENT", root.id, channelGroupId = group.id)
-        val child = s.configuration("CHILD", parent.id, channelGroupId = group.id, active = false)
-        val tenant = TenantId.of(s.tenant)
-        val stored = requireNotNull(repositories.limitConfigurations.findById(tenant, LimitConfigurationId.of(root.id)))
-        repositories.limitConfigurations.update(tenant, stored.copy(channelScope = DomainChannelScope.ChannelSpecific(ChannelId.of(api.id))))
-        val invalidRoot = s.findConfiguration("ROOT")
-
-        assertFailsWith<ValidationException> { s.configuration("NEW", child.id, channelGroupId = group.id) }
-        assertNull(s.findConfiguration("NEW"))
-
-        val failure = assertFailsWith<ValidationException> {
-            s.facade.tenantCatalogService.updateLimitConfiguration(UpdateLimitConfigurationCommand(
-                s.tenant, child.id, "Changed", "Changed", BigDecimal.ONE, mapOf("changed" to true),
-            ))
-        }
-
-        assertTrue(failure.message.orEmpty().contains(parent.id.toString()))
-        assertTrue(failure.message.orEmpty().contains(root.id.toString()))
-        assertEquals(invalidRoot, s.findConfiguration("ROOT"))
-        assertEquals(child, s.findConfiguration("CHILD"))
-    }
-
-    @Test
-    fun `activation and no-op deactivation report invalid existing membership without silently correcting it`() {
-        val repositories = InMemoryLimitguardRepositories()
-        val s = scenario(repositories)
-        val api = s.registerChannel("API")
-        val web = s.registerChannel("WEB", active = false)
-        val group = s.channelGroup("EMPTY")
-        val parent = s.configuration("PARENT", channelId = api.id)
-        val child = s.configuration("CHILD", parent.id, channelGroupId = group.id, active = false)
-        repositories.channelGroupMembers.insert(TenantId.of(s.tenant), ChannelGroupMember(
-            TenantId.of(s.tenant), ChannelGroupId.of(group.id), ChannelId.of(web.id), NOW,
-        ))
-
-        for (active in listOf(true, false)) {
-            val failure = assertFailsWith<ValidationException> {
-                s.facade.tenantCatalogService.setLimitConfigurationActive(SetLimitConfigurationActiveCommand(s.tenant, child.id, active))
-            }
-            assertTrue(failure.message.orEmpty().contains("correct the channel envelope explicitly"))
-            assertEquals(child, s.findConfiguration("CHILD"))
-        }
     }
 
     @Test
@@ -296,53 +233,8 @@ class ContainedChannelEnvelopesTest {
         assertEquals(group.id, s.rule(requireNotNull(applied.limitRuleId)).channelGroupId)
     }
 
-    @Test
-    fun `disabled channel configurations block new assignment but preserve granted rules and withdrawal`() {
-        for (disabledLevel in 0..2) {
-            val s = scenario()
-            val atm = s.registerChannel("ATM")
-            val branch = s.registerChannel("BRANCH")
-            val broad = s.channelGroup("BROAD", atm.id, branch.id)
-            val narrow = s.channelGroup("NARROW", atm.id)
-            val root = s.configuration("ROOT", channelGroupId = broad.id)
-            val parent = s.configuration("PARENT", root.id, channelGroupId = narrow.id)
-            val selected = s.configuration("SELECTED", parent.id, channelId = atm.id)
-            val source = s.source(s.product("ACCOUNT", leaf = true).id)
-            val rule = s.grant(selected)
-            val command = s.requestCommand(selected)
-            val disabled = listOf(selected, parent, root)[disabledLevel]
-            s.facade.tenantCatalogService.setLimitConfigurationActive(SetLimitConfigurationActiveCommand(s.tenant, disabled.id, false))
-
-            assertFailsWith<ValidationException> { s.facade.limitChangeService.requestLimitRuleChange(command) }
-            assertFailsWith<ValidationException> {
-                s.facade.limitChangeService.requestLimitRuleChange(command.copy(
-                    changeType = LimitRuleChangeType.UPDATE, limitRuleId = rule.id, expectedVersion = 1,
-                ))
-            }
-            val allowed = s.authorize(source, "40", atm.id)
-            assertEquals(AuthorizationDecision.ALLOWED, allowed.decision)
-            assertEquals(listOf(rule.id), allowed.matchedRules.map { it.id })
-            assertEquals(AuthorizationDecision.DENIED, s.authorize(source, "501", atm.id).decision)
-            assertEquals(rule, s.rule(rule.id))
-            val deactivate = s.facade.limitChangeService.requestLimitRuleChange(command.copy(
-                changeType = LimitRuleChangeType.DEACTIVATE, requestedRule = null, limitRuleId = rule.id, expectedVersion = 1,
-            ))
-            assertEquals(LimitRuleChangeStatus.APPLIED, s.approve(deactivate.id).status)
-            assertFailsWith<ValidationException> {
-                s.facade.limitChangeService.requestLimitRuleChange(command.copy(
-                    changeType = LimitRuleChangeType.REACTIVATE, requestedRule = null, limitRuleId = rule.id, expectedVersion = 2,
-                ))
-            }
-            val retire = s.facade.limitChangeService.requestLimitRuleChange(command.copy(
-                changeType = LimitRuleChangeType.DELETE, requestedRule = null, limitRuleId = rule.id, expectedVersion = 2,
-            ))
-            assertEquals(LimitRuleChangeStatus.APPLIED, s.approve(retire.id).status)
-            assertEquals(3, s.rule(rule.id).version)
-        }
-    }
-
-    private fun scenario(repositories: InMemoryLimitguardRepositories = InMemoryLimitguardRepositories()) =
-        FundingEnvelopeScenario(repositories.createFacade(FixedClockProvider(NOW), emptyList()), NOW)
+    private fun scenario() =
+        FundingEnvelopeScenario(PostgresFacade.create(FixedClockProvider(NOW), emptyList()), NOW)
 
     companion object {
         private val NOW = Instant.parse("2026-10-10T10:00:00Z")

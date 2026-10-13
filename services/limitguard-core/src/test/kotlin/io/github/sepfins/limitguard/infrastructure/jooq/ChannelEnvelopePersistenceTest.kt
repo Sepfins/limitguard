@@ -13,7 +13,6 @@ import io.github.sepfins.limitguard.support.FixedClockProvider
 import io.github.sepfins.limitguard.support.FundingEnvelopeScenario
 import io.github.sepfins.limitguard.support.persistence.ObservedDataSource
 import org.flywaydb.core.Flyway
-import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Timeout
 import org.postgresql.ds.PGSimpleDataSource
@@ -36,7 +35,6 @@ import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-@Tag("database")
 @Testcontainers
 @Timeout(30)
 class ChannelEnvelopePersistenceTest {

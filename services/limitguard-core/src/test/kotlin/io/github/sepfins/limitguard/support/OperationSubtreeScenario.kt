@@ -31,9 +31,13 @@ import java.math.BigDecimal
 import java.time.Instant
 import java.util.UUID
 
-class OperationSubtreeScenario(val facade: Limitguard, val now: Instant) {
+class OperationSubtreeScenario(
+    val facade: Limitguard,
+    val now: Instant,
+    noMatchingRuleBehavior: NoMatchingRuleBehavior = NoMatchingRuleBehavior.ALLOW,
+) {
     val tenant = facade.tenantCatalogService.registerTenant(RegisterTenantCommand(
-        "Operation bank ${UUID.randomUUID()}", noMatchingRuleBehavior = NoMatchingRuleBehavior.ALLOW,
+        "Operation bank ${UUID.randomUUID()}", noMatchingRuleBehavior = noMatchingRuleBehavior,
     )).id
     val owner = profile("Owner")
     val channel = facade.tenantCatalogService.registerChannel(RegisterChannelCommand(tenant, "API", "API")).id

@@ -36,7 +36,6 @@ import io.github.sepfins.limitguard.infrastructure.jooq.repository.JooqLimitChan
 import io.github.sepfins.limitguard.support.FixedClockProvider
 import org.flywaydb.core.Flyway
 import org.junit.jupiter.api.BeforeAll
-import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import org.postgresql.ds.PGSimpleDataSource
 import org.testcontainers.junit.jupiter.Container
@@ -51,7 +50,6 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
-@Tag("database")
 @Testcontainers
 class ImmutableJsonPersistenceIntegrationTest {
     private val dataSource by lazy {

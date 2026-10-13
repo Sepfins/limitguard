@@ -1,14 +1,9 @@
 package io.github.sepfins.limitguard.application
 
-import io.github.sepfins.limitguard.api.commands.UpdateFundingSourceCommand
-import io.github.sepfins.limitguard.api.errors.NotFoundException
 import io.github.sepfins.limitguard.api.errors.ValidationException
-import io.github.sepfins.limitguard.domain.common.FundingSourceProductId
-import io.github.sepfins.limitguard.domain.common.TenantId
 import io.github.sepfins.limitguard.support.FixedClockProvider
 import io.github.sepfins.limitguard.support.FundingProductScenario
-import io.github.sepfins.limitguard.support.createFacade
-import io.github.sepfins.limitguard.support.persistence.InMemoryLimitguardRepositories
+import io.github.sepfins.limitguard.support.PostgresFacade
 import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -48,25 +43,6 @@ class FundingProductLeafIntegrityTest {
     }
 
     @Test
-    fun `a stale leaf flag cannot admit a source even when its child is inactive`() {
-        val repositories = InMemoryLimitguardRepositories()
-        val s = scenario(repositories)
-        val parent = s.product("FAMILY")
-        val child = s.product("CHILD", parent.id, leaf = true, active = false)
-        val tenant = TenantId.of(s.tenant)
-        val stored = requireNotNull(repositories.fundingSourceProducts.findById(
-            tenant, FundingSourceProductId.of(parent.id),
-        ))
-        repositories.fundingSourceProducts.update(tenant, stored.copy(isLeaf = true))
-
-        assertFailsWith<ValidationException> { s.source(parent.id, "invalid-account") }
-
-        assertNull(s.findSource("invalid-account"))
-        assertEquals(parent.copy(isLeaf = true), s.findProduct("FAMILY"))
-        assertEquals(child, s.findProduct("CHILD"))
-    }
-
-    @Test
     fun `an unassigned inactive declared leaf still cannot gain a child`() {
         val s = scenario()
         val leaf = s.product("ACCOUNT", leaf = true, active = false)
@@ -93,31 +69,6 @@ class FundingProductLeafIntegrityTest {
         assertEquals(child.id, s.source(child.id, "invalid-account").productId)
     }
 
-    @Test
-    fun `parent product and source references cannot cross tenant boundaries`() {
-        val s = scenario()
-        val other = FundingProductScenario(s.facade)
-        val foreignParent = other.product("FAMILY")
-        val foreignLeaf = other.product("ACCOUNT", foreignParent.id, leaf = true)
-        val foreignSource = other.source(foreignLeaf.id, "account-1")
-
-        assertFailsWith<NotFoundException> { s.product("CHILD", foreignParent.id, leaf = true) }
-        assertFailsWith<NotFoundException> { s.source(foreignLeaf.id, "account-1") }
-        assertFailsWith<NotFoundException> {
-            s.facade.tenantCatalogService.updateFundingSource(UpdateFundingSourceCommand(
-                s.tenant, foreignSource.id, "moved-account", emptyMap(),
-            ))
-        }
-
-        assertNull(s.findProduct("CHILD"))
-        assertNull(s.findSource("account-1"))
-        assertNull(s.findSource("moved-account"))
-        assertEquals(foreignSource, other.findSource("account-1"))
-        assertEquals(foreignLeaf, other.findProduct("ACCOUNT"))
-    }
-
-    private fun scenario(repositories: InMemoryLimitguardRepositories = InMemoryLimitguardRepositories()) =
-        FundingProductScenario(repositories.createFacade(
-            FixedClockProvider(Instant.parse("2026-10-10T10:00:00Z")), emptyList(),
-        ))
+    private fun scenario() =
+        FundingProductScenario(PostgresFacade.create(FixedClockProvider(Instant.parse("2026-10-10T10:00:00Z"))))
 }

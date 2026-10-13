@@ -10,8 +10,7 @@ import io.github.sepfins.limitguard.api.queries.ResolveEntityIdentifierQuery
 import io.github.sepfins.limitguard.api.errors.ValidationException
 import io.github.sepfins.limitguard.api.errors.ConflictException
 import io.github.sepfins.limitguard.support.FixedClockProvider
-import io.github.sepfins.limitguard.support.createFacade
-import io.github.sepfins.limitguard.support.persistence.InMemoryLimitguardRepositories
+import io.github.sepfins.limitguard.support.PostgresFacade
 import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -20,7 +19,7 @@ import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 
 class PrivatePartyProfileOnboardingTest {
-    private val facade = InMemoryLimitguardRepositories().createFacade(FixedClockProvider(NOW), emptyList())
+    private val facade = PostgresFacade.create(FixedClockProvider(NOW))
 
     @Test
     fun `ordinary onboarding returns only a tenant profile canonical handle and tenant identifiers`() {

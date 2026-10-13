@@ -155,19 +155,5 @@ tasks.named("compileJava") {
 }
 
 tasks.named<Test>("test") {
-    useJUnitPlatform {
-        excludeTags("database")
-    }
-}
-
-tasks.register<Test>("databaseTest") {
-    description = "Runs PostgreSQL-backed Flyway and jOOQ integration tests."
-    group = LifecycleBasePlugin.VERIFICATION_GROUP
-    testClassesDirs = sourceSets["test"].output.classesDirs
-    classpath = sourceSets["test"].runtimeClasspath
-    shouldRunAfter(tasks.test)
-
-    useJUnitPlatform {
-        includeTags("database")
-    }
+    useJUnitPlatform()
 }

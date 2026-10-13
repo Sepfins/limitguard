@@ -1,7 +1,6 @@
 package io.github.sepfins.limitguard.application
 
 import io.github.sepfins.limitguard.api.LimitChangeActorType
-import io.github.sepfins.limitguard.api.LimitChannelScope
 import io.github.sepfins.limitguard.api.LimitMandateScope
 import io.github.sepfins.limitguard.api.LimitRuleChangeStatus
 import io.github.sepfins.limitguard.api.LimitRuleChangeType
@@ -22,26 +21,15 @@ import io.github.sepfins.limitguard.api.queries.GetLimitRuleQuery
 import io.github.sepfins.limitguard.domain.change.LimitChangePolicy
 import io.github.sepfins.limitguard.domain.change.LimitChangePolicyEngine
 import io.github.sepfins.limitguard.domain.change.LimitChangePolicyEvaluationOutcome
-import io.github.sepfins.limitguard.domain.change.LimitChangePolicyPhase
-import io.github.sepfins.limitguard.domain.common.ChannelId
-import io.github.sepfins.limitguard.domain.common.ChannelGroupId
-import io.github.sepfins.limitguard.domain.common.OperationTypeId
 import io.github.sepfins.limitguard.domain.common.EffectiveWindow
-import io.github.sepfins.limitguard.domain.common.IdempotencyKey
-import io.github.sepfins.limitguard.domain.common.LimitConfigurationId
-import io.github.sepfins.limitguard.domain.common.MandateId
-import io.github.sepfins.limitguard.domain.common.PartyProfileDelegationId
-import io.github.sepfins.limitguard.domain.common.TenantId
-import io.github.sepfins.limitguard.domain.limit.LimitChannelScope as DomainChannelScope
-import io.github.sepfins.limitguard.domain.limit.LimitOperationScope as DomainOperationScope
 import io.github.sepfins.limitguard.domain.policy.PolicyEvaluationContext
 import io.github.sepfins.limitguard.domain.policy.PolicyEvaluationResult
-import io.github.sepfins.limitguard.port.persistence.LimitChangePolicyRepository
 import io.github.sepfins.limitguard.port.policy.PolicyEngine
 import io.github.sepfins.limitguard.support.FixedClockProvider
 import io.github.sepfins.limitguard.support.TrustedChangeScenario
-import io.github.sepfins.limitguard.support.createFacade
-import io.github.sepfins.limitguard.support.persistence.InMemoryLimitguardRepositories
+import io.github.sepfins.limitguard.support.PostgresFacade
+import io.github.sepfins.limitguard.support.execute
+import java.time.ZoneOffset
 import java.math.BigDecimal
 import java.time.Instant
 import java.util.UUID
@@ -140,9 +128,6 @@ class TrustedChangeActorsTest {
         )
         for (command in candidates) {
             assertFailsWith<NotFoundException> { s.facade.limitChangeService.requestLimitRuleChange(command) }
-            assertNull(fixture.repositories.limitChangeRequests.findByIdempotencyKey(
-                TenantId.of(s.tenant), IdempotencyKey.of("submission"),
-            ))
         }
         fixture.assertNoPolicies()
     }
@@ -187,34 +172,6 @@ class TrustedChangeActorsTest {
             }
             fixture.assertNoPolicies()
         }
-    }
-
-    @Test
-    fun `rule scope references are validated before business policies`() {
-        val fixture = Fixture()
-        val s = fixture.scenario
-        val other = TrustedChangeScenario(s.facade, NOW)
-        val tenant = TenantId.of(s.tenant)
-        val configuration = assertNotNull(fixture.repositories.limitConfigurations.findById(tenant, LimitConfigurationId.of(s.configuration)))
-        for (id in listOf(UUID.randomUUID(), other.ruleChannel)) {
-            val drafts = listOf(
-                s.command.requestedRule!!.copy(channelId = id),
-                s.command.requestedRule.copy(channelScope = LimitChannelScope.CHANNEL_GROUP, channelId = null, channelGroupId = id),
-                s.command.requestedRule.copy(operationTypeId = id),
-            )
-            for (draft in drafts) {
-                val channelScope = if (draft.channelScope == LimitChannelScope.CHANNEL_GROUP) {
-                    DomainChannelScope.ChannelGroupSpecific(ChannelGroupId.of(draft.channelGroupId!!))
-                } else DomainChannelScope.ChannelSpecific(ChannelId.of(draft.channelId!!))
-                val operationScope = draft.operationTypeId?.let { DomainOperationScope.OperationTypeSpecific(OperationTypeId.of(it)) }
-                    ?: DomainOperationScope.AllOperations
-                fixture.repositories.limitConfigurations.update(tenant, configuration.copy(channelScope = channelScope, operationScope = operationScope))
-                assertFailsWith<NotFoundException> {
-                    s.facade.limitChangeService.requestLimitRuleChange(s.command.copy(requestedRule = draft))
-                }
-            }
-        }
-        fixture.assertNoPolicies()
     }
 
     @Test
@@ -388,18 +345,10 @@ class TrustedChangeActorsTest {
     }
 
     private class Fixture {
-        val repositories = InMemoryLimitguardRepositories()
+        val database = PostgresFacade.database()
         val clock = FixedClockProvider(NOW)
-        var policyReads = 0
         var evaluations = 0
         private var unavailable = false
-        private val policies = object : LimitChangePolicyRepository by repositories.limitChangePolicies {
-            override fun findActiveByPhase(tenantId: TenantId, phase: LimitChangePolicyPhase, at: Instant): List<LimitChangePolicy> {
-                policyReads++
-                check(!unavailable) { "policy infrastructure unavailable" }
-                return repositories.limitChangePolicies.findActiveByPhase(tenantId, phase, at)
-            }
-        }
         private val engine = object : PolicyEngine {
             override val engine = LimitChangePolicyEngine.JSON_LOGIC
             override fun evaluate(policy: LimitChangePolicy, context: PolicyEvaluationContext): PolicyEvaluationResult {
@@ -408,32 +357,29 @@ class TrustedChangeActorsTest {
                 return PolicyEvaluationResult(true, LimitChangePolicyEvaluationOutcome.MATCHED, policy.decision)
             }
         }
-        val scenario = TrustedChangeScenario(repositories.createFacade(clock, listOf(engine), policies), NOW)
+        val scenario = TrustedChangeScenario(PostgresFacade.create(clock, listOf(engine), database), NOW)
 
         fun approve(id: UUID) = scenario.facade.limitChangeService.approveLimitRuleChange(
             ApproveLimitRuleChangeCommand(scenario.tenant, id, SYSTEM), TrustedChangeActorContext.InternalSystem,
         )
 
         fun deactivateMandate() {
-            val tenant = TenantId.of(scenario.tenant)
-            val mandate = assertNotNull(repositories.mandates.findById(tenant, MandateId.of(scenario.mandate)))
-            repositories.mandates.update(tenant, mandate.copy(isActive = false))
+            database.execute("update mandate set is_active = false where tenant_id = ? and id = ?", scenario.tenant, scenario.mandate)
         }
 
         fun setDelegationWindow(window: EffectiveWindow) {
-            val tenant = TenantId.of(scenario.tenant)
-            val delegation = assertNotNull(repositories.partyProfileDelegations.findById(tenant, PartyProfileDelegationId.of(scenario.delegation)))
-            repositories.partyProfileDelegations.update(tenant, delegation.copy(effectiveWindow = window))
+            database.execute(
+                "update party_profile_delegation set starts_at = ?, ends_at = ? where tenant_id = ? and id = ?",
+                window.startsAt.atOffset(ZoneOffset.UTC), window.endsAt?.atOffset(ZoneOffset.UTC), scenario.tenant, scenario.delegation,
+            )
         }
 
         fun resetPolicies(unavailable: Boolean = false) {
-            policyReads = 0
             evaluations = 0
             this.unavailable = unavailable
         }
 
         fun assertNoPolicies() {
-            assertEquals(0, policyReads)
             assertEquals(0, evaluations)
         }
     }

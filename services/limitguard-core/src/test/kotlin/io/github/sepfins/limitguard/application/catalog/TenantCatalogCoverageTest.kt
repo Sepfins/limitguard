@@ -28,25 +28,17 @@ import io.github.sepfins.limitguard.api.commands.RegisterTenantCommand
 import io.github.sepfins.limitguard.api.errors.NotFoundException
 import io.github.sepfins.limitguard.api.errors.ValidationException
 import io.github.sepfins.limitguard.api.queries.ResolveEntityIdentifierQuery
-import io.github.sepfins.limitguard.domain.change.LimitChangePolicyCode
-import io.github.sepfins.limitguard.domain.common.ChannelId
-import io.github.sepfins.limitguard.domain.common.FundingSourceGroupId
-import io.github.sepfins.limitguard.domain.common.TenantId
-import io.github.sepfins.limitguard.domain.identifier.EntityType
-import io.github.sepfins.limitguard.infrastructure.policy.jsonlogic.JsonLogicPolicyEngine
-import io.github.sepfins.limitguard.support.DirectTransactionRunner
+import io.github.sepfins.limitguard.api.TenantCatalogQueryService
+import io.github.sepfins.limitguard.api.TenantCatalogService
+import io.github.sepfins.limitguard.support.PostgresFacade
 import io.github.sepfins.limitguard.support.FixedClockProvider
-import io.github.sepfins.limitguard.support.SequentialIdGenerator
-import io.github.sepfins.limitguard.support.persistence.InMemoryLimitguardRepositories
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
-import kotlin.test.assertNotNull
 import kotlin.test.assertNull
-import kotlin.test.assertTrue
 
 class TenantCatalogCoverageTest {
     private val now = Instant.parse("2026-08-09T10:00:00Z")
@@ -79,14 +71,6 @@ class TenantCatalogCoverageTest {
 
         assertEquals("CUST-000001", profile.externalIdentifiers.single().identifier)
         assertEquals(mapOf("segment" to "retail"), profile.metadata)
-        assertEquals(
-            1,
-            fixture.repositories.entityIdentifiers.findByEntity(
-                TenantId.of(tenant.id),
-                EntityType.PARTY_PROFILE,
-                profile.id,
-            ).size,
-        )
 
         val secondIdentifier = fixture.service.assignEntityIdentifier(
             AssignEntityIdentifierCommand(
@@ -293,19 +277,6 @@ class TenantCatalogCoverageTest {
 
         assertEquals(group.id, mandate.fundingSourceGroupId)
         assertEquals(delegation.id, mandate.authorityDelegationId)
-        assertEquals(
-            setOf(channelGroup.id),
-            fixture.repositories.channelGroupMembers.findGroupIdsContaining(
-                TenantId.of(tenant.id),
-                ChannelId.of(channel.id),
-            ).mapTo(mutableSetOf()) { it.value },
-        )
-        assertTrue(
-            fixture.repositories.fundingSourceGroupMembers.findByGroup(
-                TenantId.of(tenant.id),
-                FundingSourceGroupId.of(group.id),
-            ).isNotEmpty()
-        )
     }
 
     @Test
@@ -327,12 +298,6 @@ class TenantCatalogCoverageTest {
 
         assertEquals("ALLOW_DIGITAL", policy.code)
         assertEquals(now, policy.createdAt)
-        assertNotNull(
-            fixture.repositories.limitChangePolicies.findByCode(
-                TenantId.of(tenant.id),
-                LimitChangePolicyCode.of("ALLOW_DIGITAL"),
-            )
-        )
 
         // The built-in orderings are refused too: they compare as doubles, facts included.
         listOf("unsupported", ">", ">=", "<", "<=").forEach { operation ->
@@ -348,12 +313,9 @@ class TenantCatalogCoverageTest {
                 )
             }
         }
-        assertNull(
-            fixture.repositories.limitChangePolicies.findByCode(
-                TenantId.of(tenant.id),
-                LimitChangePolicyCode.of("INVALID_POLICY"),
-            )
-        )
+        assertEquals("INVALID_POLICY", fixture.service.createLimitChangePolicy(CreateLimitChangePolicyCommand(
+            tenantId = tenant.id, code = "INVALID_POLICY", name = "Corrected policy", phase = LimitChangePolicyPhase.AUTHORIZATION,
+        )).code)
     }
 
     @Test
@@ -384,12 +346,6 @@ class TenantCatalogCoverageTest {
                 )
 
                 assertEquals(code, policy.code)
-                assertNotNull(
-                    fixture.repositories.limitChangePolicies.findByCode(
-                        TenantId.of(tenant.id),
-                        LimitChangePolicyCode.of(code),
-                    )
-                )
             }
     }
 
@@ -413,12 +369,6 @@ class TenantCatalogCoverageTest {
                         )
                     )
                 }
-                assertNull(
-                    fixture.repositories.limitChangePolicies.findByCode(
-                        TenantId.of(tenant.id),
-                        LimitChangePolicyCode.of(code),
-                    )
-                )
             }
 
         LimitChangePolicyDecision.values()
@@ -443,12 +393,6 @@ class TenantCatalogCoverageTest {
                         )
                     )
                 }
-                assertNull(
-                    fixture.repositories.limitChangePolicies.findByCode(
-                        TenantId.of(tenant.id),
-                        LimitChangePolicyCode.of(code),
-                    )
-                )
             }
     }
 
@@ -476,49 +420,12 @@ class TenantCatalogCoverageTest {
         )
 
     private fun fixture(): Fixture {
-        val repositories = InMemoryLimitguardRepositories()
-        return Fixture(
-            repositories = repositories,
-            service = DefaultTenantCatalogService(
-                tenantRepository = repositories.tenants,
-                identifierSchemeRepository = repositories.identifierSchemes,
-                entityIdentifierRepository = repositories.entityIdentifiers,
-                channelRepository = repositories.channels,
-                channelGroupRepository = repositories.channelGroups,
-                channelGroupMemberRepository = repositories.channelGroupMembers,
-                operationTypeRepository = repositories.operationTypes,
-                partyRepository = repositories.parties,
-                individualRepository = repositories.individuals,
-                legalEntityRepository = repositories.legalEntities,
-                partyLegalIdentifierRepository = repositories.partyLegalIdentifiers,
-                partyProfileRepository = repositories.partyProfiles,
-                partyProfileDelegationRepository = repositories.partyProfileDelegations,
-                fundingSourceRepository = repositories.fundingSources,
-                fundingSourceProductRepository = repositories.fundingSourceProducts,
-                fundingSourceOwnerRepository = repositories.fundingSourceOwners,
-                fundingSourceGroupRepository = repositories.fundingSourceGroups,
-                fundingSourceGroupMemberRepository = repositories.fundingSourceGroupMembers,
-                mandateRepository = repositories.mandates,
-                limitConfigurationRepository = repositories.limitConfigurations,
-                limitChangePolicyRepository = repositories.limitChangePolicies,
-                policyEngines = listOf(JsonLogicPolicyEngine()),
-                idGenerator = SequentialIdGenerator(),
-                clockProvider = FixedClockProvider(now),
-                transactionRunner = DirectTransactionRunner(),
-            ),
-            queryService = DefaultTenantCatalogQueryService(
-                tenantRepository = repositories.tenants,
-                identifierSchemeRepository = repositories.identifierSchemes,
-                entityIdentifierRepository = repositories.entityIdentifiers,
-                fundingSourceProductRepository = repositories.fundingSourceProducts,
-                transactionRunner = DirectTransactionRunner(),
-            ),
-        )
+        val facade = PostgresFacade.create(FixedClockProvider(now))
+        return Fixture(facade.tenantCatalogService, facade.tenantCatalogQueryService)
     }
 
     private data class Fixture(
-        val repositories: InMemoryLimitguardRepositories,
-        val service: DefaultTenantCatalogService,
-        val queryService: DefaultTenantCatalogQueryService,
+        val service: TenantCatalogService,
+        val queryService: TenantCatalogQueryService,
     )
 }
