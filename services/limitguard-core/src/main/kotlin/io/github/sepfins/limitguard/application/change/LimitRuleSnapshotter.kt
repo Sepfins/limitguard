@@ -1,5 +1,6 @@
 package io.github.sepfins.limitguard.application.change
 
+import io.github.sepfins.limitguard.application.boundedMoney
 import io.github.sepfins.limitguard.domain.common.ChannelGroupId
 import io.github.sepfins.limitguard.domain.common.ChannelId
 import io.github.sepfins.limitguard.domain.common.CurrencyCode
@@ -13,6 +14,7 @@ import io.github.sepfins.limitguard.domain.common.OperationTypeId
 import io.github.sepfins.limitguard.domain.common.PartyProfileId
 import io.github.sepfins.limitguard.domain.common.TenantId
 import io.github.sepfins.limitguard.domain.common.Version
+import io.github.sepfins.limitguard.domain.limit.LimitAmount
 import io.github.sepfins.limitguard.domain.limit.LimitChannelScope
 import io.github.sepfins.limitguard.domain.limit.LimitKind
 import io.github.sepfins.limitguard.domain.limit.LimitOperationScope
@@ -36,11 +38,12 @@ internal object LimitRuleSnapshotter {
                 "description" to rule.description,
                 "limitKind" to rule.limitKind.snapshotKind(),
                 "period" to rule.limitKind.snapshotPeriod(),
-                "amount" to rule.amount.amount.toString(),
+                "amount" to rule.amount.boundedMoney?.amount?.toString(),
+                "amountUnlimited" to (rule.amount is LimitAmount.Unlimited),
                 "currency" to rule.amount.currency.value,
                 "mandateScope" to rule.mandateScope.snapshotScope(),
                 "mandateId" to rule.mandateScope.snapshotMandateId(),
-                "configurationId" to rule.configurationId?.value?.toString(),
+                "configurationId" to rule.configurationId.value.toString(),
                 "channelScope" to rule.channelScope.snapshotScope(),
                 "channelId" to rule.channelScope.snapshotChannelId(),
                 "channelGroupId" to rule.channelScope.snapshotChannelGroupId(),
@@ -75,10 +78,13 @@ internal object LimitRuleSnapshotter {
                 )
                 else -> throw IllegalArgumentException("unsupported limitKind in rule snapshot")
             },
-            amount = Money.positive(
-                values.requiredString("amount"),
-                CurrencyCode.of(values.requiredString("currency")),
-            ),
+            amount = CurrencyCode.of(values.requiredString("currency")).let { currency ->
+                if (values.requiredBoolean("amountUnlimited")) {
+                    LimitAmount.Unlimited(currency)
+                } else {
+                    LimitAmount.Bounded(Money.positive(values.requiredString("amount"), currency))
+                }
+            },
             mandateScope = when (values.requiredString("mandateScope")) {
                 "ALL_OWNER_MANDATES" -> MandateScope.AllOwnerMandates
                 "MANDATE" -> MandateScope.MandateSpecific(
@@ -86,7 +92,7 @@ internal object LimitRuleSnapshotter {
                 )
                 else -> throw IllegalArgumentException("unsupported mandateScope in rule snapshot")
             },
-            configurationId = values.optionalString("configurationId")?.let { LimitConfigurationId.of(it) },
+            configurationId = LimitConfigurationId.of(values.requiredString("configurationId")),
             channelScope = when (values.requiredString("channelScope")) {
                 "ALL_CHANNELS" -> LimitChannelScope.AllChannels
                 "CHANNEL" -> LimitChannelScope.ChannelSpecific(

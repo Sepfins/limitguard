@@ -58,6 +58,7 @@ import io.github.sepfins.limitguard.application.configuration.ChannelConfigurati
 import io.github.sepfins.limitguard.application.configuration.FundingConfigurationEnvelopes
 import io.github.sepfins.limitguard.application.configuration.OperationConfigurationEnvelopes
 import io.github.sepfins.limitguard.application.operation.OperationTypeAncestry
+import io.github.sepfins.limitguard.application.toDomain
 import io.github.sepfins.limitguard.domain.channel.Channel
 import io.github.sepfins.limitguard.domain.channel.ChannelCode
 import io.github.sepfins.limitguard.domain.channel.ChannelGroup
@@ -122,6 +123,7 @@ import io.github.sepfins.limitguard.domain.limit.LimitConfigurationName
 import io.github.sepfins.limitguard.domain.limit.LimitOperationScope
 import io.github.sepfins.limitguard.domain.limit.LimitPeriod
 import io.github.sepfins.limitguard.domain.limit.LimitPriority
+import io.github.sepfins.limitguard.domain.limit.LimitUsageConsumptionMode
 import io.github.sepfins.limitguard.domain.mandate.Mandate
 import io.github.sepfins.limitguard.domain.mandate.MandateName
 import io.github.sepfins.limitguard.domain.operation.OperationType
@@ -837,9 +839,10 @@ class DefaultTenantCatalogService(
                         LimitOperationScope.OperationTypeSpecific(operationTypeId)
                     }
                     ?: LimitOperationScope.AllOperations,
-                maxAssignableAmount = Money.of(command.maxAssignableAmount, CurrencyCode.of(command.currency)),
+                maxAssignableAmount = command.maxAssignableAmount.toDomain(CurrencyCode.of(command.currency)),
                 defaultAmount = command.defaultAmount?.let { Money.of(it, CurrencyCode.of(command.currency)) },
                 priority = LimitPriority.of(command.priority),
+                usageConsumptionMode = LimitUsageConsumptionMode.valueOf(command.usageConsumptionMode.name),
                 isActive = command.isActive,
                 effectiveWindow = EffectiveWindow(command.startsAt ?: now, command.endsAt),
                 metadata = Metadata(command.metadata),
@@ -870,7 +873,7 @@ class DefaultTenantCatalogService(
                 name = LimitConfigurationName.of(command.name),
                 description = command.description,
                 defaultAmount = command.defaultAmount?.let {
-                    Money.of(it, configuration.maxAssignableAmount.currency)
+                    Money.of(it, configuration.currency)
                 },
                 metadata = Metadata(command.metadata),
                 updatedAt = clockProvider.now(),

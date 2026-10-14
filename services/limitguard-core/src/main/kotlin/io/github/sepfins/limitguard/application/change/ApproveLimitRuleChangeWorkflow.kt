@@ -128,12 +128,8 @@ internal class ApproveLimitRuleChangeWorkflow(
                 "active limit rule must not end before it is applied"
             }
         }
-        val configurationId = candidate.configurationId
-        if (request.changeType == LimitRuleChangeType.CREATE) {
-            requireNotNull(configurationId) { "approvedRule.configurationId is required" }
-        }
-        if (configurationId != null && request.changeType in CONFIGURATION_VALIDATED_CHANGE_TYPES) {
-            val hierarchy = limitConfigurationRepository.resolveHierarchy(request.tenantId, configurationId)
+        if (request.changeType in CONFIGURATION_VALIDATED_CHANGE_TYPES) {
+            val hierarchy = limitConfigurationRepository.resolveHierarchy(request.tenantId, candidate.configurationId)
             candidate.validateAgainst(hierarchy.first(), hierarchy.drop(1))
         }
     }

@@ -1,5 +1,6 @@
 package io.github.sepfins.limitguard.infrastructure.jooq
 
+import io.github.sepfins.limitguard.api.LimitAmount
 import io.github.sepfins.limitguard.api.TrustedChangeActorContext
 import io.github.sepfins.limitguard.api.FundingSourceCategory
 import io.github.sepfins.limitguard.api.LimitChangeActorType
@@ -273,7 +274,7 @@ class ChangeWorkflowLockingIntegrationTest {
         val command = fixture.create(savings, "Savings limit").copy(
             changeType = LimitRuleChangeType.UPDATE, limitRuleId = original.limitRuleId, expectedVersion = 1,
             idempotencyKey = "same-update", requestedRule = fixture.create(savings, "Savings limit").requestedRule!!
-                .copy(amount = BigDecimal("600")),
+                .copy(amount = LimitAmount.Bounded(BigDecimal("600"))),
         )
         val barrier = WorkflowWriteBarrier(dataSource)
         val secondAtRuleRead = CountDownLatch(1)
@@ -435,7 +436,7 @@ class ChangeWorkflowLockingIntegrationTest {
     private fun configuration(tenant: UUID, code: String, category: FundingSourceCategory): UUID =
         facade.tenantCatalogService.createLimitConfiguration(CreateLimitConfigurationCommand(
             tenantId = tenant, code = code, name = code, limitKind = LimitKind.PER_TRANSACTION,
-            currency = "EUR", maxAssignableAmount = BigDecimal("1000"),
+            currency = "EUR", maxAssignableAmount = LimitAmount.Bounded(BigDecimal("1000")),
             fundingScope = LimitConfigurationFundingScope.FUNDING_SOURCE_CATEGORY, fundingSourceCategory = category,
         )).id
 
@@ -443,8 +444,7 @@ class ChangeWorkflowLockingIntegrationTest {
         fun create(configuration: UUID, name: String) = RequestLimitRuleChangeCommand(
             tenantId = tenant, changeType = LimitRuleChangeType.CREATE, requestedBy = SYSTEM,
             targetOwnerPartyProfileId = owner,
-            requestedRule = LimitRuleDraft(name, LimitKind.PER_TRANSACTION, BigDecimal("500"), "EUR",
-                configurationId = configuration),
+            requestedRule = LimitRuleDraft(name, LimitKind.PER_TRANSACTION, LimitAmount.Bounded(BigDecimal("500")), "EUR", configuration),
         )
     }
 

@@ -1,5 +1,6 @@
 package io.github.sepfins.limitguard.domain.limit
 
+import io.github.sepfins.limitguard.domain.common.CurrencyCode
 import io.github.sepfins.limitguard.domain.common.LimitConfigurationId
 import io.github.sepfins.limitguard.domain.common.EffectiveWindow
 import io.github.sepfins.limitguard.domain.common.Metadata
@@ -18,9 +19,10 @@ data class LimitConfiguration(
     val fundingScope: LimitConfigurationFundingScope,
     val channelScope: LimitChannelScope,
     val operationScope: LimitOperationScope,
-    val maxAssignableAmount: Money,
+    val maxAssignableAmount: LimitAmount,
     val defaultAmount: Money?,
     val priority: LimitPriority,
+    val usageConsumptionMode: LimitUsageConsumptionMode,
     val isActive: Boolean,
     val effectiveWindow: EffectiveWindow,
     val metadata: Metadata = Metadata.EMPTY,
@@ -28,21 +30,16 @@ data class LimitConfiguration(
     val updatedAt: Instant? = null
 ) {
     init {
-        require(maxAssignableAmount.isPositive) {
-            "maxAssignableAmount must be positive"
+        require(limitKind is LimitKind.Periodic || usageConsumptionMode == LimitUsageConsumptionMode.CASCADING) {
+            "ISOLATED usage consumption is only valid for periodic configurations"
         }
-        if (defaultAmount != null) {
-            require(defaultAmount.isPositive) {
-                "defaultAmount must be positive"
-            }
-            require(defaultAmount.currency == maxAssignableAmount.currency) {
-                "defaultAmount currency must match maxAssignableAmount currency"
-            }
-            require(defaultAmount.amount <= maxAssignableAmount.amount) {
-                "defaultAmount must be less than or equal to maxAssignableAmount"
-            }
+        require(defaultAmount == null || LimitAmount.Bounded(defaultAmount).fitsWithin(maxAssignableAmount)) {
+            "defaultAmount must fit within maxAssignableAmount"
         }
     }
+
+    val currency: CurrencyCode
+        get() = maxAssignableAmount.currency
 
     fun isEffectiveAt(instant: Instant): Boolean =
         isActive && effectiveWindow.contains(instant)
@@ -66,14 +63,14 @@ data class LimitConfiguration(
         require(parent.limitKind == limitKind) {
             "child configuration limit kind must match parent limit kind"
         }
-        require(parent.maxAssignableAmount.currency == maxAssignableAmount.currency) {
+        require(parent.currency == currency) {
             "child configuration currency must match parent currency"
         }
-        require(maxAssignableAmount <= parent.maxAssignableAmount) {
-            "child configuration maxAssignableAmount must be less than or equal to parent maxAssignableAmount"
+        require(maxAssignableAmount.fitsWithin(parent.maxAssignableAmount)) {
+            "child configuration maxAssignableAmount must fit within parent maxAssignableAmount"
         }
-        require(defaultAmount == null || defaultAmount <= parent.maxAssignableAmount) {
-            "child configuration defaultAmount must be less than or equal to parent maxAssignableAmount"
+        require(defaultAmount == null || LimitAmount.Bounded(defaultAmount).fitsWithin(parent.maxAssignableAmount)) {
+            "child configuration defaultAmount must fit within parent maxAssignableAmount"
         }
         require(parent.effectiveWindow.contains(effectiveWindow)) {
             "child configuration effective window must be contained by parent effective window"

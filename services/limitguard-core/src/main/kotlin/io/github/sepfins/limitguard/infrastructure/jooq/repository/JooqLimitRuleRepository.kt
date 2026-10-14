@@ -7,7 +7,7 @@ import io.github.sepfins.limitguard.domain.common.EffectiveWindow
 import io.github.sepfins.limitguard.domain.common.LimitConfigurationId
 import io.github.sepfins.limitguard.domain.common.LimitRuleId
 import io.github.sepfins.limitguard.domain.common.MandateId
-import io.github.sepfins.limitguard.domain.common.Money
+import io.github.sepfins.limitguard.domain.limit.LimitAmount
 import io.github.sepfins.limitguard.domain.common.OperationTypeId
 import io.github.sepfins.limitguard.domain.common.PartyProfileId
 import io.github.sepfins.limitguard.domain.common.TenantId
@@ -23,6 +23,8 @@ import io.github.sepfins.limitguard.domain.limit.LimitUsageConsumptionMode
 import io.github.sepfins.limitguard.domain.mandate.MandateScope
 import io.github.sepfins.limitguard.infrastructure.jooq.JooqPersistenceContext
 import io.github.sepfins.limitguard.infrastructure.jooq.jooqOperation
+import io.github.sepfins.limitguard.infrastructure.jooq.storedAmount
+import io.github.sepfins.limitguard.infrastructure.jooq.storedLimitAmount
 import io.github.sepfins.limitguard.infrastructure.jooq.toJsonb
 import io.github.sepfins.limitguard.infrastructure.jooq.toMetadata
 import io.github.sepfins.limitguard.infrastructure.jooq.generated.enums.LimitChannelScope as GeneratedLimitChannelScope
@@ -88,11 +90,12 @@ class JooqLimitRuleRepository(
                 .set(table.DESCRIPTION, limitRule.description)
                 .set(table.LIMIT_KIND, limitRule.limitKind.toGenerated())
                 .set(table.PERIOD, limitRule.limitKind.period()?.toGenerated())
-                .set(table.AMOUNT, limitRule.amount.amount)
+                .set(table.AMOUNT, limitRule.amount.storedAmount)
+                .set(table.AMOUNT_UNLIMITED, limitRule.amount is LimitAmount.Unlimited)
                 .set(table.CURRENCY, limitRule.amount.currency.value)
                 .set(table.MANDATE_SCOPE, limitRule.mandateScope.toGenerated())
                 .set(table.MANDATE_ID, limitRule.mandateId())
-                .set(table.CONFIGURATION_ID, limitRule.configurationId?.value)
+                .set(table.CONFIGURATION_ID, limitRule.configurationId.value)
                 .set(table.CHANNEL_SCOPE, limitRule.channelScope.toGenerated())
                 .set(table.CHANNEL_ID, limitRule.channelId())
                 .set(table.CHANNEL_GROUP_ID, limitRule.channelGroupId())
@@ -122,11 +125,12 @@ class JooqLimitRuleRepository(
             .set(table.DESCRIPTION, limitRule.description)
             .set(table.LIMIT_KIND, limitRule.limitKind.toGenerated())
             .set(table.PERIOD, limitRule.limitKind.period()?.toGenerated())
-            .set(table.AMOUNT, limitRule.amount.amount)
+            .set(table.AMOUNT, limitRule.amount.storedAmount)
+            .set(table.AMOUNT_UNLIMITED, limitRule.amount is LimitAmount.Unlimited)
             .set(table.CURRENCY, limitRule.amount.currency.value)
             .set(table.MANDATE_SCOPE, limitRule.mandateScope.toGenerated())
             .set(table.MANDATE_ID, limitRule.mandateId())
-            .set(table.CONFIGURATION_ID, limitRule.configurationId?.value)
+            .set(table.CONFIGURATION_ID, limitRule.configurationId.value)
             .set(table.CHANNEL_SCOPE, limitRule.channelScope.toGenerated())
             .set(table.CHANNEL_ID, limitRule.channelId())
             .set(table.CHANNEL_GROUP_ID, limitRule.channelGroupId())
@@ -196,9 +200,9 @@ class JooqLimitRuleRepository(
             name = LimitRuleName.of(requireNotNull(get(table.NAME))),
             description = get(table.DESCRIPTION),
             limitKind = limitKind,
-            amount = Money.positive(requireNotNull(get(table.AMOUNT)), currency),
+            amount = storedLimitAmount(get(table.AMOUNT), requireNotNull(get(table.AMOUNT_UNLIMITED)), currency),
             mandateScope = mandateScope,
-            configurationId = get(table.CONFIGURATION_ID)?.let(LimitConfigurationId::of),
+            configurationId = LimitConfigurationId.of(requireNotNull(get(table.CONFIGURATION_ID))),
             channelScope = channelScope,
             operationScope = operationScope,
             usageConsumptionMode = LimitUsageConsumptionMode.valueOf(

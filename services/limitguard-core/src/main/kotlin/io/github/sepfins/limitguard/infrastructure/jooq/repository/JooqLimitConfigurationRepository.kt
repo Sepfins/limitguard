@@ -8,6 +8,8 @@ import io.github.sepfins.limitguard.domain.common.EffectiveWindow
 import io.github.sepfins.limitguard.domain.common.FundingSourceProductId
 import io.github.sepfins.limitguard.domain.common.LimitConfigurationId
 import io.github.sepfins.limitguard.domain.common.Money
+import io.github.sepfins.limitguard.domain.limit.LimitAmount
+import io.github.sepfins.limitguard.domain.limit.LimitUsageConsumptionMode
 import io.github.sepfins.limitguard.domain.common.OperationTypeId
 import io.github.sepfins.limitguard.domain.common.TenantId
 import io.github.sepfins.limitguard.domain.funding.FundingSourceCategory
@@ -22,6 +24,8 @@ import io.github.sepfins.limitguard.domain.limit.LimitPeriod
 import io.github.sepfins.limitguard.domain.limit.LimitPriority
 import io.github.sepfins.limitguard.infrastructure.jooq.JooqPersistenceContext
 import io.github.sepfins.limitguard.infrastructure.jooq.jooqOperation
+import io.github.sepfins.limitguard.infrastructure.jooq.storedAmount
+import io.github.sepfins.limitguard.infrastructure.jooq.storedLimitAmount
 import io.github.sepfins.limitguard.infrastructure.jooq.toJsonb
 import io.github.sepfins.limitguard.infrastructure.jooq.toMetadata
 import io.github.sepfins.limitguard.infrastructure.jooq.generated.enums.FundingSourceCategory as GeneratedFundingSourceCategory
@@ -29,6 +33,7 @@ import io.github.sepfins.limitguard.infrastructure.jooq.generated.enums.LimitCha
 import io.github.sepfins.limitguard.infrastructure.jooq.generated.enums.LimitConfigurationFundingScope as GeneratedLimitConfigurationFundingScope
 import io.github.sepfins.limitguard.infrastructure.jooq.generated.enums.LimitKind as GeneratedLimitKind
 import io.github.sepfins.limitguard.infrastructure.jooq.generated.enums.LimitPeriod as GeneratedLimitPeriod
+import io.github.sepfins.limitguard.infrastructure.jooq.generated.enums.LimitUsageConsumptionMode as GeneratedLimitUsageConsumptionMode
 import io.github.sepfins.limitguard.infrastructure.jooq.generated.tables.LimitConfiguration as GeneratedLimitConfigurationTable
 import io.github.sepfins.limitguard.port.persistence.LimitConfigurationRepository
 import org.jooq.Condition
@@ -163,7 +168,7 @@ class JooqLimitConfigurationRepository(
             .set(table.DESCRIPTION, limitConfiguration.description)
             .set(table.LIMIT_KIND, limitConfiguration.limitKind.toGenerated())
             .set(table.PERIOD, limitConfiguration.limitKind.period()?.toGenerated())
-            .set(table.CURRENCY, limitConfiguration.maxAssignableAmount.currency.value)
+            .set(table.CURRENCY, limitConfiguration.currency.value)
             .set(table.FUNDING_SCOPE, limitConfiguration.fundingScope.toGenerated())
             .set(table.FUNDING_SOURCE_CATEGORY, limitConfiguration.fundingScope.category()?.toGenerated())
             .set(table.FUNDING_SOURCE_PRODUCT_ID, limitConfiguration.fundingScope.productId())
@@ -171,9 +176,11 @@ class JooqLimitConfigurationRepository(
             .set(table.CHANNEL_ID, limitConfiguration.channelScope.channelId())
             .set(table.CHANNEL_GROUP_ID, limitConfiguration.channelScope.channelGroupId())
             .set(table.OPERATION_TYPE_ID, limitConfiguration.operationScope.operationTypeId())
-            .set(table.MAX_ASSIGNABLE_AMOUNT, limitConfiguration.maxAssignableAmount.amount)
+            .set(table.MAX_ASSIGNABLE_AMOUNT, limitConfiguration.maxAssignableAmount.storedAmount)
+            .set(table.MAX_ASSIGNABLE_UNLIMITED, limitConfiguration.maxAssignableAmount is LimitAmount.Unlimited)
             .set(table.DEFAULT_AMOUNT, limitConfiguration.defaultAmount?.amount)
             .set(table.PRIORITY, limitConfiguration.priority.value)
+            .set(table.USAGE_CONSUMPTION_MODE, GeneratedLimitUsageConsumptionMode.valueOf(limitConfiguration.usageConsumptionMode.name))
             .set(table.IS_ACTIVE, limitConfiguration.isActive)
             .set(table.STARTS_AT, limitConfiguration.effectiveWindow.startsAt.toOffsetDateTime())
             .set(table.ENDS_AT, limitConfiguration.effectiveWindow.endsAt?.toOffsetDateTime())
@@ -198,7 +205,7 @@ class JooqLimitConfigurationRepository(
             .set(table.DESCRIPTION, limitConfiguration.description)
             .set(table.LIMIT_KIND, limitConfiguration.limitKind.toGenerated())
             .set(table.PERIOD, limitConfiguration.limitKind.period()?.toGenerated())
-            .set(table.CURRENCY, limitConfiguration.maxAssignableAmount.currency.value)
+            .set(table.CURRENCY, limitConfiguration.currency.value)
             .set(table.FUNDING_SCOPE, limitConfiguration.fundingScope.toGenerated())
             .set(table.FUNDING_SOURCE_CATEGORY, limitConfiguration.fundingScope.category()?.toGenerated())
             .set(table.FUNDING_SOURCE_PRODUCT_ID, limitConfiguration.fundingScope.productId())
@@ -206,9 +213,11 @@ class JooqLimitConfigurationRepository(
             .set(table.CHANNEL_ID, limitConfiguration.channelScope.channelId())
             .set(table.CHANNEL_GROUP_ID, limitConfiguration.channelScope.channelGroupId())
             .set(table.OPERATION_TYPE_ID, limitConfiguration.operationScope.operationTypeId())
-            .set(table.MAX_ASSIGNABLE_AMOUNT, limitConfiguration.maxAssignableAmount.amount)
+            .set(table.MAX_ASSIGNABLE_AMOUNT, limitConfiguration.maxAssignableAmount.storedAmount)
+            .set(table.MAX_ASSIGNABLE_UNLIMITED, limitConfiguration.maxAssignableAmount is LimitAmount.Unlimited)
             .set(table.DEFAULT_AMOUNT, limitConfiguration.defaultAmount?.amount)
             .set(table.PRIORITY, limitConfiguration.priority.value)
+            .set(table.USAGE_CONSUMPTION_MODE, GeneratedLimitUsageConsumptionMode.valueOf(limitConfiguration.usageConsumptionMode.name))
             .set(table.IS_ACTIVE, limitConfiguration.isActive)
             .set(table.STARTS_AT, limitConfiguration.effectiveWindow.startsAt.toOffsetDateTime())
             .set(table.ENDS_AT, limitConfiguration.effectiveWindow.endsAt?.toOffsetDateTime())
@@ -308,9 +317,12 @@ class JooqLimitConfigurationRepository(
             fundingScope = fundingScope,
             channelScope = channelScope,
             operationScope = operationScope,
-            maxAssignableAmount = Money.positive(requireNotNull(get(table.MAX_ASSIGNABLE_AMOUNT)), currency),
+            maxAssignableAmount = storedLimitAmount(
+                get(table.MAX_ASSIGNABLE_AMOUNT), requireNotNull(get(table.MAX_ASSIGNABLE_UNLIMITED)), currency,
+            ),
             defaultAmount = get(table.DEFAULT_AMOUNT)?.let { Money.positive(it, currency) },
             priority = LimitPriority.of(requireNotNull(get(table.PRIORITY))),
+            usageConsumptionMode = LimitUsageConsumptionMode.valueOf(requireNotNull(get(table.USAGE_CONSUMPTION_MODE)).name),
             isActive = requireNotNull(get(table.IS_ACTIVE)),
             effectiveWindow = EffectiveWindow(
                 startsAt = requireNotNull(get(table.STARTS_AT)).toInstant(),

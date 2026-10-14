@@ -1,5 +1,7 @@
 package io.github.sepfins.limitguard.application.evaluation
 
+import io.github.sepfins.limitguard.application.cap
+import io.github.sepfins.limitguard.application.isBounded
 import io.github.sepfins.limitguard.application.usage.UsageReservationPlan
 import io.github.sepfins.limitguard.application.usage.UsageReservationService
 import io.github.sepfins.limitguard.domain.common.Money
@@ -85,7 +87,9 @@ internal class AuthorizationEvaluator(
         }
 
         val evaluatedRules = ApplicableLimitRuleSelector.select(matchedRules)
-        val currencyViolations = evaluatedRules
+        // Unlimited rules are reported as matched but never deny and reserve no usage.
+        val boundedRules = evaluatedRules.filter { it.isBounded }
+        val currencyViolations = boundedRules
             .filter { it.amount.currency != transaction.authorizedAmount.currency }
             .map { it.currencyMismatchViolation(transaction.authorizedAmount) }
 
@@ -93,9 +97,9 @@ internal class AuthorizationEvaluator(
             return denied(evaluatedRules, currencyViolations)
         }
 
-        val perTransactionViolations = evaluatedRules
+        val perTransactionViolations = boundedRules
             .filter { it.limitKind == LimitKind.PerTransaction }
-            .filter { transaction.authorizedAmount > it.amount }
+            .filter { transaction.authorizedAmount > it.cap }
             .map { it.perTransactionViolation(transaction.authorizedAmount) }
 
         if (perTransactionViolations.isNotEmpty()) {
@@ -104,7 +108,7 @@ internal class AuthorizationEvaluator(
 
         val reservationPlan = usageReservationService.planAuthorizationReservation(
             transaction = transaction,
-            periodicRules = evaluatedRules.filter { it.limitKind is LimitKind.Periodic },
+            periodicRules = boundedRules.filter { it.limitKind is LimitKind.Periodic },
             now = now,
         )
         val decision = decision(evaluatedRules, reservationPlan.violations)
@@ -156,9 +160,9 @@ internal class AuthorizationEvaluator(
         LimitViolation(
             code = "PER_TRANSACTION_LIMIT_EXCEEDED",
             message = "Attempted amount ${attemptedAmount.amount} ${attemptedAmount.currency.value} " +
-                "exceeds per-transaction limit ${amount.amount} ${amount.currency.value}",
+                "exceeds per-transaction limit ${cap.amount} ${cap.currency.value}",
             limitRuleId = id,
-            limitAmount = amount,
+            limitAmount = cap,
             attemptedAmount = attemptedAmount,
             remainingAmount = null,
         )

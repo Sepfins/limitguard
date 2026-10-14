@@ -1,5 +1,6 @@
 package io.github.sepfins.limitguard.demo.application
 
+import io.github.sepfins.limitguard.api.LimitAmount
 import io.github.sepfins.limitguard.api.LimitChangeActorType
 import io.github.sepfins.limitguard.api.LimitRuleChangeStatus
 import io.github.sepfins.limitguard.api.LimitRuleChangeType
@@ -50,7 +51,7 @@ class LimitManagementService(
             GetLimitRuleQuery(tenantId, setting.limitRuleId),
         )
         val currentLimit = customerBankingService.limit(settingId)
-        if (amount.compareTo(currentRule.amount) == 0) {
+        if ((currentRule.amount as? LimitAmount.Bounded)?.value?.compareTo(amount) == 0) {
             return LimitUpdateResponse(
                 status = LimitRuleChangeStatus.APPLIED,
                 message = "This limit is already active",
@@ -78,7 +79,7 @@ class LimitManagementService(
                     description = currentRule.description,
                     limitKind = currentRule.limitKind,
                     period = currentRule.period,
-                    amount = amount,
+                    amount = LimitAmount.Bounded(amount),
                     currency = currentRule.currency,
                     mandateScope = currentRule.mandateScope,
                     mandateId = currentRule.mandateId,

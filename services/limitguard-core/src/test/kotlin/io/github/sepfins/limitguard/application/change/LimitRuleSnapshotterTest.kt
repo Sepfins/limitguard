@@ -1,5 +1,7 @@
 package io.github.sepfins.limitguard.application.change
 
+import io.github.sepfins.limitguard.api.LimitAmount as ApiLimitAmount
+import io.github.sepfins.limitguard.domain.limit.LimitAmount
 import io.github.sepfins.limitguard.api.commands.LimitRuleDraft
 import io.github.sepfins.limitguard.domain.change.ChangeActor
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeRequest
@@ -41,7 +43,7 @@ class LimitRuleSnapshotterTest {
         val rule = LimitRuleSnapshotter.restoreRule(snapshot, createdAt = now, updatedAt = now)
 
         assertEquals("Daily transfer limit", rule.name.value)
-        assertEquals(Money.positive("500", CurrencyCode.of("EUR")), rule.amount)
+        assertEquals(LimitAmount.Bounded(Money.positive("500", CurrencyCode.of("EUR"))), rule.amount)
         assertEquals(now, rule.createdAt)
         assertEquals(now, rule.updatedAt)
         assertEquals(snapshot, LimitRuleSnapshotter.ruleSnapshot(rule))
@@ -62,7 +64,6 @@ class LimitRuleSnapshotterTest {
             for (kind in listOf(original.limitKind, LimitKind.PerTransaction)) {
                 val rule = original.copy(
                     description = null,
-                    configurationId = null,
                     mandateScope = MandateScope.AllOwnerMandates,
                     operationScope = LimitOperationScope.AllOperations,
                     channelScope = channel,
@@ -100,7 +101,7 @@ class LimitRuleSnapshotterTest {
         val rule = LimitRuleSnapshotter.restoreRule(storedSnapshot())
         val draft = draft().copy(
             name = " Daily transfer limit ",
-            amount = BigDecimal("500.00000"),
+            amount = ApiLimitAmount.Bounded(BigDecimal("500.00000")),
             metadata = rule.metadata.value + ("attempts" to BigDecimal("1.00")),
         )
 
@@ -109,7 +110,7 @@ class LimitRuleSnapshotterTest {
         assertTrue(draft.copy(startsAt = rule.effectiveWindow.startsAt).matches(rule))
         assertFalse(draft.copy(configurationId = UUID(0, 99)).matches(rule))
         assertFalse(draft.copy(startsAt = now).matches(rule))
-        assertFalse(draft.copy(amount = BigDecimal("501")).matches(rule))
+        assertFalse(draft.copy(amount = ApiLimitAmount.Bounded(BigDecimal("501"))).matches(rule))
         assertFalse(draft.copy(metadata = mapOf("attempts" to 2)).matches(rule))
         assertFalse(draft.copy(operationTypeId = null).matches(rule))
         assertFalse(draft.copy(endsAt = null).matches(rule))
@@ -139,7 +140,7 @@ class LimitRuleSnapshotterTest {
             snapshot.value + ("amount" to "400.0000"), result.request.requestedRule.value,
         ))
         assertEquals("500.0000", snapshot.value["amount"])
-        assertEquals(cap, LimitRuleSnapshotter.restoreRule(result.request.requestedRule).amount)
+        assertEquals(LimitAmount.Bounded(cap), LimitRuleSnapshotter.restoreRule(result.request.requestedRule).amount)
         assertEquals(true, result.results.single()["changed"])
         assertEquals(request.targetScopeHash, result.request.targetScopeHash)
     }
@@ -153,8 +154,9 @@ class LimitRuleSnapshotterTest {
         description = "Daily transfer cap",
         limitKind = io.github.sepfins.limitguard.api.LimitKind.PERIODIC,
         period = io.github.sepfins.limitguard.api.LimitPeriod.DAILY,
-        amount = BigDecimal("500"),
+        amount = ApiLimitAmount.Bounded(BigDecimal("500")),
         currency = "EUR",
+        configurationId = UUID(0, 5),
         mandateScope = io.github.sepfins.limitguard.api.LimitMandateScope.MANDATE,
         mandateId = UUID(0, 4),
         channelScope = io.github.sepfins.limitguard.api.LimitChannelScope.CHANNEL_GROUP,

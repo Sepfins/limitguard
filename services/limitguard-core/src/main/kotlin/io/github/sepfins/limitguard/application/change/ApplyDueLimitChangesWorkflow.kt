@@ -104,9 +104,8 @@ internal class ApplyDueLimitChangesWorkflow(
             createdAt = currentRule?.createdAt ?: request.createdAt,
             updatedAt = dueAt,
         )
-        if (candidate.isActive && candidate.configurationId != null) {
-            val configurationId = candidate.configurationId
-            val hierarchy = limitConfigurationRepository.resolveHierarchy(request.tenantId, configurationId)
+        if (candidate.isActive) {
+            val hierarchy = limitConfigurationRepository.resolveHierarchy(request.tenantId, candidate.configurationId)
             candidate.validateAgainst(hierarchy.first(), hierarchy.drop(1))
         }
         mandateValidator.validate(candidate, dueAt)

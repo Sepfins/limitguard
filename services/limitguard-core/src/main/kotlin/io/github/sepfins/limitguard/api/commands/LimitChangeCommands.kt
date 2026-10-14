@@ -2,12 +2,12 @@ package io.github.sepfins.limitguard.api.commands
 
 import io.github.sepfins.limitguard.api.LimitChangeActorType
 import io.github.sepfins.limitguard.api.LimitChannelScope
+import io.github.sepfins.limitguard.api.LimitAmount
 import io.github.sepfins.limitguard.api.LimitKind
 import io.github.sepfins.limitguard.api.LimitMandateScope
 import io.github.sepfins.limitguard.api.LimitPeriod
 import io.github.sepfins.limitguard.api.LimitRuleChangeType
 import io.github.sepfins.limitguard.api.LimitUsageConsumptionMode
-import java.math.BigDecimal
 import java.time.Instant
 import java.util.UUID
 
@@ -38,13 +38,13 @@ data class LimitChangeActorCommand(
 data class LimitRuleDraft(
     val name: String,
     val limitKind: LimitKind,
-    val amount: BigDecimal,
+    val amount: LimitAmount,
     val currency: String,
+    val configurationId: UUID,
     val description: String? = null,
     val period: LimitPeriod? = null,
     val mandateScope: LimitMandateScope = LimitMandateScope.ALL_OWNER_MANDATES,
     val mandateId: UUID? = null,
-    val configurationId: UUID? = null,
     val channelScope: LimitChannelScope = LimitChannelScope.ALL_CHANNELS,
     val channelId: UUID? = null,
     val channelGroupId: UUID? = null,

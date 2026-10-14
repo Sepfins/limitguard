@@ -1,6 +1,7 @@
 package io.github.sepfins.limitguard.application.evaluation
 
 import io.github.sepfins.limitguard.api.AuthorizationDecision
+import io.github.sepfins.limitguard.application.toApi
 import io.github.sepfins.limitguard.api.LimitKind
 import io.github.sepfins.limitguard.api.LimitPeriod
 import io.github.sepfins.limitguard.api.results.AuthorizationResult
@@ -38,7 +39,7 @@ private fun MatchedLimitRule.toResult(): MatchedLimitRuleResult {
         name = name.value,
         limitKind = apiKind,
         period = apiPeriod,
-        amount = amount.amount,
+        amount = amount.toApi(),
         currency = amount.currency.value,
         priority = priority.value,
     )

@@ -1,6 +1,8 @@
 package io.github.sepfins.limitguard.application.change
 
+import io.github.sepfins.limitguard.application.boundedMoney
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeRequest
+import io.github.sepfins.limitguard.domain.limit.LimitAmount
 import io.github.sepfins.limitguard.domain.policy.PolicyAction
 import java.time.Instant
 
@@ -62,8 +64,9 @@ internal class LimitChangePolicyActionExecutor {
         require(action.maximumAmount.currency == currency) {
             "CAP_REQUESTED_AMOUNT currency must match the requested rule currency"
         }
-        val changed = before > action.maximumAmount
-        val afterAmount = if (changed) action.maximumAmount else before
+        val maximum = LimitAmount.Bounded(action.maximumAmount)
+        val changed = !before.fitsWithin(maximum)
+        val afterAmount = if (changed) maximum else before
         val after = if (changed) {
             request.copy(
                 requestedRule = LimitRuleSnapshotter.ruleSnapshot(
@@ -80,8 +83,8 @@ internal class LimitChangePolicyActionExecutor {
                 "type" to "CAP_REQUESTED_AMOUNT",
                 "maximum" to action.maximumAmount.amount.toString(),
                 "currency" to currency.value,
-                "before" to before.amount.toString(),
-                "after" to afterAmount.amount.toString(),
+                "before" to before.boundedMoney?.amount?.toString(),
+                "after" to afterAmount.boundedMoney?.amount?.toString(),
                 "changed" to changed,
             ),
         )

@@ -56,9 +56,6 @@ internal class ChangeReferenceResolver(
         val configurationId = command.requestedRule?.configurationId
             ?.let { LimitConfigurationId.of(it) }
             ?: currentRule?.configurationId
-        if (command.changeType == LimitRuleChangeType.CREATE && configurationId == null) {
-            throw IllegalArgumentException("requestedRule.configurationId is required")
-        }
         val configurationHierarchy = configurationId
             ?.let { limitConfigurationRepository.resolveHierarchy(tenantId, it) }
             .orEmpty()

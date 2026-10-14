@@ -5,7 +5,6 @@ import io.github.sepfins.limitguard.api.errors.NotFoundException
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeRequest
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeStatus
 import io.github.sepfins.limitguard.domain.common.LimitChangeRequestId
-import io.github.sepfins.limitguard.domain.limit.LimitConfigurationFundingScope.AllFundingSources
 import io.github.sepfins.limitguard.domain.limit.LimitRule
 import io.github.sepfins.limitguard.domain.limit.LimitRuleTargetScope
 import io.github.sepfins.limitguard.internal.hashing.TargetScopeCanonicalizer
@@ -21,10 +20,8 @@ internal class LimitChangeTargets(
     private val requests: LimitChangeRequestRepository,
 ) {
     fun scopeFor(rule: LimitRule): LimitRuleTargetScope {
-        val funding = rule.configurationId?.let { id ->
-            configurations.findById(rule.tenantId, id)?.fundingScope
-                ?: throw NotFoundException("limit configuration not found: ${id.value}")
-        } ?: AllFundingSources
+        val funding = configurations.findById(rule.tenantId, rule.configurationId)?.fundingScope
+            ?: throw NotFoundException("limit configuration not found: ${rule.configurationId.value}")
         return rule.toTargetScope(funding)
     }
 

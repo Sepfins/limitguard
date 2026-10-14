@@ -1,5 +1,6 @@
 package io.github.sepfins.limitguard.infrastructure.jooq
 
+import io.github.sepfins.limitguard.api.LimitAmount
 import io.github.sepfins.limitguard.api.TrustedChangeActorContext
 import io.github.sepfins.limitguard.api.LimitChangeActorType
 import io.github.sepfins.limitguard.api.LimitKind
@@ -131,7 +132,7 @@ class ImmutableJsonPersistenceIntegrationTest {
         val normalized = metadata + mapOf("large" to BigDecimal("$large.0"), "count" to BigDecimal("1.000"))
         val retry = command.copy(
             metadata = normalized, policyContext = normalized,
-            requestedRule = command.requestedRule!!.copy(amount = BigDecimal("500.0000"), currency = "EUR", metadata = normalized),
+            requestedRule = command.requestedRule!!.copy(amount = LimitAmount.Bounded(BigDecimal("500.0000")), currency = "EUR", metadata = normalized),
         )
         assertEquals(pending, facade.limitChangeService.requestLimitRuleChange(retry, trustedActorContext = TrustedChangeActorContext.InternalSystem))
         val persisted = assertNotNull(JooqLimitChangeRequestRepository(JooqPersistenceContext(dataSource)).findById(
@@ -147,7 +148,7 @@ class ImmutableJsonPersistenceIntegrationTest {
 
         val applied = facade.limitChangeService.approveLimitRuleChange(ApproveLimitRuleChangeCommand(
             tenant, pending.id, LimitChangeActorCommand(LimitChangeActorType.SYSTEM),
-            approvedRule = command.requestedRule.copy(amount = BigDecimal("400")),
+            approvedRule = command.requestedRule.copy(amount = LimitAmount.Bounded(BigDecimal("400"))),
         ),
             trustedActorContext = TrustedChangeActorContext.InternalSystem,
         )
@@ -199,13 +200,13 @@ class ImmutableJsonPersistenceIntegrationTest {
         )).id
         val configuration = facade.tenantCatalogService.createLimitConfiguration(CreateLimitConfigurationCommand(
             tenantId = tenant, code = "GENERAL", name = "General limit", limitKind = LimitKind.PER_TRANSACTION,
-            currency = "EUR", maxAssignableAmount = BigDecimal("1000"),
+            currency = "EUR", maxAssignableAmount = LimitAmount.Bounded(BigDecimal("1000")),
         )).id
         return RequestLimitRuleChangeCommand(
             tenantId = tenant, changeType = LimitRuleChangeType.CREATE,
             requestedBy = LimitChangeActorCommand(LimitChangeActorType.SYSTEM), targetOwnerPartyProfileId = owner,
             requestedRule = LimitRuleDraft(
-                name = "Spending limit", limitKind = LimitKind.PER_TRANSACTION, amount = BigDecimal("500.00001"),
+                name = "Spending limit", limitKind = LimitKind.PER_TRANSACTION, amount = LimitAmount.Bounded(BigDecimal("500.00001")),
                 currency = "EUR", configurationId = configuration, metadata = metadata,
             ),
             policyContext = metadata, metadata = metadata, idempotencyKey = "exact-json",

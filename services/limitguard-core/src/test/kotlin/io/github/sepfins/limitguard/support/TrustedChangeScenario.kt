@@ -1,5 +1,6 @@
 package io.github.sepfins.limitguard.support
 
+import io.github.sepfins.limitguard.api.LimitAmount
 import io.github.sepfins.limitguard.api.LimitChangeActorType
 import io.github.sepfins.limitguard.api.LimitChangePolicyDecision
 import io.github.sepfins.limitguard.api.LimitChangePolicyPhase
@@ -37,7 +38,7 @@ class TrustedChangeScenario(
     val ruleChannel = facade.tenantCatalogService.registerChannel(RegisterChannelCommand(tenant, "ATM", "ATM")).id
     val configuration = createConfiguration(CreateLimitConfigurationCommand(
         tenantId = tenant, code = "GENERAL", name = "General", limitKind = LimitKind.PER_TRANSACTION,
-        currency = "EUR", maxAssignableAmount = BigDecimal("1000"),
+        currency = "EUR", maxAssignableAmount = LimitAmount.Bounded(BigDecimal("1000")),
         channelScope = LimitChannelScope.CHANNEL, channelId = ruleChannel,
     ))
     val delegation = facade.tenantCatalogService.createPartyProfileDelegation(CreatePartyProfileDelegationCommand(
@@ -55,7 +56,7 @@ class TrustedChangeScenario(
         tenantId = tenant, changeType = LimitRuleChangeType.CREATE, requestedBy = party(owner),
         targetOwnerPartyProfileId = owner, requestChannelId = channel,
         requestedRule = LimitRuleDraft(
-            name = "Spending limit", limitKind = LimitKind.PER_TRANSACTION, amount = BigDecimal("500"),
+            name = "Spending limit", limitKind = LimitKind.PER_TRANSACTION, amount = LimitAmount.Bounded(BigDecimal("500")),
             currency = "EUR", configurationId = configuration,
             channelScope = LimitChannelScope.CHANNEL, channelId = ruleChannel,
         ),

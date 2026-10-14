@@ -44,7 +44,10 @@ import io.github.sepfins.limitguard.api.results.PaymentTransactionResult
 import io.github.sepfins.limitguard.api.results.TenantResult
 import io.github.sepfins.limitguard.api.results.TransactionHistoryEventResult
 import io.github.sepfins.limitguard.api.results.TransactionHistoryResult
+import io.github.sepfins.limitguard.application.cap
 import io.github.sepfins.limitguard.application.catalog.toResult
+import io.github.sepfins.limitguard.application.isBounded
+import io.github.sepfins.limitguard.application.toApi
 import io.github.sepfins.limitguard.application.change.toResult
 import io.github.sepfins.limitguard.application.evaluation.AuthorizationReferenceResolver
 import io.github.sepfins.limitguard.application.evaluation.LimitEvaluationContext
@@ -210,6 +213,7 @@ class DefaultLimitInquiryService(
             }
             val periodicKind = rule.limitKind as? LimitKind.Periodic
                 ?: throw ValidationException("current usage is only available for periodic limit rules")
+            if (!rule.isBounded) throw ValidationException("current usage is not tracked for unlimited limit rules")
             val window = usageWindowCalculator.calculateWindow(calculatedAt, periodicKind.period)
             val bucket = usageBucketRepository.findByLimitRuleAndAssigneeInWindow(
                 tenantId = tenantId,
@@ -228,10 +232,10 @@ class DefaultLimitInquiryService(
                 period = ApiLimitPeriod.valueOf(periodicKind.period.name),
                 periodStartsAt = window.periodStartsAt,
                 periodEndsAt = window.periodEndsAt,
-                limitAmount = rule.amount.amount,
+                limitAmount = rule.cap.amount,
                 reservedAmount = bucket?.reservedAmount?.amount ?: zero.amount,
                 consumedAmount = bucket?.consumedAmount?.amount ?: zero.amount,
-                remainingAmount = bucket?.remaining(rule.amount)?.amount ?: rule.amount.amount,
+                remainingAmount = bucket?.remaining(rule.cap)?.amount ?: rule.cap.amount,
                 currency = rule.amount.currency.value,
                 calculatedAt = calculatedAt,
                 updatedAt = bucket?.updatedAt,
@@ -397,14 +401,14 @@ class DefaultLimitInquiryService(
             description = description,
             limitKind = if (periodic == null) ApiLimitKind.PER_TRANSACTION else ApiLimitKind.PERIODIC,
             period = periodic?.period?.let { ApiLimitPeriod.valueOf(it.name) },
-            amount = amount.amount,
+            amount = amount.toApi(),
             currency = amount.currency.value,
             mandateScope = when (mandateScope) {
                 MandateScope.AllOwnerMandates -> ApiLimitMandateScope.ALL_OWNER_MANDATES
                 is MandateScope.MandateSpecific -> ApiLimitMandateScope.MANDATE
             },
             mandateId = mandateId,
-            configurationId = configurationId?.value,
+            configurationId = configurationId.value,
             channelScope = when (channelScope) {
                 LimitChannelScope.AllChannels -> ApiLimitChannelScope.ALL_CHANNELS
                 is LimitChannelScope.ChannelSpecific -> ApiLimitChannelScope.CHANNEL

@@ -5,12 +5,10 @@ import io.github.sepfins.limitguard.api.commands.LimitRuleDraft
 import io.github.sepfins.limitguard.api.commands.RequestLimitRuleChangeCommand
 import io.github.sepfins.limitguard.api.errors.ConflictException
 import io.github.sepfins.limitguard.domain.change.ResolvedLimitChangeFacts
-import io.github.sepfins.limitguard.domain.common.CurrencyCode
 import io.github.sepfins.limitguard.domain.common.EffectiveWindow
 import io.github.sepfins.limitguard.domain.common.LimitConfigurationId
 import io.github.sepfins.limitguard.domain.common.LimitRuleId
 import io.github.sepfins.limitguard.domain.common.Metadata
-import io.github.sepfins.limitguard.domain.common.Money
 import io.github.sepfins.limitguard.domain.common.PartyProfileId
 import io.github.sepfins.limitguard.domain.common.TenantId
 import io.github.sepfins.limitguard.domain.common.Version
@@ -113,10 +111,9 @@ internal class LimitRuleCandidateFactory {
             name = LimitRuleName.of(approvedRule.name),
             description = approvedRule.description,
             limitKind = approvedRule.toLimitKind(),
-            amount = Money.positive(approvedRule.amount, CurrencyCode.of(approvedRule.currency)),
+            amount = approvedRule.toLimitAmount(),
             mandateScope = approvedRule.toMandateScope(),
-            configurationId = approvedRule.configurationId?.let { LimitConfigurationId.of(it) }
-                ?: requestedCandidate.configurationId,
+            configurationId = LimitConfigurationId.of(approvedRule.configurationId),
             channelScope = approvedRule.toChannelScope(),
             operationScope = approvedRule.toOperationScope(),
             usageConsumptionMode = LimitUsageConsumptionMode.valueOf(approvedRule.usageConsumptionMode.name),
@@ -166,10 +163,9 @@ internal class LimitRuleCandidateFactory {
             name = LimitRuleName.of(draft.name),
             description = draft.description,
             limitKind = draft.toLimitKind(),
-            amount = Money.positive(draft.amount, CurrencyCode.of(draft.currency)),
+            amount = draft.toLimitAmount(),
             mandateScope = draft.toMandateScope(),
-            configurationId = draft.configurationId?.let { LimitConfigurationId.of(it) }
-                ?: currentRule?.configurationId,
+            configurationId = LimitConfigurationId.of(draft.configurationId),
             channelScope = draft.toChannelScope(),
             operationScope = draft.toOperationScope(),
             usageConsumptionMode = LimitUsageConsumptionMode.valueOf(draft.usageConsumptionMode.name),

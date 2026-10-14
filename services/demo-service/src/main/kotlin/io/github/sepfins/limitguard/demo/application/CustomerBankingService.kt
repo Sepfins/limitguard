@@ -1,6 +1,7 @@
 package io.github.sepfins.limitguard.demo.application
 
 import io.github.sepfins.limitguard.api.AuthorizationDecision
+import io.github.sepfins.limitguard.api.LimitAmount
 import io.github.sepfins.limitguard.api.LimitKind
 import io.github.sepfins.limitguard.api.OperationCapacityStatus
 import io.github.sepfins.limitguard.api.TransactionEventType
@@ -195,7 +196,9 @@ class CustomerBankingService(
         val usage = capacity.applicableLimits.firstOrNull { it.limitRuleId == limitRuleId }
         val consumed = usage?.consumedAmount ?: BigDecimal.ZERO
         val reserved = usage?.reservedAmount ?: BigDecimal.ZERO
-        val available = usage?.availableAmount ?: rule.amount
+        // Demo limits are always bounded.
+        val ruleAmount = (rule.amount as LimitAmount.Bounded).value
+        val available = usage?.availableAmount ?: ruleAmount
         val exposure = consumed + reserved
         val editableMinimum = if (rule.limitKind == LimitKind.PERIODIC) {
             exposure
@@ -211,7 +214,7 @@ class CustomerBankingService(
             displayName = displayName,
             limitKind = rule.limitKind,
             period = rule.period,
-            currentAmount = money(rule.amount, rule.currency),
+            currentAmount = money(ruleAmount, rule.currency),
             minimumAmount = money(editableMinimum, rule.currency),
             maximumAmount = money(maximumAmount, rule.currency),
             stepAmount = money(stepAmount, rule.currency),

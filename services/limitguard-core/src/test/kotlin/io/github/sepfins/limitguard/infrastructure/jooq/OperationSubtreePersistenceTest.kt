@@ -112,7 +112,7 @@ class OperationSubtreePersistenceTest {
     @Test
     fun `V4 reports invalid legacy taxonomy without repairing nodes or historical decisions`() {
         for (corruption in listOf("HIDDEN", "MISSING", "CYCLE", "SELF_CYCLE", "GLOBAL_PRIVATE", "LEAF")) {
-            val fixture = fixture(target = "2")
+            val fixture = fixture(target = "3")
             val s = fixture.scenario
             // Seed legacy rows directly: current catalog admission requires the V4 guard.
             fun legacyOperation(code: String, parent: UUID? = null, global: Boolean = false, tenant: UUID = s.tenant): UUID {

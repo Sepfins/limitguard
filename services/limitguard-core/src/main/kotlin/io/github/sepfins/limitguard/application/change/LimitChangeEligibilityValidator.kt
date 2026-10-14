@@ -6,23 +6,15 @@ import io.github.sepfins.limitguard.api.commands.RequestLimitRuleChangeCommand
 import io.github.sepfins.limitguard.api.errors.ConflictException
 import io.github.sepfins.limitguard.api.errors.NotFoundException
 import io.github.sepfins.limitguard.api.errors.ValidationException
-import io.github.sepfins.limitguard.application.configuration.resolveHierarchy
 import io.github.sepfins.limitguard.domain.change.ChangeActor
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeRequest
 import io.github.sepfins.limitguard.domain.common.PartyProfileDelegationId
 import io.github.sepfins.limitguard.domain.common.PartyProfileId
 import io.github.sepfins.limitguard.domain.common.TenantId
-import io.github.sepfins.limitguard.domain.limit.LimitChannelScope
-import io.github.sepfins.limitguard.domain.limit.LimitConfigurationFundingScope
-import io.github.sepfins.limitguard.domain.limit.LimitOperationScope
 import io.github.sepfins.limitguard.domain.limit.LimitRule
 import io.github.sepfins.limitguard.domain.mandate.MandateScope
-import io.github.sepfins.limitguard.port.persistence.ChannelGroupRepository
 import io.github.sepfins.limitguard.port.persistence.ChannelRepository
-import io.github.sepfins.limitguard.port.persistence.FundingSourceProductRepository
-import io.github.sepfins.limitguard.port.persistence.LimitConfigurationRepository
 import io.github.sepfins.limitguard.port.persistence.MandateRepository
-import io.github.sepfins.limitguard.port.persistence.OperationTypeRepository
 import io.github.sepfins.limitguard.port.persistence.PartyProfileDelegationRepository
 import io.github.sepfins.limitguard.port.persistence.PartyProfileRepository
 import io.github.sepfins.limitguard.port.persistence.TenantRepository
@@ -41,10 +33,6 @@ internal class LimitChangeEligibilityValidator(
     private val profiles: PartyProfileRepository,
     private val delegations: PartyProfileDelegationRepository,
     private val channels: ChannelRepository,
-    private val channelGroups: ChannelGroupRepository,
-    private val operations: OperationTypeRepository,
-    private val products: FundingSourceProductRepository,
-    private val configurations: LimitConfigurationRepository,
     private val mandates: MandateRepository,
 ) {
     fun validateTenant(tenantId: TenantId) {
@@ -137,43 +125,17 @@ internal class LimitChangeEligibilityValidator(
         }
     }
 
+    /** A narrowed rule's mandate and its delegation must hold from [at]. */
     private fun validateRuleReferences(rule: LimitRule, at: Instant) {
-        requireProfile(rule.tenantId, rule.ownerPartyProfileId)
-        validateScopes(rule.tenantId, rule.channelScope, rule.operationScope)
-        rule.configurationId?.let { id ->
-            configurations.resolveHierarchy(rule.tenantId, id).forEach { configuration ->
-                validateScopes(rule.tenantId, configuration.channelScope, configuration.operationScope)
-                val funding = configuration.fundingScope as? LimitConfigurationFundingScope.FundingSourceProductSpecific
-                if (funding != null && products.findById(rule.tenantId, funding.productId) == null) {
-                    throw NotFoundException("funding source product not found: ${funding.productId.value}")
-                }
-            }
-        }
         val scope = rule.mandateScope as? MandateScope.MandateSpecific ?: return
         val mandate = mandates.findById(rule.tenantId, scope.mandateId)
             ?: throw NotFoundException("mandate not found: ${scope.mandateId.value}")
         if (mandate.ownerPartyProfileId != rule.ownerPartyProfileId) {
             throw ConflictException("mandate does not belong to target owner: ${mandate.id.value}")
         }
-        requireProfile(rule.tenantId, mandate.assigneePartyProfileId)
         mandate.authorityDelegationId?.let { id ->
             requireDelegation(rule.tenantId, id, mandate.ownerPartyProfileId, mandate.assigneePartyProfileId,
                 if (rule.isActive) maxOf(at, rule.effectiveWindow.startsAt) else null)
-        }
-    }
-
-    private fun validateScopes(tenantId: TenantId, channel: LimitChannelScope, operation: LimitOperationScope) {
-        when (channel) {
-            LimitChannelScope.AllChannels -> Unit
-            is LimitChannelScope.ChannelSpecific -> if (channels.findById(tenantId, channel.channelId) == null) {
-                throw NotFoundException("channel not found: ${channel.channelId.value}")
-            }
-            is LimitChannelScope.ChannelGroupSpecific -> if (channelGroups.findById(tenantId, channel.channelGroupId) == null) {
-                throw NotFoundException("channel group not found: ${channel.channelGroupId.value}")
-            }
-        }
-        if (operation is LimitOperationScope.OperationTypeSpecific && operations.findById(tenantId, operation.operationTypeId) == null) {
-            throw NotFoundException("operation type not found: ${operation.operationTypeId.value}")
         }
     }
 }

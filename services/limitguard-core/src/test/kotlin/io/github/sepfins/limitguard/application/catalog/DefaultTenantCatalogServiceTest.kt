@@ -1,5 +1,6 @@
 package io.github.sepfins.limitguard.application.catalog
 
+import io.github.sepfins.limitguard.api.LimitAmount
 import io.github.sepfins.limitguard.api.FundingSourceCategory
 import io.github.sepfins.limitguard.api.LimitChannelScope
 import io.github.sepfins.limitguard.api.LimitFundingScope
@@ -102,7 +103,7 @@ class DefaultTenantCatalogServiceTest {
 
         assertFailsWith<ValidationException> {
             service.createLimitConfiguration(configuration("PREMIUM_TRANSFER_CAP").copy(
-                maxAssignableAmount = BigDecimal("1000.01"), parentConfigurationId = parent.id,
+                maxAssignableAmount = LimitAmount.Bounded(BigDecimal("1000.01")), parentConfigurationId = parent.id,
             ))
         }
     }
@@ -137,7 +138,7 @@ class DefaultTenantCatalogServiceTest {
         assertEquals("ACC-PRIMARY", updatedSource.externalReference)
         assertFalse(inactiveSource.isActive)
         assertEquals(BigDecimal("300.0000"), updatedConfiguration.defaultAmount)
-        assertEquals(BigDecimal("1000.0000"), updatedConfiguration.maxAssignableAmount)
+        assertEquals(LimitAmount.Bounded(BigDecimal("1000.0000")), updatedConfiguration.maxAssignableAmount)
         assertFalse(inactiveConfiguration.isActive)
         assertEquals(fixedNow, inactiveConfiguration.updatedAt)
         val inquiry = facade.limitInquiryService
@@ -160,6 +161,6 @@ class DefaultTenantCatalogServiceTest {
 
     private fun configuration(code: String) = CreateLimitConfigurationCommand(
         tenantId = tenant, code = code, name = code, limitKind = LimitKind.PERIODIC, period = LimitPeriod.DAILY,
-        currency = "EUR", maxAssignableAmount = BigDecimal("1000.00"),
+        currency = "EUR", maxAssignableAmount = LimitAmount.Bounded(BigDecimal("1000.00")),
     )
 }

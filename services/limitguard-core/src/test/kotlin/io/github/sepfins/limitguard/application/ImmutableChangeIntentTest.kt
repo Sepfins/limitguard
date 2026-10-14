@@ -1,5 +1,6 @@
 package io.github.sepfins.limitguard.application
 
+import io.github.sepfins.limitguard.api.LimitAmount
 import io.github.sepfins.limitguard.api.TrustedChangeActorContext
 import io.github.sepfins.limitguard.api.LimitChangeActorType
 import io.github.sepfins.limitguard.api.LimitKind
@@ -80,7 +81,7 @@ class ImmutableChangeIntentTest {
             command.copy(expiresAt = command.expiresAt!!.plusSeconds(1)),
             command.copy(policyContext = emptyMap()),
             command.copy(metadata = mapOf("attempt" to 2)),
-            command.copy(requestedRule = command.requestedRule!!.copy(amount = BigDecimal("501"))),
+            command.copy(requestedRule = command.requestedRule!!.copy(amount = LimitAmount.Bounded(BigDecimal("501")))),
         )
         for (retry in different) {
             val context = TrustedChangeActorContext.InternalSystem.takeIf { retry.requestedBy.actorType == LimitChangeActorType.SYSTEM }
@@ -114,7 +115,7 @@ class ImmutableChangeIntentTest {
         }
         assertFailsWith<IdempotencyConflictException> {
             fixture.facade.limitChangeService.requestLimitRuleChange(command.copy(
-                requestedRule = command.requestedRule!!.copy(amount = BigDecimal("400")),
+                requestedRule = command.requestedRule!!.copy(amount = LimitAmount.Bounded(BigDecimal("400"))),
             ))
         }
 
@@ -123,7 +124,7 @@ class ImmutableChangeIntentTest {
         val applied = fixture.facade.limitChangeService.requestLimitRuleChange(command)
         val ruleId = applied.limitRuleId!!
         assertEquals(LimitRuleChangeStatus.APPLIED, applied.status)
-        assertEquals(BigDecimal("400.0000"), fixture.facade.limitInquiryService.getLimitRule(GetLimitRuleQuery(fixture.tenant, ruleId)).amount)
+        assertEquals(LimitAmount.Bounded(BigDecimal("400.0000")), fixture.facade.limitInquiryService.getLimitRule(GetLimitRuleQuery(fixture.tenant, ruleId)).amount)
 
         val retire = fixture.facade.limitChangeService.requestLimitRuleChange(command.copy(
             changeType = LimitRuleChangeType.DELETE, limitRuleId = ruleId, expectedVersion = 1,
@@ -300,7 +301,7 @@ class ImmutableChangeIntentTest {
         )).id
         val configuration = facade.tenantCatalogService.createLimitConfiguration(CreateLimitConfigurationCommand(
             tenantId = tenant, code = "GENERAL", name = "General limit", limitKind = LimitKind.PER_TRANSACTION,
-            currency = "EUR", maxAssignableAmount = BigDecimal("1000"),
+            currency = "EUR", maxAssignableAmount = LimitAmount.Bounded(BigDecimal("1000")),
         )).id
         val channel = facade.tenantCatalogService.registerChannel(RegisterChannelCommand(tenant, "WEB", "Web")).id
         val command = RequestLimitRuleChangeCommand(
@@ -310,7 +311,7 @@ class ImmutableChangeIntentTest {
             requestChannelId = channel,
             targetOwnerPartyProfileId = owner,
             requestedRule = LimitRuleDraft(
-                name = "Spending limit", limitKind = LimitKind.PER_TRANSACTION, amount = BigDecimal("500"),
+                name = "Spending limit", limitKind = LimitKind.PER_TRANSACTION, amount = LimitAmount.Bounded(BigDecimal("500")),
                 currency = "EUR", configurationId = configuration,
             ),
             idempotencyKey = "original-submission",

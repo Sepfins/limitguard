@@ -1,5 +1,6 @@
 package io.github.sepfins.limitguard.application
 
+import io.github.sepfins.limitguard.api.LimitAmount
 import io.github.sepfins.limitguard.api.FundingSourceCategory
 import io.github.sepfins.limitguard.api.AuthorizationDecision
 import io.github.sepfins.limitguard.api.LimitRuleChangeStatus
@@ -181,8 +182,8 @@ class ContainedFundingEnvelopesTest {
             .copy(endsAt = root.endsAt)
         val invalid = listOf(
             child.copy(currency = "USD"),
-            child.copy(maxAssignableAmount = BigDecimal("1001")),
-            child.copy(maxAssignableAmount = BigDecimal("500"), defaultAmount = BigDecimal("501")),
+            child.copy(maxAssignableAmount = LimitAmount.Bounded(BigDecimal("1001"))),
+            child.copy(maxAssignableAmount = LimitAmount.Bounded(BigDecimal("500")), defaultAmount = BigDecimal("501")),
             child.copy(defaultAmount = BigDecimal.ZERO),
             child.copy(startsAt = NOW.minusSeconds(1)),
             child.copy(endsAt = null),
@@ -217,7 +218,7 @@ class ContainedFundingEnvelopesTest {
             draft.copy(channelScope = LimitChannelScope.ALL_CHANNELS, channelId = null),
             draft.copy(operationTypeId = null),
             draft.copy(priority = 8),
-            draft.copy(amount = BigDecimal("1001")),
+            draft.copy(amount = LimitAmount.Bounded(BigDecimal("1001"))),
             draft.copy(startsAt = NOW.minusSeconds(1)),
             draft.copy(endsAt = null),
         )
@@ -281,7 +282,7 @@ class ContainedFundingEnvelopesTest {
         val request = s.facade.limitChangeService.requestLimitRuleChange(s.requestCommand(child))
         assertEquals(LimitRuleChangeStatus.REQUESTED, request.status)
         val rule = s.rule(requireNotNull(s.approve(request.id).limitRuleId))
-        assertEquals(BigDecimal("500.0000"), rule.amount)
+        assertEquals(LimitAmount.Bounded(BigDecimal("500.0000")), rule.amount)
         val allowed = s.authorize(source, "400")
         assertEquals(AuthorizationDecision.ALLOWED, allowed.decision)
         assertEquals(listOf(rule.id), allowed.matchedRules.map { it.id })

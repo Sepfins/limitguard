@@ -2,6 +2,7 @@ package io.github.sepfins.limitguard.demo.application
 
 import io.github.sepfins.limitguard.api.FundingSourceCategory
 import io.github.sepfins.limitguard.api.FundingSourceOwnerRole
+import io.github.sepfins.limitguard.api.LimitAmount
 import io.github.sepfins.limitguard.api.LimitChangeActorType
 import io.github.sepfins.limitguard.api.LimitChangePolicyDecision
 import io.github.sepfins.limitguard.api.LimitChangePolicyEngine
@@ -477,7 +478,7 @@ class DemoScenarioService(
                 limitKind = kind,
                 period = period,
                 currency = "EUR",
-                maxAssignableAmount = BigDecimal(maximum),
+                maxAssignableAmount = LimitAmount.Bounded(BigDecimal(maximum)),
                 defaultAmount = BigDecimal(amount),
                 fundingScope = LimitConfigurationFundingScope.FUNDING_SOURCE_PRODUCT,
                 fundingSourceProductId = productId,
@@ -506,7 +507,7 @@ class DemoScenarioService(
                     description = "Customer-managed $name",
                     limitKind = kind,
                     period = period,
-                    amount = BigDecimal(amount),
+                    amount = LimitAmount.Bounded(BigDecimal(amount)),
                     currency = "EUR",
                     mandateScope = LimitMandateScope.MANDATE,
                     mandateId = mandateId,

@@ -1,5 +1,6 @@
 package io.github.sepfins.limitguard.support
 
+import io.github.sepfins.limitguard.api.LimitAmount
 import io.github.sepfins.limitguard.api.FundingSourceCategory
 import io.github.sepfins.limitguard.api.LimitChangeActorType
 import io.github.sepfins.limitguard.api.LimitKind
@@ -74,14 +75,14 @@ class OperationSubtreeScenario(
         val period = if (perTransaction) null else LimitPeriod.DAILY
         val configuration = facade.tenantCatalogService.createLimitConfiguration(CreateLimitConfigurationCommand(
             tenantId = tenant, code = "LIMIT_$number", name = "Limit $number", limitKind = kind, period = period,
-            currency = "EUR", maxAssignableAmount = BigDecimal("10000"), operationTypeId = operation, priority = priority,
+            currency = "EUR", maxAssignableAmount = LimitAmount.Bounded(BigDecimal("10000")), operationTypeId = operation, priority = priority,
         )).id
         val request = facade.limitChangeService.requestLimitRuleChange(RequestLimitRuleChangeCommand(
             tenantId = tenant, changeType = LimitRuleChangeType.CREATE,
             requestedBy = LimitChangeActorCommand(LimitChangeActorType.PARTY_PROFILE, partyProfileId = ruleOwner),
             targetOwnerPartyProfileId = ruleOwner, requestChannelId = channel,
             requestedRule = LimitRuleDraft(
-                name = "Rule $number", limitKind = kind, period = period, amount = BigDecimal(amount), currency = "EUR",
+                name = "Rule $number", limitKind = kind, period = period, amount = LimitAmount.Bounded(BigDecimal(amount)), currency = "EUR",
                 configurationId = configuration, operationTypeId = operation, priority = priority,
                 usageConsumptionMode = if (isolated) LimitUsageConsumptionMode.ISOLATED else LimitUsageConsumptionMode.CASCADING,
                 mandateScope = if (mandate == null) LimitMandateScope.ALL_OWNER_MANDATES else LimitMandateScope.MANDATE,

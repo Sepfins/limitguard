@@ -7,6 +7,7 @@
   "limitKind": "PERIODIC",
   "period": "DAILY",
   "amount": "500.0000",
+  "amountUnlimited": false,
   "currency": "EUR",
   "mandateScope": "MANDATE",
   "mandateId": "00000000-0000-0000-0000-000000000004",

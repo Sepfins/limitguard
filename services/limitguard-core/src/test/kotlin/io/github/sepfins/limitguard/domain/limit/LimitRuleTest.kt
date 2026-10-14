@@ -1,5 +1,6 @@
 package io.github.sepfins.limitguard.domain.limit
 
+import io.github.sepfins.limitguard.domain.limit.LimitAmount
 import io.github.sepfins.limitguard.domain.common.ChannelId
 import io.github.sepfins.limitguard.domain.common.CurrencyCode
 import io.github.sepfins.limitguard.domain.common.EffectiveWindow
@@ -186,9 +187,10 @@ class LimitRuleTest {
             fundingScope = LimitConfigurationFundingScope.AllFundingSources,
             channelScope = channelScope,
             operationScope = operationScope,
-            maxAssignableAmount = Money.positive(maxAmount, eur),
+            maxAssignableAmount = LimitAmount.Bounded(Money.positive(maxAmount, eur)),
             defaultAmount = null,
             priority = priority,
+            usageConsumptionMode = LimitUsageConsumptionMode.CASCADING,
             isActive = isActive,
             effectiveWindow = effectiveWindow,
         )
@@ -206,7 +208,7 @@ class LimitRuleTest {
             name = LimitRuleName.of("Child ATM daily"),
             description = null,
             limitKind = limitKind,
-            amount = Money.of(amount, eur),
+            amount = LimitAmount.Bounded(Money.of(amount, eur)),
             mandateScope = MandateScope.AllOwnerMandates,
             configurationId = configurationId,
             channelScope = LimitChannelScope.AllChannels,

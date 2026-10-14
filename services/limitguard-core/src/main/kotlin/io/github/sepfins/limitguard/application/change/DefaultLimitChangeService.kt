@@ -25,9 +25,6 @@ import io.github.sepfins.limitguard.port.persistence.TenantRepository
 import io.github.sepfins.limitguard.port.persistence.PartyProfileRepository
 import io.github.sepfins.limitguard.port.persistence.PartyProfileDelegationRepository
 import io.github.sepfins.limitguard.port.persistence.ChannelRepository
-import io.github.sepfins.limitguard.port.persistence.ChannelGroupRepository
-import io.github.sepfins.limitguard.port.persistence.OperationTypeRepository
-import io.github.sepfins.limitguard.port.persistence.FundingSourceProductRepository
 import io.github.sepfins.limitguard.port.policy.PolicyEngine
 import io.github.sepfins.limitguard.port.time.ClockProvider
 import io.github.sepfins.limitguard.port.transactions.TransactionRunner
@@ -43,9 +40,6 @@ internal class DefaultLimitChangeService(
     partyProfileRepository: PartyProfileRepository,
     partyProfileDelegationRepository: PartyProfileDelegationRepository,
     channelRepository: ChannelRepository,
-    channelGroupRepository: ChannelGroupRepository,
-    operationTypeRepository: OperationTypeRepository,
-    fundingSourceProductRepository: FundingSourceProductRepository,
     policyRepository: LimitChangePolicyRepository,
     policyEvaluationRepository: LimitChangePolicyEvaluationRepository,
     policyEngines: Collection<PolicyEngine>,
@@ -63,10 +57,6 @@ internal class DefaultLimitChangeService(
         profiles = partyProfileRepository,
         delegations = partyProfileDelegationRepository,
         channels = channelRepository,
-        channelGroups = channelGroupRepository,
-        operations = operationTypeRepository,
-        products = fundingSourceProductRepository,
-        configurations = limitConfigurationRepository,
         mandates = mandateRepository,
     )
     private val application = LimitChangeApplicationWorkflow(

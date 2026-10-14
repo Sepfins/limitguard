@@ -4,6 +4,8 @@ import io.github.sepfins.limitguard.internal.json.JsonSnapshots
 import io.github.sepfins.limitguard.api.FundingSourceCategory as ApiFundingSourceCategory
 import io.github.sepfins.limitguard.api.FundingSourceOwnerRole as ApiFundingSourceOwnerRole
 import io.github.sepfins.limitguard.api.LimitChannelScope as ApiLimitChannelScope
+import io.github.sepfins.limitguard.api.LimitUsageConsumptionMode as ApiLimitUsageConsumptionMode
+import io.github.sepfins.limitguard.application.toApi
 import io.github.sepfins.limitguard.api.LimitChangePolicyDecision as ApiLimitChangePolicyDecision
 import io.github.sepfins.limitguard.api.LimitChangePolicyEngine as ApiLimitChangePolicyEngine
 import io.github.sepfins.limitguard.api.LimitChangePolicyPhase as ApiLimitChangePolicyPhase
@@ -289,7 +291,7 @@ internal fun LimitConfiguration.toResult(): LimitConfigurationResult {
             DomainLimitKind.PerTransaction -> null
             is DomainLimitKind.Periodic -> ApiLimitPeriod.valueOf(kind.period.name)
         },
-        currency = maxAssignableAmount.currency.value,
+        currency = currency.value,
         fundingScope = fundingScope.toApiFundingScope(),
         fundingSourceCategory = when (val scope = fundingScope) {
             DomainLimitConfigurationFundingScope.AllFundingSources -> null
@@ -317,9 +319,10 @@ internal fun LimitConfiguration.toResult(): LimitConfigurationResult {
             LimitOperationScope.AllOperations -> null
             is LimitOperationScope.OperationTypeSpecific -> scope.operationTypeId.value
         },
-        maxAssignableAmount = maxAssignableAmount.amount,
+        maxAssignableAmount = maxAssignableAmount.toApi(),
         defaultAmount = defaultAmount?.amount,
         priority = priority.value,
+        usageConsumptionMode = ApiLimitUsageConsumptionMode.valueOf(usageConsumptionMode.name),
         isActive = isActive,
         startsAt = effectiveWindow.startsAt,
         endsAt = effectiveWindow.endsAt,

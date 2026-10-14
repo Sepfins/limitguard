@@ -1,6 +1,7 @@
 package io.github.sepfins.limitguard.api.results
 
 import io.github.sepfins.limitguard.api.AuthorizationDecision
+import io.github.sepfins.limitguard.api.LimitAmount
 import io.github.sepfins.limitguard.api.LimitKind
 import io.github.sepfins.limitguard.api.LimitPeriod
 import io.github.sepfins.limitguard.api.LimitUsageEventType
@@ -27,7 +28,7 @@ data class MatchedLimitRule(
     val name: String,
     val limitKind: LimitKind,
     val period: LimitPeriod?,
-    val amount: BigDecimal,
+    val amount: LimitAmount,
     val currency: String,
     val priority: Int,
 )

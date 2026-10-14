@@ -7,7 +7,9 @@ import io.github.sepfins.limitguard.api.errors.NotFoundException
 import io.github.sepfins.limitguard.api.results.ApplicableLimitUsageResult
 import io.github.sepfins.limitguard.api.results.OperationCapacityReasonResult
 import io.github.sepfins.limitguard.api.results.OperationCapacityResult
+import io.github.sepfins.limitguard.application.cap
 import io.github.sepfins.limitguard.application.evaluation.ApplicableLimitRuleSelector
+import io.github.sepfins.limitguard.application.isBounded
 import io.github.sepfins.limitguard.application.evaluation.AuthorizationReferenceResolver
 import io.github.sepfins.limitguard.application.evaluation.LimitEvaluationContext
 import io.github.sepfins.limitguard.application.evaluation.LimitRuleMatcher
@@ -98,7 +100,11 @@ internal class OperationCapacityReader(
             )
         }
 
-        val selectedRules = ApplicableLimitRuleSelector.select(matchingRules)
+        // Unlimited rules never cap capacity.
+        val selectedRules = ApplicableLimitRuleSelector.select(matchingRules).filter { it.isBounded }
+        if (selectedRules.isEmpty()) {
+            return result(context = context, currency = currency, at = at, status = OperationCapacityStatus.AVAILABLE)
+        }
         val applicableLimits = selectedRules.map { rule ->
             rule.toUsageResult(context, at)
         }
@@ -108,7 +114,7 @@ internal class OperationCapacityReader(
                 OperationCapacityReasonResult(
                     code = "LIMIT_CURRENCY_MISMATCH",
                     message = "Cannot calculate ${currency.value} capacity against " +
-                        "${rule.amount.currency.value} limit rule without currency conversion",
+                        "${rule.cap.currency.value} limit rule without currency conversion",
                     limitRuleId = rule.id.value,
                 )
             }
@@ -158,11 +164,11 @@ internal class OperationCapacityReader(
                 period = null,
                 periodStartsAt = null,
                 periodEndsAt = null,
-                limitAmount = amount.amount,
+                limitAmount = cap.amount,
                 consumedAmount = null,
                 reservedAmount = null,
-                availableAmount = amount.amount,
-                currency = amount.currency.value,
+                availableAmount = cap.amount,
+                currency = cap.currency.value,
                 usageBucketId = null,
                 updatedAt = null,
             )
@@ -187,11 +193,11 @@ internal class OperationCapacityReader(
                     period = ApiLimitPeriod.valueOf(kind.period.name),
                     periodStartsAt = window.periodStartsAt,
                     periodEndsAt = window.periodEndsAt,
-                    limitAmount = amount.amount,
+                    limitAmount = cap.amount,
                     consumedAmount = bucket?.consumedAmount?.amount ?: zero.amount,
                     reservedAmount = bucket?.reservedAmount?.amount ?: zero.amount,
-                    availableAmount = bucket?.remaining(amount)?.amount ?: amount.amount,
-                    currency = amount.currency.value,
+                    availableAmount = bucket?.remaining(cap)?.amount ?: cap.amount,
+                    currency = cap.currency.value,
                     usageBucketId = bucket?.id?.value,
                     updatedAt = bucket?.updatedAt,
                 )

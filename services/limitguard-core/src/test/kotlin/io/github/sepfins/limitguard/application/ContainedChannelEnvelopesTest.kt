@@ -1,5 +1,6 @@
 package io.github.sepfins.limitguard.application
 
+import io.github.sepfins.limitguard.api.LimitAmount
 import io.github.sepfins.limitguard.api.LimitChannelScope
 import io.github.sepfins.limitguard.api.LimitRuleChangeStatus
 import io.github.sepfins.limitguard.api.LimitKind
@@ -183,8 +184,8 @@ class ContainedChannelEnvelopesTest {
 
         for (invalid in listOf(
             child.copy(currency = "USD"),
-            child.copy(maxAssignableAmount = BigDecimal("1001")),
-            child.copy(maxAssignableAmount = BigDecimal("500"), defaultAmount = BigDecimal("501")),
+            child.copy(maxAssignableAmount = LimitAmount.Bounded(BigDecimal("1001"))),
+            child.copy(maxAssignableAmount = LimitAmount.Bounded(BigDecimal("500")), defaultAmount = BigDecimal("501")),
             child.copy(defaultAmount = BigDecimal.ZERO),
             child.copy(startsAt = NOW.minusSeconds(1)),
             child.copy(endsAt = null),
@@ -221,7 +222,7 @@ class ContainedChannelEnvelopesTest {
             draft.copy(channelGroupId = equivalent.id),
             draft.copy(channelScope = LimitChannelScope.CHANNEL, channelGroupId = null, channelId = atm.id),
             draft.copy(priority = selected.priority + 1),
-            draft.copy(amount = BigDecimal("1001")),
+            draft.copy(amount = LimitAmount.Bounded(BigDecimal("1001"))),
             draft.copy(startsAt = NOW.minusSeconds(1)),
         )) {
             assertFailsWith<ValidationException> { s.facade.limitChangeService.requestLimitRuleChange(command.copy(requestedRule = invalid)) }

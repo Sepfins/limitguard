@@ -8,9 +8,11 @@ import io.github.sepfins.limitguard.api.LimitChangePolicyEngine
 import io.github.sepfins.limitguard.api.LimitChangePolicyPhase
 import io.github.sepfins.limitguard.api.LimitConfigurationFundingScope
 import io.github.sepfins.limitguard.api.LimitFundingScope
+import io.github.sepfins.limitguard.api.LimitAmount
 import io.github.sepfins.limitguard.api.LimitKind
 import io.github.sepfins.limitguard.api.LimitPeriod
 import io.github.sepfins.limitguard.api.NoMatchingRuleBehavior
+import io.github.sepfins.limitguard.api.LimitUsageConsumptionMode
 import io.github.sepfins.limitguard.api.PartyProfileDelegationType
 import io.github.sepfins.limitguard.api.ProductNodeType
 import java.math.BigDecimal
@@ -193,9 +195,10 @@ data class LimitConfigurationResult(
     val channelId: UUID?,
     val channelGroupId: UUID?,
     val operationTypeId: UUID?,
-    val maxAssignableAmount: BigDecimal,
+    val maxAssignableAmount: LimitAmount,
     val defaultAmount: BigDecimal?,
     val priority: Int,
+    val usageConsumptionMode: LimitUsageConsumptionMode,
     val isActive: Boolean,
     val startsAt: Instant,
     val endsAt: Instant?,

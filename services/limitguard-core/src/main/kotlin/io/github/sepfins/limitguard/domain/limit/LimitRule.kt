@@ -4,7 +4,6 @@ import io.github.sepfins.limitguard.domain.common.EffectiveWindow
 import io.github.sepfins.limitguard.domain.common.LimitConfigurationId
 import io.github.sepfins.limitguard.domain.common.LimitRuleId
 import io.github.sepfins.limitguard.domain.common.Metadata
-import io.github.sepfins.limitguard.domain.common.Money
 import io.github.sepfins.limitguard.domain.common.PartyProfileId
 import io.github.sepfins.limitguard.domain.common.TenantId
 import io.github.sepfins.limitguard.domain.common.Version
@@ -18,9 +17,9 @@ data class LimitRule(
     val name: LimitRuleName,
     val description: String?,
     val limitKind: LimitKind,
-    val amount: Money,
+    val amount: LimitAmount,
     val mandateScope: MandateScope,
-    val configurationId: LimitConfigurationId?,
+    val configurationId: LimitConfigurationId,
     val channelScope: LimitChannelScope,
     val operationScope: LimitOperationScope,
     val usageConsumptionMode: LimitUsageConsumptionMode,
@@ -33,9 +32,6 @@ data class LimitRule(
     val updatedAt: Instant? = null
 ) {
     init {
-        require(amount.isPositive) {
-            "amount must be positive"
-        }
         require(limitKind is LimitKind.Periodic || usageConsumptionMode == LimitUsageConsumptionMode.CASCADING) {
             "ISOLATED usage consumption is only valid for periodic rules"
         }
@@ -65,11 +61,11 @@ data class LimitRule(
         require(configuration.limitKind == limitKind) {
             "configuration limit kind must match rule limit kind"
         }
-        require(configuration.maxAssignableAmount.currency == amount.currency) {
+        require(configuration.currency == amount.currency) {
             "configuration currency must match rule currency"
         }
-        require(amount <= configuration.maxAssignableAmount) {
-            "rule amount must be less than or equal to configuration maxAssignableAmount"
+        require(amount.fitsWithin(configuration.maxAssignableAmount)) {
+            "rule amount must fit within configuration maxAssignableAmount; unlimited needs an unlimited maximum"
         }
         require(configuration.channelScope == channelScope) {
             "rule channel scope must match configuration channel scope"
@@ -93,8 +89,8 @@ data class LimitRule(
             require(parent.isActive) {
                 "ancestor configuration must be active"
             }
-            require(amount <= parent.maxAssignableAmount) {
-                "rule amount must be less than or equal to ancestor configuration maxAssignableAmount"
+            require(amount.fitsWithin(parent.maxAssignableAmount)) {
+                "rule amount must fit within ancestor configuration maxAssignableAmount"
             }
             require(parent.effectiveWindow.contains(effectiveWindow)) {
                 "rule effective window must be contained by ancestor configuration effective window"

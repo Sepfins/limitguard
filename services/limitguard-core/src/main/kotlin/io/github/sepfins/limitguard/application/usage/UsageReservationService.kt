@@ -1,5 +1,7 @@
 package io.github.sepfins.limitguard.application.usage
 
+import io.github.sepfins.limitguard.application.cap
+import io.github.sepfins.limitguard.application.isBounded
 import io.github.sepfins.limitguard.domain.common.Money
 import io.github.sepfins.limitguard.domain.common.TransactionEventId
 import io.github.sepfins.limitguard.domain.common.UsageBucketId
@@ -29,8 +31,8 @@ internal class UsageReservationService(
         periodicRules: List<LimitRule>,
         now: Instant,
     ): UsageReservationPlan {
-        require(periodicRules.all { it.limitKind is LimitKind.Periodic }) {
-            "Usage reservations can only be planned for periodic rules"
+        require(periodicRules.all { it.limitKind is LimitKind.Periodic && it.isBounded }) {
+            "Usage reservations can only be planned for bounded periodic rules"
         }
 
         val requests = periodicRules.map { rule ->
@@ -87,7 +89,7 @@ internal class UsageReservationService(
 
         val exceeding = candidates.filter {
             it.candidateBucket.wouldExceed(
-                limitAmount = it.rule.amount,
+                limitAmount = it.rule.cap,
                 delta = transaction.authorizedAmount
             )
         }
@@ -164,10 +166,10 @@ internal class UsageReservationService(
         LimitViolation(
             code = "PERIODIC_LIMIT_EXCEEDED",
             message = "Attempted amount ${attemptedAmount.amount} ${attemptedAmount.currency.value} " +
-                "would exceed periodic limit ${rule.amount.amount} ${rule.amount.currency.value}",
+                "would exceed periodic limit ${rule.cap.amount} ${rule.cap.currency.value}",
             limitRuleId = rule.id,
-            limitAmount = rule.amount,
+            limitAmount = rule.cap,
             attemptedAmount = attemptedAmount,
-            remainingAmount = candidateBucket.remaining(rule.amount),
+            remainingAmount = candidateBucket.remaining(rule.cap),
         )
 }

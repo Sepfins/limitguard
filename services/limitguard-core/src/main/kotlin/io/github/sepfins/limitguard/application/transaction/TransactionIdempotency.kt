@@ -3,6 +3,7 @@ package io.github.sepfins.limitguard.application.transaction
 import io.github.sepfins.limitguard.api.AuthorizationDecision
 import io.github.sepfins.limitguard.api.LimitUsageEventType
 import io.github.sepfins.limitguard.api.TransactionStatus
+import io.github.sepfins.limitguard.api.LimitAmount as ApiLimitAmount
 import io.github.sepfins.limitguard.api.LimitKind as ApiLimitKind
 import io.github.sepfins.limitguard.api.LimitPeriod as ApiLimitPeriod
 import io.github.sepfins.limitguard.api.results.AuthorizationResult
@@ -57,7 +58,7 @@ internal object TransactionIdempotency {
                     name = rule.requiredString("name"),
                     limitKind = rule.requiredEnum<ApiLimitKind>("limitKind"),
                     period = rule.optionalEnum<ApiLimitPeriod>("period"),
-                    amount = rule.requiredDecimal("amount"),
+                    amount = rule.optionalDecimal("amount")?.let(ApiLimitAmount::Bounded) ?: ApiLimitAmount.Unlimited,
                     currency = rule.requiredString("currency"),
                     priority = rule.requiredNumber("priority").toInt(),
                 )
@@ -162,7 +163,7 @@ internal object TransactionIdempotency {
             "name" to name,
             "limitKind" to limitKind.name,
             "period" to period?.name,
-            "amount" to amount.toPlainString(),
+            "amount" to (amount as? ApiLimitAmount.Bounded)?.value?.toPlainString(),
             "currency" to currency,
             "priority" to priority,
         )

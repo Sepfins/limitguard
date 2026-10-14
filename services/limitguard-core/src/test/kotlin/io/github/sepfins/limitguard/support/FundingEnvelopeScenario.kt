@@ -1,5 +1,6 @@
 package io.github.sepfins.limitguard.support
 
+import io.github.sepfins.limitguard.api.LimitAmount
 import io.github.sepfins.limitguard.api.FundingSourceCategory
 import io.github.sepfins.limitguard.api.LimitChangeActorType
 import io.github.sepfins.limitguard.api.LimitChannelScope
@@ -88,7 +89,7 @@ class FundingEnvelopeScenario(val facade: Limitguard, val now: Instant) {
         operationId: UUID? = null,
     ) = CreateLimitConfigurationCommand(
         tenantId = tenant, code = code, name = code, parentConfigurationId = parent,
-        limitKind = LimitKind.PER_TRANSACTION, currency = "EUR", maxAssignableAmount = BigDecimal("1000"),
+        limitKind = LimitKind.PER_TRANSACTION, currency = "EUR", maxAssignableAmount = LimitAmount.Bounded(BigDecimal("1000")),
         fundingScope = when {
             category != null -> LimitConfigurationFundingScope.FUNDING_SOURCE_CATEGORY
             product != null -> LimitConfigurationFundingScope.FUNDING_SOURCE_PRODUCT
@@ -142,7 +143,7 @@ class FundingEnvelopeScenario(val facade: Limitguard, val now: Instant) {
         requestedRule = LimitRuleDraft(
             name = "Rule ${configuration.code}", configurationId = configuration.id,
             limitKind = configuration.limitKind, period = configuration.period, currency = configuration.currency,
-            amount = BigDecimal(amount), channelScope = configuration.channelScope, channelId = configuration.channelId,
+            amount = LimitAmount.Bounded(BigDecimal(amount)), channelScope = configuration.channelScope, channelId = configuration.channelId,
             channelGroupId = configuration.channelGroupId, operationTypeId = configuration.operationTypeId,
             priority = configuration.priority, startsAt = configuration.startsAt, endsAt = configuration.endsAt,
         ),

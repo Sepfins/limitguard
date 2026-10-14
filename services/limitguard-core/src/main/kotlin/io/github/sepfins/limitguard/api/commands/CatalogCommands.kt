@@ -8,9 +8,11 @@ import io.github.sepfins.limitguard.api.LimitChangePolicyEngine
 import io.github.sepfins.limitguard.api.LimitChangePolicyPhase
 import io.github.sepfins.limitguard.api.LimitConfigurationFundingScope
 import io.github.sepfins.limitguard.api.LimitFundingScope
+import io.github.sepfins.limitguard.api.LimitAmount
 import io.github.sepfins.limitguard.api.LimitKind
 import io.github.sepfins.limitguard.api.LimitPeriod
 import io.github.sepfins.limitguard.api.NoMatchingRuleBehavior
+import io.github.sepfins.limitguard.api.LimitUsageConsumptionMode
 import io.github.sepfins.limitguard.api.PartyType
 import io.github.sepfins.limitguard.api.PartyProfileDelegationType
 import io.github.sepfins.limitguard.api.ProductNodeType
@@ -210,7 +212,7 @@ data class CreateLimitConfigurationCommand(
     val name: String,
     val limitKind: LimitKind,
     val currency: String,
-    val maxAssignableAmount: BigDecimal,
+    val maxAssignableAmount: LimitAmount,
     val parentConfigurationId: UUID? = null,
     val description: String? = null,
     val period: LimitPeriod? = null,
@@ -223,6 +225,7 @@ data class CreateLimitConfigurationCommand(
     val operationTypeId: UUID? = null,
     val defaultAmount: BigDecimal? = null,
     val priority: Int = 100,
+    val usageConsumptionMode: LimitUsageConsumptionMode = LimitUsageConsumptionMode.CASCADING,
     val isActive: Boolean = true,
     val startsAt: Instant? = null,
     val endsAt: Instant? = null,

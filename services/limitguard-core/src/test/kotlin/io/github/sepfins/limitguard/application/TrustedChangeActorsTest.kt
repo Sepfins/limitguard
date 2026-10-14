@@ -1,5 +1,6 @@
 package io.github.sepfins.limitguard.application
 
+import io.github.sepfins.limitguard.api.LimitAmount
 import io.github.sepfins.limitguard.api.LimitChangeActorType
 import io.github.sepfins.limitguard.api.LimitMandateScope
 import io.github.sepfins.limitguard.api.LimitRuleChangeStatus
@@ -275,7 +276,7 @@ class TrustedChangeActorsTest {
             val historyBefore = s.details(created.id)
             val pending = s.facade.limitChangeService.requestLimitRuleChange(s.represented().copy(
                 changeType = LimitRuleChangeType.UPDATE, limitRuleId = ruleId, expectedVersion = ruleBefore.version,
-                requestedRule = s.command.requestedRule!!.copy(amount = BigDecimal("600")), idempotencyKey = "update",
+                requestedRule = s.command.requestedRule!!.copy(amount = LimitAmount.Bounded(BigDecimal("600"))), idempotencyKey = "update",
             ))
             fixture.setDelegationWindow(EffectiveWindow(NOW.minusSeconds(60), NOW))
             fixture.resetPolicies(unavailable = true)

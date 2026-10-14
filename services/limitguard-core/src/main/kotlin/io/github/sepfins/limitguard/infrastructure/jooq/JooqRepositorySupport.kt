@@ -6,7 +6,10 @@ import com.google.gson.JsonParser
 import io.github.sepfins.limitguard.api.errors.ConflictException
 import io.github.sepfins.limitguard.api.errors.IdempotencyConflictException
 import io.github.sepfins.limitguard.api.errors.InfrastructureException
+import io.github.sepfins.limitguard.domain.common.CurrencyCode
 import io.github.sepfins.limitguard.domain.common.Metadata
+import io.github.sepfins.limitguard.domain.common.Money
+import io.github.sepfins.limitguard.domain.limit.LimitAmount
 import io.github.sepfins.limitguard.internal.json.JsonSnapshots
 import org.jooq.Condition
 import org.jooq.Field
@@ -76,6 +79,13 @@ private fun numberValue(value: String): Number {
     }
     return decimal
 }
+
+/** A limit amount is stored as a nullable amount column plus an unlimited flag. */
+internal val LimitAmount.storedAmount: BigDecimal?
+    get() = (this as? LimitAmount.Bounded)?.money?.amount
+
+internal fun storedLimitAmount(amount: BigDecimal?, unlimited: Boolean, currency: CurrencyCode): LimitAmount =
+    if (unlimited) LimitAmount.Unlimited(currency) else LimitAmount.Bounded(Money.positive(requireNotNull(amount), currency))
 
 internal fun Field<String>.containsIgnoreCaseLiteral(search: String): Condition {
     val escaped = search
