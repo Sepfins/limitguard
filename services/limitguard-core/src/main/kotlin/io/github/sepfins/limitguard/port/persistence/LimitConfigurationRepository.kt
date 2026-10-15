@@ -29,6 +29,9 @@ interface LimitConfigurationRepository {
     fun findActiveByOperationScope(tenantId: TenantId, scope: LimitOperationScope, at: Instant): List<LimitConfiguration>
     fun findById(tenantId: TenantId, id: LimitConfigurationId): LimitConfiguration?
 
+    /** Includes disabled configurations and every effective window. */
+    fun findByIds(tenantId: TenantId, ids: Set<LimitConfigurationId>): List<LimitConfiguration>
+
     fun findByIdForUpdate(tenantId: TenantId, id: LimitConfigurationId): LimitConfiguration?
     fun findByCode(tenantId: TenantId, code: LimitConfigurationCode): LimitConfiguration?
     fun insert(tenantId: TenantId, limitConfiguration: LimitConfiguration): LimitConfiguration

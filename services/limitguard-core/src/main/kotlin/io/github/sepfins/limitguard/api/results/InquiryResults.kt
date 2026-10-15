@@ -176,10 +176,11 @@ data class ApplicableLimitUsageResult(
     val period: LimitPeriod?,
     val periodStartsAt: Instant?,
     val periodEndsAt: Instant?,
-    val limitAmount: BigDecimal,
+    val limitAmount: LimitAmount,
     val consumedAmount: BigDecimal?,
     val reservedAmount: BigDecimal?,
-    val availableAmount: BigDecimal,
+    /** Null for an unlimited rule, which never caps capacity. */
+    val availableAmount: BigDecimal?,
     val currency: String,
     val usageBucketId: UUID?,
     val updatedAt: Instant?,

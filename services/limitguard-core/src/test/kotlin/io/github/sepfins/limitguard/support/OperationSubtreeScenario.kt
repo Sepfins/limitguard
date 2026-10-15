@@ -46,6 +46,8 @@ class OperationSubtreeScenario(
         tenant, "ACCOUNT", "Account", FundingSourceCategory.TRANSACTIONAL, ProductNodeType.PRODUCT, isLeaf = true,
     )).id
     val source = facade.tenantCatalogService.registerFundingSource(RegisterFundingSourceCommand(tenant, product)).id
+    private val configurations = mutableMapOf<UUID, CreateLimitConfigurationCommand>()
+    private var configurationNumber = 0
     private var ruleNumber = 0
 
     init {
@@ -69,22 +71,41 @@ class OperationSubtreeScenario(
         perTransaction: Boolean = false,
         ruleOwner: UUID = owner,
         mandate: UUID? = null,
+    ): UUID = rule(
+        configuration(operation, priority, isolated, perTransaction),
+        LimitAmount.Bounded(BigDecimal(amount)), ruleOwner, mandate,
+    )
+
+    fun configuration(
+        operation: UUID?,
+        priority: Int = 100,
+        isolated: Boolean = false,
+        perTransaction: Boolean = false,
+        parent: UUID? = null,
+        maximum: LimitAmount = LimitAmount.Bounded(BigDecimal("10000")),
     ): UUID {
-        val number = ++ruleNumber
-        val kind = if (perTransaction) LimitKind.PER_TRANSACTION else LimitKind.PERIODIC
-        val period = if (perTransaction) null else LimitPeriod.DAILY
-        val configuration = facade.tenantCatalogService.createLimitConfiguration(CreateLimitConfigurationCommand(
-            tenantId = tenant, code = "LIMIT_$number", name = "Limit $number", limitKind = kind, period = period,
-            currency = "EUR", maxAssignableAmount = LimitAmount.Bounded(BigDecimal("10000")), operationTypeId = operation, priority = priority,
-        )).id
+        val number = ++configurationNumber
+        val command = CreateLimitConfigurationCommand(
+            tenantId = tenant, code = "LIMIT_$number", name = "Limit $number",
+            limitKind = if (perTransaction) LimitKind.PER_TRANSACTION else LimitKind.PERIODIC,
+            period = if (perTransaction) null else LimitPeriod.DAILY,
+            currency = "EUR", maxAssignableAmount = maximum, parentConfigurationId = parent,
+            operationTypeId = operation, priority = priority,
+            usageConsumptionMode = if (isolated) LimitUsageConsumptionMode.ISOLATED else LimitUsageConsumptionMode.CASCADING,
+        )
+        return facade.tenantCatalogService.createLimitConfiguration(command).id.also { configurations[it] = command }
+    }
+
+    fun rule(configuration: UUID, amount: LimitAmount, ruleOwner: UUID = owner, mandate: UUID? = null): UUID {
+        val c = configurations.getValue(configuration)
         val request = facade.limitChangeService.requestLimitRuleChange(RequestLimitRuleChangeCommand(
             tenantId = tenant, changeType = LimitRuleChangeType.CREATE,
             requestedBy = LimitChangeActorCommand(LimitChangeActorType.PARTY_PROFILE, partyProfileId = ruleOwner),
             targetOwnerPartyProfileId = ruleOwner, requestChannelId = channel,
             requestedRule = LimitRuleDraft(
-                name = "Rule $number", limitKind = kind, period = period, amount = LimitAmount.Bounded(BigDecimal(amount)), currency = "EUR",
-                configurationId = configuration, operationTypeId = operation, priority = priority,
-                usageConsumptionMode = if (isolated) LimitUsageConsumptionMode.ISOLATED else LimitUsageConsumptionMode.CASCADING,
+                name = "Rule ${++ruleNumber}", limitKind = c.limitKind, period = c.period, amount = amount, currency = "EUR",
+                configurationId = configuration, operationTypeId = c.operationTypeId, priority = c.priority,
+                usageConsumptionMode = c.usageConsumptionMode,
                 mandateScope = if (mandate == null) LimitMandateScope.ALL_OWNER_MANDATES else LimitMandateScope.MANDATE,
                 mandateId = mandate,
             ),

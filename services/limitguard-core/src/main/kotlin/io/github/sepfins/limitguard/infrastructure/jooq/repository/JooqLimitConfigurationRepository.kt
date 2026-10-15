@@ -129,6 +129,14 @@ class JooqLimitConfigurationRepository(
                 .fetchOne { it.toDomain() }
         }
 
+    override fun findByIds(tenantId: TenantId, ids: Set<LimitConfigurationId>): List<LimitConfiguration> =
+        jooqOperation("find limit configurations by ids") {
+            selectConfigurations()
+                .where(table.TENANT_ID.eq(tenantId.value))
+                .and(table.ID.`in`(ids.map { it.value }))
+                .fetch { it.toDomain() }
+        }
+
     override fun findByIdForUpdate(
         tenantId: TenantId,
         id: LimitConfigurationId,

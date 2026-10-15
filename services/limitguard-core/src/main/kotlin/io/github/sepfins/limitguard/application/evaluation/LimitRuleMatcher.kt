@@ -1,7 +1,5 @@
 package io.github.sepfins.limitguard.application.evaluation
 
-import io.github.sepfins.limitguard.api.errors.NotFoundException
-import io.github.sepfins.limitguard.domain.limit.LimitRule
 import io.github.sepfins.limitguard.domain.limit.appliesToFundingSource
 import io.github.sepfins.limitguard.domain.transaction.PaymentTransaction
 import io.github.sepfins.limitguard.port.persistence.ChannelGroupMemberRepository
@@ -9,6 +7,7 @@ import io.github.sepfins.limitguard.port.persistence.LimitConfigurationRepositor
 import io.github.sepfins.limitguard.port.persistence.LimitRuleRepository
 import java.time.Instant
 
+/** Finds the rules the actor may use, then keeps those whose configurations cover the operation. */
 internal class LimitRuleMatcher(
     private val limitRuleRepository: LimitRuleRepository,
     private val channelGroupMemberRepository: ChannelGroupMemberRepository,
@@ -19,7 +18,7 @@ internal class LimitRuleMatcher(
         authorities: List<ResolvedFundingAuthority>,
         references: ResolvedAuthorizationReferences,
         at: Instant,
-    ): List<LimitRule> = findMatches(
+    ): List<ApplicableLimitRule> = findMatches(
         context = transaction.toLimitEvaluationContext(),
         authorities = authorities,
         references = references,
@@ -31,15 +30,8 @@ internal class LimitRuleMatcher(
         authorities: List<ResolvedFundingAuthority>,
         references: ResolvedAuthorizationReferences,
         at: Instant,
-    ): List<LimitRule> {
-        val containingChannelGroupIds = channelGroupMemberRepository.findGroupIdsContaining(
-            tenantId = context.tenantId,
-            channelId = context.channelId,
-        )
-        val operationTypePath = references.operationTypePath.map { it.id }
-
-        return authorities
-            .asSequence()
+    ): List<ApplicableLimitRule> {
+        val rules = authorities
             .flatMap { authority ->
                 limitRuleRepository
                     .findActiveForOwner(
@@ -47,7 +39,6 @@ internal class LimitRuleMatcher(
                         owner = authority.ownerPartyProfileId,
                         at = at,
                     )
-                    .asSequence()
                     .filter { rule ->
                         rule.mandateScope.appliesTo(
                             directOwner = authority.directOwnership,
@@ -56,6 +47,18 @@ internal class LimitRuleMatcher(
                     }
             }
             .distinctBy { it.id }
+        if (rules.isEmpty()) {
+            return emptyList()
+        }
+
+        val containingChannelGroupIds = channelGroupMemberRepository.findGroupIdsContaining(
+            tenantId = context.tenantId,
+            channelId = context.channelId,
+        )
+        val operationTypePath = references.operationTypePath.map { it.id }
+        // A configuration's activity and window apply to new grants, not to rules already granted under it.
+        val coveringConfigurations = limitConfigurationRepository
+            .findByIds(context.tenantId, rules.mapTo(hashSetOf()) { it.configurationId })
             .filter {
                 it.channelScope.includes(
                     channelId = context.channelId,
@@ -63,21 +66,15 @@ internal class LimitRuleMatcher(
                 )
             }
             .filter { it.operationScope.includes(operationTypePath) }
-            .filter { it.appliesToFundingScope(context, references) }
-            .sortedWith(
-                compareBy<LimitRule> { it.priority.value }
-                    .thenBy { it.id.value },
-            )
-            .toList()
-    }
+            .filter { it.fundingScope.appliesToFundingSource(references.fundingSourceProductPath) }
+            .associateBy { it.id }
 
-    private fun LimitRule.appliesToFundingScope(
-        context: LimitEvaluationContext,
-        references: ResolvedAuthorizationReferences,
-    ): Boolean {
-        val configurationId = configurationId ?: return true
-        val configuration = limitConfigurationRepository.findById(context.tenantId, configurationId)
-            ?: throw NotFoundException("limit configuration not found: ${configurationId.value}")
-        return configuration.fundingScope.appliesToFundingSource(references.fundingSourceProductPath)
+        return rules
+            .filter { it.configurationId in coveringConfigurations }
+            .map { ApplicableLimitRule(it, coveringConfigurations.getValue(it.configurationId)) }
+            .sortedWith(
+                compareBy<ApplicableLimitRule> { it.configuration.priority.value }
+                    .thenBy { it.rule.id.value },
+            )
     }
 }

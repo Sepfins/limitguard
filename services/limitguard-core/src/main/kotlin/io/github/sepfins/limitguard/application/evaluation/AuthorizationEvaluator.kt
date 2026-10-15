@@ -55,7 +55,7 @@ internal class AuthorizationEvaluator(
 ) {
     fun evaluate(
         transaction: PaymentTransaction,
-        matchedRules: List<LimitRule>,
+        matchedRules: List<ApplicableLimitRule>,
         noMatchingRuleBehavior: NoMatchingRuleBehavior,
         now: Instant,
     ): AuthorizationEvaluation {
@@ -88,19 +88,19 @@ internal class AuthorizationEvaluator(
 
         val evaluatedRules = ApplicableLimitRuleSelector.select(matchedRules)
         // Unlimited rules are reported as matched but never deny and reserve no usage.
-        val boundedRules = evaluatedRules.filter { it.isBounded }
+        val boundedRules = evaluatedRules.filter { it.rule.isBounded }
         val currencyViolations = boundedRules
-            .filter { it.amount.currency != transaction.authorizedAmount.currency }
-            .map { it.currencyMismatchViolation(transaction.authorizedAmount) }
+            .filter { it.rule.amount.currency != transaction.authorizedAmount.currency }
+            .map { it.rule.currencyMismatchViolation(transaction.authorizedAmount) }
 
         if (currencyViolations.isNotEmpty()) {
             return denied(evaluatedRules, currencyViolations)
         }
 
         val perTransactionViolations = boundedRules
-            .filter { it.limitKind == LimitKind.PerTransaction }
-            .filter { transaction.authorizedAmount > it.cap }
-            .map { it.perTransactionViolation(transaction.authorizedAmount) }
+            .filter { it.configuration.limitKind == LimitKind.PerTransaction }
+            .filter { transaction.authorizedAmount > it.rule.cap }
+            .map { it.rule.perTransactionViolation(transaction.authorizedAmount) }
 
         if (perTransactionViolations.isNotEmpty()) {
             return denied(evaluatedRules, perTransactionViolations)
@@ -108,7 +108,9 @@ internal class AuthorizationEvaluator(
 
         val reservationPlan = usageReservationService.planAuthorizationReservation(
             transaction = transaction,
-            periodicRules = boundedRules.filter { it.limitKind is LimitKind.Periodic },
+            periodicRules = boundedRules
+                .filter { it.configuration.limitKind is LimitKind.Periodic }
+                .map { it.rule },
             now = now,
         )
         val decision = decision(evaluatedRules, reservationPlan.violations)
@@ -134,7 +136,7 @@ internal class AuthorizationEvaluator(
     }
 
     private fun denied(
-        rules: List<LimitRule>,
+        rules: List<ApplicableLimitRule>,
         violations: List<LimitViolation>,
     ): AuthorizationEvaluation =
         AuthorizationEvaluation(
@@ -143,7 +145,7 @@ internal class AuthorizationEvaluator(
         )
 
     private fun decision(
-        rules: List<LimitRule>,
+        rules: List<ApplicableLimitRule>,
         violations: List<LimitViolation>,
     ): LimitDecision =
         LimitDecision(
@@ -180,13 +182,13 @@ internal class AuthorizationEvaluator(
             remainingAmount = null,
         )
 
-    private fun LimitRule.toMatchedRule(): MatchedLimitRule =
+    private fun ApplicableLimitRule.toMatchedRule(): MatchedLimitRule =
         MatchedLimitRule(
-            id = id,
-            name = name,
-            limitKind = limitKind,
-            amount = amount,
-            priority = priority,
+            id = rule.id,
+            name = rule.name,
+            limitKind = configuration.limitKind,
+            amount = rule.amount,
+            priority = configuration.priority,
         )
 
     companion object {

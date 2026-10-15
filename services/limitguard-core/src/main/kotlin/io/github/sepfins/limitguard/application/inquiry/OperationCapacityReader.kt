@@ -8,8 +8,11 @@ import io.github.sepfins.limitguard.api.results.ApplicableLimitUsageResult
 import io.github.sepfins.limitguard.api.results.OperationCapacityReasonResult
 import io.github.sepfins.limitguard.api.results.OperationCapacityResult
 import io.github.sepfins.limitguard.application.cap
+import io.github.sepfins.limitguard.application.boundedMoney
+import io.github.sepfins.limitguard.application.evaluation.ApplicableLimitRule
 import io.github.sepfins.limitguard.application.evaluation.ApplicableLimitRuleSelector
 import io.github.sepfins.limitguard.application.isBounded
+import io.github.sepfins.limitguard.application.toApi
 import io.github.sepfins.limitguard.application.evaluation.AuthorizationReferenceResolver
 import io.github.sepfins.limitguard.application.evaluation.LimitEvaluationContext
 import io.github.sepfins.limitguard.application.evaluation.LimitRuleMatcher
@@ -18,7 +21,6 @@ import io.github.sepfins.limitguard.application.usage.UsageWindowCalculator
 import io.github.sepfins.limitguard.domain.common.CurrencyCode
 import io.github.sepfins.limitguard.domain.common.Money
 import io.github.sepfins.limitguard.domain.limit.LimitKind
-import io.github.sepfins.limitguard.domain.limit.LimitRule
 import io.github.sepfins.limitguard.domain.tenant.NoMatchingRuleBehavior
 import io.github.sepfins.limitguard.port.persistence.FundingSourceOwnerRepository
 import io.github.sepfins.limitguard.port.persistence.UsageBucketRepository
@@ -100,16 +102,13 @@ internal class OperationCapacityReader(
             )
         }
 
-        // Unlimited rules never cap capacity.
-        val selectedRules = ApplicableLimitRuleSelector.select(matchingRules).filter { it.isBounded }
-        if (selectedRules.isEmpty()) {
-            return result(context = context, currency = currency, at = at, status = OperationCapacityStatus.AVAILABLE)
-        }
-        val applicableLimits = selectedRules.map { rule ->
-            rule.toUsageResult(context, at)
-        }
+        val selectedRules = ApplicableLimitRuleSelector.select(matchingRules)
+        val applicableLimits = selectedRules.map { it.toUsageResult(context, at) }
+        // Unlimited rules are reported as applicable but never cap capacity.
+        val boundedLimits = applicableLimits.filter { it.availableAmount != null }
         val currencyMismatches = selectedRules
-            .filter { it.amount.currency != currency }
+            .map { it.rule }
+            .filter { it.isBounded && it.amount.currency != currency }
             .map { rule ->
                 OperationCapacityReasonResult(
                     code = "LIMIT_CURRENCY_MISMATCH",
@@ -129,10 +128,19 @@ internal class OperationCapacityReader(
                 reasons = currencyMismatches,
             )
         }
+        if (boundedLimits.isEmpty()) {
+            return result(
+                context = context,
+                currency = currency,
+                at = at,
+                status = OperationCapacityStatus.AVAILABLE,
+                applicableLimits = applicableLimits,
+            )
+        }
 
-        val effectiveAvailableAmount = applicableLimits.minOf { it.availableAmount }
-        val limitingRuleIds = applicableLimits
-            .filter { it.availableAmount.compareTo(effectiveAvailableAmount) == 0 }
+        val effectiveAvailableAmount = boundedLimits.mapNotNull { it.availableAmount }.min()
+        val limitingRuleIds = boundedLimits
+            .filter { it.availableAmount?.compareTo(effectiveAvailableAmount) == 0 }
             .map { it.limitRuleId }
 
         return result(
@@ -150,59 +158,43 @@ internal class OperationCapacityReader(
         )
     }
 
-    private fun LimitRule.toUsageResult(
+    private fun ApplicableLimitRule.toUsageResult(
         context: LimitEvaluationContext,
         at: Instant,
-    ): ApplicableLimitUsageResult =
-        when (val kind = limitKind) {
-            LimitKind.PerTransaction -> ApplicableLimitUsageResult(
-                limitRuleId = id.value,
-                ownerPartyProfileId = ownerPartyProfileId.value,
-                name = name.value,
-                description = description,
-                limitKind = ApiLimitKind.PER_TRANSACTION,
-                period = null,
-                periodStartsAt = null,
-                periodEndsAt = null,
-                limitAmount = cap.amount,
-                consumedAmount = null,
-                reservedAmount = null,
-                availableAmount = cap.amount,
-                currency = cap.currency.value,
-                usageBucketId = null,
-                updatedAt = null,
+    ): ApplicableLimitUsageResult {
+        val period = (configuration.limitKind as? LimitKind.Periodic)?.period
+        val window = period?.let { usageWindowCalculator.calculateWindow(at, it) }
+        // Unlimited rules reserve nothing, so they have no bucket to read.
+        val bucket = window?.takeIf { rule.isBounded }?.let {
+            usageBucketRepository.findByLimitRuleAndAssigneeInWindow(
+                tenantId = context.tenantId,
+                limitRuleId = rule.id,
+                assigneeId = context.actingPartyProfileId,
+                currency = rule.amount.currency,
+                window = it,
             )
-
-            is LimitKind.Periodic -> {
-                val window = usageWindowCalculator.calculateWindow(at, kind.period)
-                val bucket = usageBucketRepository.findByLimitRuleAndAssigneeInWindow(
-                    tenantId = context.tenantId,
-                    limitRuleId = id,
-                    assigneeId = context.actingPartyProfileId,
-                    currency = amount.currency,
-                    window = window,
-                )
-                val zero = Money.zero(amount.currency)
-
-                ApplicableLimitUsageResult(
-                    limitRuleId = id.value,
-                    ownerPartyProfileId = ownerPartyProfileId.value,
-                    name = name.value,
-                    description = description,
-                    limitKind = ApiLimitKind.PERIODIC,
-                    period = ApiLimitPeriod.valueOf(kind.period.name),
-                    periodStartsAt = window.periodStartsAt,
-                    periodEndsAt = window.periodEndsAt,
-                    limitAmount = cap.amount,
-                    consumedAmount = bucket?.consumedAmount?.amount ?: zero.amount,
-                    reservedAmount = bucket?.reservedAmount?.amount ?: zero.amount,
-                    availableAmount = bucket?.remaining(cap)?.amount ?: cap.amount,
-                    currency = cap.currency.value,
-                    usageBucketId = bucket?.id?.value,
-                    updatedAt = bucket?.updatedAt,
-                )
-            }
         }
+        val zero = Money.zero(rule.amount.currency).amount
+        val cap = rule.amount.boundedMoney
+
+        return ApplicableLimitUsageResult(
+            limitRuleId = rule.id.value,
+            ownerPartyProfileId = rule.ownerPartyProfileId.value,
+            name = rule.name.value,
+            description = rule.description,
+            limitKind = if (period == null) ApiLimitKind.PER_TRANSACTION else ApiLimitKind.PERIODIC,
+            period = period?.let { ApiLimitPeriod.valueOf(it.name) },
+            periodStartsAt = window?.periodStartsAt,
+            periodEndsAt = window?.periodEndsAt,
+            limitAmount = rule.amount.toApi(),
+            consumedAmount = window?.let { bucket?.consumedAmount?.amount ?: zero },
+            reservedAmount = window?.let { bucket?.reservedAmount?.amount ?: zero },
+            availableAmount = cap?.let { bucket?.remaining(it)?.amount ?: it.amount },
+            currency = rule.amount.currency.value,
+            usageBucketId = bucket?.id?.value,
+            updatedAt = bucket?.updatedAt,
+        )
+    }
 
     private fun noMatchingRuleResult(
         context: LimitEvaluationContext,

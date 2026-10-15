@@ -1,33 +1,32 @@
 package io.github.sepfins.limitguard.application.evaluation
 
 import io.github.sepfins.limitguard.domain.limit.LimitKind
-import io.github.sepfins.limitguard.domain.limit.LimitRule
 import io.github.sepfins.limitguard.domain.limit.LimitUsageConsumptionMode
 
 /** Selects the exact rule cascade enforced by transaction authorization. */
 internal object ApplicableLimitRuleSelector {
-    fun select(matchedRules: List<LimitRule>): List<LimitRule> {
+    fun select(matchedRules: List<ApplicableLimitRule>): List<ApplicableLimitRule> {
         val selectedPeriodicRuleIds = matchedRules
-            .filter { it.limitKind is LimitKind.Periodic }
-            .groupBy { it.ownerPartyProfileId }
+            .filter { it.configuration.limitKind is LimitKind.Periodic }
+            .groupBy { it.rule.ownerPartyProfileId }
             .values
             .flatMap(::selectPeriodicCascade)
-            .mapTo(hashSetOf()) { it.id }
+            .mapTo(hashSetOf()) { it.rule.id }
 
-        return matchedRules.filter { rule ->
-            rule.limitKind == LimitKind.PerTransaction || rule.id in selectedPeriodicRuleIds
+        return matchedRules.filter {
+            it.configuration.limitKind == LimitKind.PerTransaction || it.rule.id in selectedPeriodicRuleIds
         }
     }
 
-    private fun selectPeriodicCascade(rules: List<LimitRule>): List<LimitRule> {
+    private fun selectPeriodicCascade(rules: List<ApplicableLimitRule>): List<ApplicableLimitRule> {
         val priorityTiers = rules
-            .groupBy { it.priority }
+            .groupBy { it.configuration.priority }
             .toSortedMap(compareBy { it.value })
-        val selected = mutableListOf<LimitRule>()
+        val selected = mutableListOf<ApplicableLimitRule>()
 
         for (tier in priorityTiers.values) {
             selected += tier
-            if (tier.any { it.usageConsumptionMode == LimitUsageConsumptionMode.ISOLATED }) {
+            if (tier.any { it.configuration.usageConsumptionMode == LimitUsageConsumptionMode.ISOLATED }) {
                 break
             }
         }
