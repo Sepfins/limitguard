@@ -11,11 +11,8 @@ import io.github.sepfins.limitguard.api.LimitChannelScope
 import io.github.sepfins.limitguard.api.LimitConfigurationFundingScope
 import io.github.sepfins.limitguard.api.LimitFundingScope
 import io.github.sepfins.limitguard.api.LimitKind
-import io.github.sepfins.limitguard.api.LimitMandateScope
 import io.github.sepfins.limitguard.api.LimitPeriod
 import io.github.sepfins.limitguard.api.LimitRuleChangeStatus
-import io.github.sepfins.limitguard.api.LimitRuleChangeType
-import io.github.sepfins.limitguard.api.LimitUsageConsumptionMode
 import io.github.sepfins.limitguard.api.Limitguard
 import io.github.sepfins.limitguard.api.NoMatchingRuleBehavior
 import io.github.sepfins.limitguard.api.PartyProfileDelegationType
@@ -27,7 +24,8 @@ import io.github.sepfins.limitguard.api.commands.CreateLimitConfigurationCommand
 import io.github.sepfins.limitguard.api.commands.CreateMandateCommand
 import io.github.sepfins.limitguard.api.commands.CreatePartyProfileDelegationCommand
 import io.github.sepfins.limitguard.api.commands.LimitChangeActorCommand
-import io.github.sepfins.limitguard.api.commands.LimitRuleDraft
+import io.github.sepfins.limitguard.api.commands.LimitRuleChangeOperation
+import io.github.sepfins.limitguard.api.commands.LimitRuleTargetCommand
 import io.github.sepfins.limitguard.api.commands.RegisterChannelCommand
 import io.github.sepfins.limitguard.api.commands.RegisterFundingSourceCommand
 import io.github.sepfins.limitguard.api.commands.RegisterFundingSourceProductCommand
@@ -492,33 +490,15 @@ class DemoScenarioService(
         val request = limitguard.limitChangeService.requestLimitRuleChange(
             RequestLimitRuleChangeCommand(
                 tenantId = tenantId,
-                changeType = LimitRuleChangeType.CREATE,
                 requestedBy = LimitChangeActorCommand(
                     actorType = LimitChangeActorType.PARTY_PROFILE,
                     partyProfileId = customerProfileId,
                 ),
-                targetOwnerPartyProfileId = ownerProfileId,
+                target = LimitRuleTargetCommand(ownerProfileId, configuration.id, mandateId),
+                operation = LimitRuleChangeOperation.SetAmount(LimitAmount.Bounded(BigDecimal(amount))),
                 requesterPartyProfileId = customerProfileId,
                 authorityDelegationId = delegationId,
                 requestChannelId = channelId,
-                targetMandateId = mandateId,
-                requestedRule = LimitRuleDraft(
-                    name = name,
-                    description = "Customer-managed $name",
-                    limitKind = kind,
-                    period = period,
-                    amount = LimitAmount.Bounded(BigDecimal(amount)),
-                    currency = "EUR",
-                    mandateScope = LimitMandateScope.MANDATE,
-                    mandateId = mandateId,
-                    configurationId = configuration.id,
-                    channelScope = LimitChannelScope.CHANNEL,
-                    channelId = channelId,
-                    operationTypeId = operationTypeId,
-                    usageConsumptionMode = LimitUsageConsumptionMode.CASCADING,
-                    priority = 100,
-                    metadata = mapOf("journey" to "SELF_SERVICE"),
-                ),
                 policyContext = mapOf(
                     "journey" to "SELF_SERVICE",
                     "currentExposure" to "0.0000",

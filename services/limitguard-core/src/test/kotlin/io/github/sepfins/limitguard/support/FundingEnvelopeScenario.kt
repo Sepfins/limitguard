@@ -7,7 +7,6 @@ import io.github.sepfins.limitguard.api.LimitChannelScope
 import io.github.sepfins.limitguard.api.LimitConfigurationFundingScope
 import io.github.sepfins.limitguard.api.LimitKind
 import io.github.sepfins.limitguard.api.Limitguard
-import io.github.sepfins.limitguard.api.LimitRuleChangeType
 import io.github.sepfins.limitguard.api.PartyType
 import io.github.sepfins.limitguard.api.ProductNodeType
 import io.github.sepfins.limitguard.api.TrustedChangeActorContext
@@ -18,7 +17,8 @@ import io.github.sepfins.limitguard.api.commands.AuthorizeTransactionCommand
 import io.github.sepfins.limitguard.api.commands.CreateLimitConfigurationCommand
 import io.github.sepfins.limitguard.api.commands.CreateChannelGroupCommand
 import io.github.sepfins.limitguard.api.commands.LimitChangeActorCommand
-import io.github.sepfins.limitguard.api.commands.LimitRuleDraft
+import io.github.sepfins.limitguard.api.commands.LimitRuleChangeOperation
+import io.github.sepfins.limitguard.api.commands.LimitRuleTargetCommand
 import io.github.sepfins.limitguard.api.commands.RegisterChannelCommand
 import io.github.sepfins.limitguard.api.commands.RegisterFundingSourceCommand
 import io.github.sepfins.limitguard.api.commands.RegisterFundingSourceProductCommand
@@ -137,16 +137,11 @@ class FundingEnvelopeScenario(val facade: Limitguard, val now: Instant) {
     }
 
     fun requestCommand(configuration: LimitConfigurationResult, amount: String = "500") = RequestLimitRuleChangeCommand(
-        tenantId = tenant, changeType = LimitRuleChangeType.CREATE,
+        tenantId = tenant,
         requestedBy = LimitChangeActorCommand(LimitChangeActorType.PARTY_PROFILE, partyProfileId = owner),
-        targetOwnerPartyProfileId = owner, requestChannelId = channel,
-        requestedRule = LimitRuleDraft(
-            name = "Rule ${configuration.code}", configurationId = configuration.id,
-            limitKind = configuration.limitKind, period = configuration.period, currency = configuration.currency,
-            amount = LimitAmount.Bounded(BigDecimal(amount)), channelScope = configuration.channelScope, channelId = configuration.channelId,
-            channelGroupId = configuration.channelGroupId, operationTypeId = configuration.operationTypeId,
-            priority = configuration.priority, startsAt = configuration.startsAt, endsAt = configuration.endsAt,
-        ),
+        target = LimitRuleTargetCommand(owner, configuration.id),
+        operation = LimitRuleChangeOperation.SetAmount(LimitAmount.Bounded(BigDecimal(amount))),
+        requestChannelId = channel,
     )
 
     fun approve(request: UUID) = facade.limitChangeService.approveLimitRuleChange(ApproveLimitRuleChangeCommand(

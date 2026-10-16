@@ -5,7 +5,6 @@ import io.github.sepfins.limitguard.api.TrustedChangeActorContext
 import io.github.sepfins.limitguard.api.LimitChangeActorType
 import io.github.sepfins.limitguard.api.LimitKind
 import io.github.sepfins.limitguard.api.LimitRuleChangeStatus
-import io.github.sepfins.limitguard.api.LimitRuleChangeType
 import io.github.sepfins.limitguard.api.PartyType
 import io.github.sepfins.limitguard.api.commands.CreateLimitConfigurationCommand
 import io.github.sepfins.limitguard.api.commands.CreateLimitChangePolicyCommand
@@ -14,7 +13,8 @@ import io.github.sepfins.limitguard.api.commands.ApplyDueLimitChangesCommand
 import io.github.sepfins.limitguard.api.commands.SetLimitConfigurationActiveCommand
 import io.github.sepfins.limitguard.api.commands.CancelLimitRuleChangeCommand
 import io.github.sepfins.limitguard.api.commands.LimitChangeActorCommand
-import io.github.sepfins.limitguard.api.commands.LimitRuleDraft
+import io.github.sepfins.limitguard.api.commands.LimitRuleChangeOperation
+import io.github.sepfins.limitguard.api.commands.LimitRuleTargetCommand
 import io.github.sepfins.limitguard.api.commands.RegisterPartyProfileCommand
 import io.github.sepfins.limitguard.api.commands.RegisterChannelCommand
 import io.github.sepfins.limitguard.api.commands.RegisterTenantCommand
@@ -52,11 +52,11 @@ class ImmutableChangeIntentTest {
     fun `creation retries conflict on changes to any original submission field`() {
         val fixture = Fixture()
         val created = fixture.facade.limitChangeService.requestLimitRuleChange(fixture.command)
-        val rule = fixture.approve(created.id)
+        fixture.approve(created.id)
         val channel = fixture.facade.tenantCatalogService.registerChannel(RegisterChannelCommand(fixture.tenant, "MOBILE", "Mobile")).id
         val effectiveAt = fixture.clock.now().plusSeconds(3600)
         val command = fixture.command.copy(
-            changeType = LimitRuleChangeType.UPDATE, limitRuleId = rule.limitRuleId, expectedVersion = 1,
+            operation = LimitRuleChangeOperation.SetAmount(LimitAmount.Bounded(BigDecimal("600"))), expectedVersion = 1,
             requestedBy = LimitChangeActorCommand(LimitChangeActorType.PARTY_PROFILE, partyProfileId = fixture.owner),
             requestChannelId = channel, effectiveAt = effectiveAt, expiresAt = effectiveAt.plusSeconds(3600),
             policyContext = mapOf("optional" to null), metadata = mapOf("attempt" to 1L), idempotencyKey = "update-intent",
@@ -68,11 +68,11 @@ class ImmutableChangeIntentTest {
         )))
         val different = listOf(
             command.copy(expectedVersion = 2),
-            command.copy(limitRuleId = UUID.randomUUID()),
             command.copy(requesterPartyProfileId = UUID.randomUUID()),
             command.copy(requestChannelId = UUID.randomUUID()),
             command.copy(authorityDelegationId = UUID.randomUUID()),
-            command.copy(targetOwnerPartyProfileId = UUID.randomUUID()),
+            command.copy(target = command.target.copy(ownerPartyProfileId = UUID.randomUUID())),
+            command.copy(target = command.target.copy(mandateId = UUID.randomUUID())),
             command.copy(
                 requestedBy = LimitChangeActorCommand(LimitChangeActorType.SYSTEM),
                 requesterPartyProfileId = fixture.owner,
@@ -81,7 +81,8 @@ class ImmutableChangeIntentTest {
             command.copy(expiresAt = command.expiresAt!!.plusSeconds(1)),
             command.copy(policyContext = emptyMap()),
             command.copy(metadata = mapOf("attempt" to 2)),
-            command.copy(requestedRule = command.requestedRule!!.copy(amount = LimitAmount.Bounded(BigDecimal("501")))),
+            command.copy(operation = LimitRuleChangeOperation.SetAmount(LimitAmount.Bounded(BigDecimal("601")))),
+            command.copy(operation = LimitRuleChangeOperation.Deactivate),
         )
         for (retry in different) {
             val context = TrustedChangeActorContext.InternalSystem.takeIf { retry.requestedBy.actorType == LimitChangeActorType.SYSTEM }
@@ -115,7 +116,7 @@ class ImmutableChangeIntentTest {
         }
         assertFailsWith<IdempotencyConflictException> {
             fixture.facade.limitChangeService.requestLimitRuleChange(command.copy(
-                requestedRule = command.requestedRule!!.copy(amount = LimitAmount.Bounded(BigDecimal("400"))),
+                operation = LimitRuleChangeOperation.SetAmount(LimitAmount.Bounded(BigDecimal("400"))),
             ))
         }
 
@@ -127,8 +128,7 @@ class ImmutableChangeIntentTest {
         assertEquals(LimitAmount.Bounded(BigDecimal("400.0000")), fixture.facade.limitInquiryService.getLimitRule(GetLimitRuleQuery(fixture.tenant, ruleId)).amount)
 
         val retire = fixture.facade.limitChangeService.requestLimitRuleChange(command.copy(
-            changeType = LimitRuleChangeType.DELETE, limitRuleId = ruleId, expectedVersion = 1,
-            requestedRule = null, expiresAt = null, idempotencyKey = "retire",
+            operation = LimitRuleChangeOperation.Delete, expectedVersion = 1, expiresAt = null, idempotencyKey = "retire",
         ))
         fixture.approve(retire.id)
         fixture.facade.tenantCatalogService.setLimitConfigurationActive(SetLimitConfigurationActiveCommand(
@@ -207,13 +207,12 @@ class ImmutableChangeIntentTest {
             },
         )
         for (value in malformed) {
-            for (boundary in listOf("metadata", "policyContext", "draft")) {
+            for (boundary in listOf("metadata", "policyContext")) {
                 val fixture = Fixture()
                 val invalid = mapOf("bad" to value)
                 val command = when (boundary) {
                     "metadata" -> fixture.command.copy(metadata = invalid)
-                    "policyContext" -> fixture.command.copy(policyContext = invalid)
-                    else -> fixture.command.copy(requestedRule = fixture.command.requestedRule!!.copy(metadata = invalid))
+                    else -> fixture.command.copy(policyContext = invalid)
                 }
                 assertFailsWith<ValidationException>(boundary) {
                     fixture.facade.limitChangeService.requestLimitRuleChange(command)
@@ -264,7 +263,6 @@ class ImmutableChangeIntentTest {
         val command = fixture.command.copy(
             metadata = metadata,
             policyContext = metadata,
-            requestedRule = fixture.command.requestedRule!!.copy(metadata = metadata),
         )
         val result = fixture.facade.limitChangeService.requestLimitRuleChange(command)
 
@@ -276,7 +274,6 @@ class ImmutableChangeIntentTest {
         val details = fixture.facade.limitInquiryService.getLimitChange(GetLimitChangeQuery(fixture.tenant, result.id))
         assertEquals(expected, result.metadata)
         assertEquals(expected, details.request.metadata)
-        assertEquals(expected, details.requestedRule["metadata"])
         assertFailsWith<UnsupportedOperationException> {
             (result.metadata as MutableMap<String, Any?>)["extra"] = true
         }
@@ -286,7 +283,6 @@ class ImmutableChangeIntentTest {
         val replay = fixture.facade.limitChangeService.requestLimitRuleChange(command.copy(
             metadata = expected,
             policyContext = expected,
-            requestedRule = command.requestedRule!!.copy(metadata = expected),
         ))
         assertEquals(result, replay)
         assertEquals(details, fixture.facade.limitInquiryService.getLimitChange(GetLimitChangeQuery(fixture.tenant, result.id)))
@@ -306,14 +302,10 @@ class ImmutableChangeIntentTest {
         val channel = facade.tenantCatalogService.registerChannel(RegisterChannelCommand(tenant, "WEB", "Web")).id
         val command = RequestLimitRuleChangeCommand(
             tenantId = tenant,
-            changeType = LimitRuleChangeType.CREATE,
             requestedBy = LimitChangeActorCommand(LimitChangeActorType.PARTY_PROFILE, partyProfileId = owner),
+            target = LimitRuleTargetCommand(owner, configuration),
+            operation = LimitRuleChangeOperation.SetAmount(LimitAmount.Bounded(BigDecimal("500"))),
             requestChannelId = channel,
-            targetOwnerPartyProfileId = owner,
-            requestedRule = LimitRuleDraft(
-                name = "Spending limit", limitKind = LimitKind.PER_TRANSACTION, amount = LimitAmount.Bounded(BigDecimal("500")),
-                currency = "EUR", configurationId = configuration,
-            ),
             idempotencyKey = "original-submission",
         )
 

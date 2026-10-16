@@ -22,7 +22,6 @@ import java.util.UUID
 data class LimitChangeDetailsResult(
     val request: LimitChangeRequestResult,
     val requestedRule: Map<String, Any?>,
-    val approvedRule: Map<String, Any?>?,
     val beforeRule: Map<String, Any?>?,
     val events: List<LimitChangeEventResult>,
     val revisions: List<LimitRuleRevisionResult>,

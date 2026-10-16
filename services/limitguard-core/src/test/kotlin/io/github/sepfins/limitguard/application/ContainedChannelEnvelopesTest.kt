@@ -211,23 +211,11 @@ class ContainedChannelEnvelopesTest {
         val s = scenario()
         val atm = s.registerChannel("ATM")
         val group = s.channelGroup("ATMS", atm.id)
-        val equivalent = s.channelGroup("EQUIVALENT", atm.id)
         val parent = s.configuration("PARENT")
         val selected = s.configuration("SELECTED", parent.id, channelGroupId = group.id)
-        val command = s.requestCommand(selected)
-        val draft = requireNotNull(command.requestedRule)
 
-        for (invalid in listOf(
-            draft.copy(channelScope = LimitChannelScope.ALL_CHANNELS, channelGroupId = null),
-            draft.copy(channelGroupId = equivalent.id),
-            draft.copy(channelScope = LimitChannelScope.CHANNEL, channelGroupId = null, channelId = atm.id),
-            draft.copy(priority = selected.priority + 1),
-            draft.copy(amount = LimitAmount.Bounded(BigDecimal("1001"))),
-            draft.copy(startsAt = NOW.minusSeconds(1)),
-        )) {
-            assertFailsWith<ValidationException> { s.facade.limitChangeService.requestLimitRuleChange(command.copy(requestedRule = invalid)) }
-        }
-        val request = s.facade.limitChangeService.requestLimitRuleChange(command)
+        assertFailsWith<ValidationException> { s.facade.limitChangeService.requestLimitRuleChange(s.requestCommand(selected, "1001")) }
+        val request = s.facade.limitChangeService.requestLimitRuleChange(s.requestCommand(selected))
         assertEquals(s.channel, request.requestChannelId)
         val applied = s.approve(request.id)
         assertEquals(LimitRuleChangeStatus.APPLIED, applied.status)

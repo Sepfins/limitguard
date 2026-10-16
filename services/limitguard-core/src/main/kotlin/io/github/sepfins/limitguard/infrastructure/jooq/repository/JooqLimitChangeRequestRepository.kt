@@ -188,7 +188,6 @@ class JooqLimitChangeRequestRepository(
             .set(table.TARGET_SCOPE_HASH, request.targetScopeHash.value)
             .set(table.BEFORE_RULE, request.beforeRule?.toJsonb())
             .set(table.REQUESTED_RULE, request.requestedRule.toJsonb())
-            .set(table.APPROVED_RULE, request.approvedRule?.toJsonb())
             .set(table.POLICY_CONTEXT, request.policyContext.toJsonb())
             .set(table.EFFECTIVE_AT, request.effectiveAt?.toOffsetDateTime())
             .set(table.EXPIRES_AT, request.expiresAt?.toOffsetDateTime())
@@ -218,7 +217,6 @@ class JooqLimitChangeRequestRepository(
             .set(table.TARGET_SCOPE_HASH, request.targetScopeHash.value)
             .set(table.BEFORE_RULE, request.beforeRule?.toJsonb())
             .set(table.REQUESTED_RULE, request.requestedRule.toJsonb())
-            .set(table.APPROVED_RULE, request.approvedRule?.toJsonb())
             .set(table.POLICY_CONTEXT, request.policyContext.toJsonb())
             .set(table.EFFECTIVE_AT, request.effectiveAt?.toOffsetDateTime())
             .set(table.EXPIRES_AT, request.expiresAt?.toOffsetDateTime())
@@ -289,7 +287,6 @@ class JooqLimitChangeRequestRepository(
             requesterPartyProfileId = get(table.REQUESTER_PARTY_PROFILE_ID)?.let(PartyProfileId::of),
             targetMandateId = get(table.TARGET_MANDATE_ID)?.let(MandateId::of),
             beforeRule = get(table.BEFORE_RULE)?.toMetadata(),
-            approvedRule = get(table.APPROVED_RULE)?.toMetadata(),
             policyContext = get(table.POLICY_CONTEXT).toMetadata(),
             effectiveAt = get(table.EFFECTIVE_AT)?.toInstant(),
             expiresAt = get(table.EXPIRES_AT)?.toInstant(),

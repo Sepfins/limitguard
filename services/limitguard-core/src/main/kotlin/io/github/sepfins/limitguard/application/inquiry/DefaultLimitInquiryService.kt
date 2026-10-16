@@ -161,7 +161,6 @@ class DefaultLimitInquiryService(
             LimitChangeDetailsResult(
                 request = request.toResult(),
                 requestedRule = request.requestedRule.value,
-                approvedRule = request.approvedRule?.value,
                 beforeRule = request.beforeRule?.value,
                 events = limitChangeEventRepository.findByChangeRequest(tenantId, requestId)
                     .map { it.toResult() },

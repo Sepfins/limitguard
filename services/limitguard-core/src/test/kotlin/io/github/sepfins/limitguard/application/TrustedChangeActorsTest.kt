@@ -2,10 +2,9 @@ package io.github.sepfins.limitguard.application
 
 import io.github.sepfins.limitguard.api.LimitAmount
 import io.github.sepfins.limitguard.api.LimitChangeActorType
-import io.github.sepfins.limitguard.api.LimitMandateScope
 import io.github.sepfins.limitguard.api.LimitRuleChangeStatus
-import io.github.sepfins.limitguard.api.LimitRuleChangeType
 import io.github.sepfins.limitguard.api.TrustedChangeActorContext
+import io.github.sepfins.limitguard.api.commands.LimitRuleChangeOperation
 import io.github.sepfins.limitguard.api.commands.ApplyDueLimitChangesCommand
 import io.github.sepfins.limitguard.api.commands.ApproveLimitRuleChangeCommand
 import io.github.sepfins.limitguard.api.commands.CancelLimitRuleChangeCommand
@@ -102,10 +101,6 @@ class TrustedChangeActorsTest {
         val fixture = Fixture()
         val s = fixture.scenario
         val other = TrustedChangeScenario(s.facade, NOW)
-        val otherPending = s.facade.limitChangeService.requestLimitRuleChange(other.command)
-        val otherApplied = s.facade.limitChangeService.approveLimitRuleChange(
-            ApproveLimitRuleChangeCommand(other.tenant, otherPending.id, SYSTEM), TrustedChangeActorContext.InternalSystem,
-        )
         fixture.resetPolicies()
         val missing = UUID.randomUUID()
         val candidates = listOf(
@@ -114,18 +109,17 @@ class TrustedChangeActorsTest {
             s.command.copy(requestedBy = s.party(other.owner)),
             s.command.copy(requesterPartyProfileId = missing),
             s.command.copy(requesterPartyProfileId = other.owner),
-            s.command.copy(targetOwnerPartyProfileId = missing),
-            s.command.copy(targetOwnerPartyProfileId = other.owner),
+            s.command.copy(target = s.command.target.copy(ownerPartyProfileId = missing)),
+            s.command.copy(target = s.command.target.copy(ownerPartyProfileId = other.owner)),
             s.command.copy(requestChannelId = missing),
             s.command.copy(requestChannelId = other.channel),
-            s.command.copy(requestedRule = s.command.requestedRule!!.copy(configurationId = missing)),
-            s.command.copy(requestedRule = s.command.requestedRule.copy(configurationId = other.configuration)),
+            s.command.copy(target = s.command.target.copy(configurationId = missing)),
+            s.command.copy(target = s.command.target.copy(configurationId = other.configuration)),
             s.represented().copy(authorityDelegationId = missing),
             s.represented().copy(authorityDelegationId = other.delegation),
-            s.command.copy(requestedRule = s.command.requestedRule.copy(mandateScope = LimitMandateScope.MANDATE, mandateId = missing)),
-            s.command.copy(requestedRule = s.command.requestedRule.copy(mandateScope = LimitMandateScope.MANDATE, mandateId = other.mandate)),
-            s.command.copy(changeType = LimitRuleChangeType.UPDATE, limitRuleId = missing, expectedVersion = 1),
-            s.command.copy(changeType = LimitRuleChangeType.UPDATE, limitRuleId = otherApplied.limitRuleId, expectedVersion = 1),
+            s.command.copy(target = s.command.target.copy(mandateId = missing)),
+            s.command.copy(target = s.command.target.copy(mandateId = other.mandate)),
+            s.command.copy(operation = LimitRuleChangeOperation.Deactivate),
         )
         for (command in candidates) {
             assertFailsWith<NotFoundException> { s.facade.limitChangeService.requestLimitRuleChange(command) }
@@ -195,10 +189,10 @@ class TrustedChangeActorsTest {
     }
 
     @Test
-    fun `approval cannot bypass expired representation unavailable target Mandate or invalid adjusted references`() {
+    fun `approval cannot bypass expired representation or an unavailable target Mandate`() {
         val fixture = Fixture()
         val s = fixture.scenario
-        val command = s.represented().copy(requestedRule = s.command.requestedRule!!.copy(mandateScope = LimitMandateScope.MANDATE, mandateId = s.mandate))
+        val command = s.represented().copy(target = s.command.target.copy(mandateId = s.mandate))
         val pending = s.facade.limitChangeService.requestLimitRuleChange(command)
         val before = s.details(pending.id)
         fixture.setDelegationWindow(EffectiveWindow(NOW.minusSeconds(60), NOW))
@@ -206,11 +200,6 @@ class TrustedChangeActorsTest {
         fixture.setDelegationWindow(EffectiveWindow(NOW.minusSeconds(60), null))
         fixture.deactivateMandate()
         assertFailsWith<ConflictException> { fixture.approve(pending.id) }
-        assertFailsWith<NotFoundException> {
-            s.facade.limitChangeService.approveLimitRuleChange(ApproveLimitRuleChangeCommand(
-                s.tenant, pending.id, SYSTEM, approvedRule = command.requestedRule!!.copy(mandateId = UUID.randomUUID()),
-            ), TrustedChangeActorContext.InternalSystem)
-        }
         assertEquals(before, s.details(pending.id))
     }
 
@@ -238,7 +227,7 @@ class TrustedChangeActorsTest {
             val s = fixture.scenario
             val command = s.represented().copy(
                 effectiveAt = if (cancel) NOW.plusSeconds(3600) else null,
-                requestedRule = s.command.requestedRule!!.copy(mandateScope = LimitMandateScope.MANDATE, mandateId = s.mandate),
+                target = s.command.target.copy(mandateId = s.mandate),
             )
             val pending = s.facade.limitChangeService.requestLimitRuleChange(command)
             if (cancel) fixture.approve(pending.id)
@@ -275,8 +264,8 @@ class TrustedChangeActorsTest {
             val ruleBefore = s.facade.limitInquiryService.getLimitRule(GetLimitRuleQuery(s.tenant, ruleId))
             val historyBefore = s.details(created.id)
             val pending = s.facade.limitChangeService.requestLimitRuleChange(s.represented().copy(
-                changeType = LimitRuleChangeType.UPDATE, limitRuleId = ruleId, expectedVersion = ruleBefore.version,
-                requestedRule = s.command.requestedRule!!.copy(amount = LimitAmount.Bounded(BigDecimal("600"))), idempotencyKey = "update",
+                operation = LimitRuleChangeOperation.SetAmount(LimitAmount.Bounded(BigDecimal("600"))),
+                expectedVersion = ruleBefore.version, idempotencyKey = "update",
             ))
             fixture.setDelegationWindow(EffectiveWindow(NOW.minusSeconds(60), NOW))
             fixture.resetPolicies(unavailable = true)

@@ -5,7 +5,6 @@ import io.github.sepfins.limitguard.api.LimitChangeActorType
 import io.github.sepfins.limitguard.api.LimitKind
 import io.github.sepfins.limitguard.api.LimitPeriod
 import io.github.sepfins.limitguard.api.LimitRuleChangeStatus
-import io.github.sepfins.limitguard.api.LimitRuleChangeType
 import io.github.sepfins.limitguard.api.LimitUsageConsumptionMode
 import io.github.sepfins.limitguard.api.PartyType
 import io.github.sepfins.limitguard.api.TrustedChangeActorContext
@@ -13,7 +12,8 @@ import io.github.sepfins.limitguard.api.commands.ApplyDueLimitChangesCommand
 import io.github.sepfins.limitguard.api.commands.ApproveLimitRuleChangeCommand
 import io.github.sepfins.limitguard.api.commands.CreateLimitConfigurationCommand
 import io.github.sepfins.limitguard.api.commands.LimitChangeActorCommand
-import io.github.sepfins.limitguard.api.commands.LimitRuleDraft
+import io.github.sepfins.limitguard.api.commands.LimitRuleChangeOperation
+import io.github.sepfins.limitguard.api.commands.LimitRuleTargetCommand
 import io.github.sepfins.limitguard.api.commands.RegisterPartyProfileCommand
 import io.github.sepfins.limitguard.api.commands.RegisterTenantCommand
 import io.github.sepfins.limitguard.api.commands.RequestLimitRuleChangeCommand
@@ -116,13 +116,9 @@ class ConfigurationMaximumTest {
         fun request(configuration: UUID, amount: LimitAmount, effectiveAt: Instant? = null) =
             facade.limitChangeService.requestLimitRuleChange(RequestLimitRuleChangeCommand(
                 tenantId = tenant,
-                changeType = LimitRuleChangeType.CREATE,
                 requestedBy = LimitChangeActorCommand(LimitChangeActorType.SYSTEM),
-                targetOwnerPartyProfileId = owner,
-                requestedRule = LimitRuleDraft(
-                    name = "Monthly spending", limitKind = LimitKind.PERIODIC, period = LimitPeriod.MONTHLY,
-                    amount = amount, currency = "EUR", configurationId = configuration,
-                ),
+                target = LimitRuleTargetCommand(owner, configuration),
+                operation = LimitRuleChangeOperation.SetAmount(amount),
                 effectiveAt = effectiveAt,
             ), TrustedChangeActorContext.InternalSystem)
 

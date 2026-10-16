@@ -19,6 +19,7 @@ internal class LimitChangeRequestFactory {
     fun create(
         id: LimitChangeRequestId,
         command: RequestLimitRuleChangeCommand,
+        changeType: LimitRuleChangeType,
         requestedRule: LimitRule,
         currentRule: LimitRule?,
         targetScope: LimitRuleTargetScope,
@@ -32,7 +33,7 @@ internal class LimitChangeRequestFactory {
         return LimitRuleChangeRequest(
             id = id,
             tenantId = requestedRule.tenantId,
-            changeType = LimitRuleChangeType.valueOf(command.changeType.name),
+            changeType = changeType,
             status = LimitRuleChangeStatus.REQUESTED,
             requestedBy = actor,
             limitRuleId = currentRule?.id,

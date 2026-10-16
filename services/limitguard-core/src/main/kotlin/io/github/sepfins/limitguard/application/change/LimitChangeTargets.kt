@@ -1,10 +1,14 @@
 package io.github.sepfins.limitguard.application.change
 
+import io.github.sepfins.limitguard.api.commands.RequestLimitRuleChangeCommand
 import io.github.sepfins.limitguard.api.errors.ConflictException
 import io.github.sepfins.limitguard.api.errors.NotFoundException
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeRequest
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeStatus
 import io.github.sepfins.limitguard.domain.common.LimitChangeRequestId
+import io.github.sepfins.limitguard.domain.common.LimitConfigurationId
+import io.github.sepfins.limitguard.domain.common.PartyProfileId
+import io.github.sepfins.limitguard.domain.common.TenantId
 import io.github.sepfins.limitguard.domain.limit.LimitRule
 import io.github.sepfins.limitguard.domain.limit.LimitRuleTargetScope
 import io.github.sepfins.limitguard.internal.hashing.TargetScopeCanonicalizer
@@ -23,6 +27,16 @@ internal class LimitChangeTargets(
         val funding = configurations.findById(rule.tenantId, rule.configurationId)?.fundingScope
             ?: throw NotFoundException("limit configuration not found: ${rule.configurationId.value}")
         return rule.toTargetScope(funding)
+    }
+
+    /** The target's lock, known from the configuration before its rule is looked up. */
+    fun lockPlan(command: RequestLimitRuleChangeCommand): LimitChangeLockPlan {
+        val tenantId = TenantId.of(command.tenantId)
+        val configurationId = LimitConfigurationId.of(command.target.configurationId)
+        val configuration = configurations.findById(tenantId, configurationId)
+            ?: throw NotFoundException("limit configuration not found: ${configurationId.value}")
+        val scope = configuration.targetScope(PartyProfileId.of(command.target.ownerPartyProfileId), command.toMandateScope())
+        return LimitChangeLockPlan(targetHashes = setOf(TargetScopeCanonicalizer.hash(scope)), ruleIds = emptySet())
     }
 
     fun requireAvailable(

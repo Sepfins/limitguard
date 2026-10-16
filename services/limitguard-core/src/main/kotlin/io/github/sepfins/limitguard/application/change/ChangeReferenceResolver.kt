@@ -1,19 +1,14 @@
 package io.github.sepfins.limitguard.application.change
 
-import io.github.sepfins.limitguard.api.LimitRuleChangeType
 import io.github.sepfins.limitguard.api.commands.RequestLimitRuleChangeCommand
 import io.github.sepfins.limitguard.api.errors.ConflictException
-import io.github.sepfins.limitguard.api.errors.NotFoundException
 import io.github.sepfins.limitguard.application.configuration.resolveHierarchy
 import io.github.sepfins.limitguard.domain.change.LimitRuleRevisionEventType
 import io.github.sepfins.limitguard.domain.change.ResolvedLimitChangeFacts
 import io.github.sepfins.limitguard.domain.common.LimitConfigurationId
-import io.github.sepfins.limitguard.domain.common.LimitRuleId
-import io.github.sepfins.limitguard.domain.common.MandateId
 import io.github.sepfins.limitguard.domain.common.PartyProfileId
 import io.github.sepfins.limitguard.domain.common.TenantId
 import io.github.sepfins.limitguard.domain.limit.LimitRule
-import io.github.sepfins.limitguard.domain.mandate.MandateScope
 import io.github.sepfins.limitguard.port.persistence.LimitConfigurationRepository
 import io.github.sepfins.limitguard.port.persistence.LimitRuleRepository
 import io.github.sepfins.limitguard.port.persistence.LimitRuleRevisionRepository
@@ -23,53 +18,41 @@ internal class ChangeReferenceResolver(
     private val limitRuleRepository: LimitRuleRepository,
     private val limitRuleRevisionRepository: LimitRuleRevisionRepository,
 ) {
+    /** Call while holding the target lock: the rule found for the target is then locked for update. */
     fun resolve(command: RequestLimitRuleChangeCommand): ResolvedLimitChangeFacts {
         val tenantId = TenantId.of(command.tenantId)
-        val currentRule = command.limitRuleId?.let {
-            limitRuleRepository.findById(tenantId, LimitRuleId.of(it))
-                ?: throw NotFoundException("limit rule not found: $it")
+        val hierarchy = limitConfigurationRepository.resolveHierarchy(
+            tenantId, LimitConfigurationId.of(command.target.configurationId),
+        )
+        val currentRule = findRule(command)?.let {
+            limitRuleRepository.findByIdForUpdate(tenantId, it.id)
         }
-        if (command.changeType != LimitRuleChangeType.CREATE) {
-            requireNotNull(currentRule)
-            if (currentRule.ownerPartyProfileId != PartyProfileId.of(command.targetOwnerPartyProfileId)) {
-                throw ConflictException("target owner does not own limit rule: ${currentRule.id.value}")
-            }
-            if (currentRule.version.value != command.expectedVersion) {
-                throw ConflictException(
-                    "limit rule version conflict: expected ${command.expectedVersion}, found ${currentRule.version.value}"
-                )
-            }
-            command.targetMandateId?.takeIf { command.requestedRule == null }?.let { targetMandateId ->
-                if (currentRule.mandateId() != MandateId.of(targetMandateId)) {
-                    throw ConflictException("target mandate does not match limit rule: ${currentRule.id.value}")
-                }
-            }
+        if (command.expectedVersion != null && currentRule?.version?.value != command.expectedVersion) {
+            throw ConflictException(
+                "limit rule version conflict: expected ${command.expectedVersion}, found ${currentRule?.version?.value ?: "no rule"}"
+            )
         }
-
-        val latestRevision = currentRule
-            ?.let { limitRuleRevisionRepository.findByLimitRule(tenantId, it.id) }
-            ?.maxByOrNull { it.revisionNumber.value }
-        if (latestRevision?.revisionEventType == LimitRuleRevisionEventType.DELETED) {
-            throw ConflictException("limit rule has been deleted: ${currentRule.id.value}")
-        }
-
-        val configurationId = command.requestedRule?.configurationId
-            ?.let { LimitConfigurationId.of(it) }
-            ?: currentRule?.configurationId
-        val configurationHierarchy = configurationId
-            ?.let { limitConfigurationRepository.resolveHierarchy(tenantId, it) }
-            .orEmpty()
-
         return ResolvedLimitChangeFacts(
             currentRule = currentRule,
-            configuration = configurationHierarchy.firstOrNull(),
-            ancestorConfigurations = configurationHierarchy.drop(1),
+            configuration = hierarchy.first(),
+            ancestorConfigurations = hierarchy.drop(1),
         )
     }
 
-    private fun LimitRule.mandateId(): MandateId? =
-        when (val scope = mandateScope) {
-            MandateScope.AllOwnerMandates -> null
-            is MandateScope.MandateSpecific -> scope.mandateId
+    private fun findRule(command: RequestLimitRuleChangeCommand): LimitRule? {
+        val tenantId = TenantId.of(command.tenantId)
+        val configurationId = LimitConfigurationId.of(command.target.configurationId)
+        val mandateScope = command.toMandateScope()
+        val rules = limitRuleRepository.findByOwner(tenantId, PartyProfileId.of(command.target.ownerPartyProfileId))
+            .filter { it.configurationId == configurationId && it.mandateScope == mandateScope && (it.isActive || !isDeleted(it)) }
+        if (rules.size > 1) {
+            throw ConflictException("more than one limit rule exists for the target: ${rules.map { it.id.value }}")
         }
+        return rules.singleOrNull()
+    }
+
+    private fun isDeleted(rule: LimitRule): Boolean =
+        limitRuleRevisionRepository.findByLimitRule(rule.tenantId, rule.id)
+            .maxByOrNull { it.revisionNumber.value }
+            ?.revisionEventType == LimitRuleRevisionEventType.DELETED
 }

@@ -4,6 +4,7 @@ import io.github.sepfins.limitguard.api.LimitAmount
 import io.github.sepfins.limitguard.api.FundingSourceCategory
 import io.github.sepfins.limitguard.api.AuthorizationDecision
 import io.github.sepfins.limitguard.api.LimitRuleChangeStatus
+import io.github.sepfins.limitguard.api.LimitRuleChangeType
 import io.github.sepfins.limitguard.api.LimitChannelScope
 import io.github.sepfins.limitguard.api.LimitKind
 import io.github.sepfins.limitguard.api.LimitPeriod
@@ -206,26 +207,14 @@ class ContainedFundingEnvelopesTest {
     }
 
     @Test
-    fun `selected rule scopes priority amount and window remain constrained`() {
+    fun `a dated configuration grants a rule within its maximum`() {
         val s = scenario()
         val configuration = s.facade.tenantCatalogService.createLimitConfiguration(s.configurationCommand(
             "SCOPED", category = FundingSourceCategory.TRANSACTIONAL,
         ).copy(channelScope = LimitChannelScope.CHANNEL, channelId = s.channel, operationTypeId = s.operation,
             priority = 7, endsAt = NOW.plusSeconds(3600)))
-        val command = s.requestCommand(configuration)
-        val draft = requireNotNull(command.requestedRule)
-        val invalid = listOf(
-            draft.copy(channelScope = LimitChannelScope.ALL_CHANNELS, channelId = null),
-            draft.copy(operationTypeId = null),
-            draft.copy(priority = 8),
-            draft.copy(amount = LimitAmount.Bounded(BigDecimal("1001"))),
-            draft.copy(startsAt = NOW.minusSeconds(1)),
-            draft.copy(endsAt = null),
-        )
-        invalid.forEach { rule ->
-            assertFailsWith<ValidationException> { s.facade.limitChangeService.requestLimitRuleChange(command.copy(requestedRule = rule)) }
-        }
-        assertEquals(LimitRuleChangeStatus.REQUESTED, s.facade.limitChangeService.requestLimitRuleChange(command).status)
+        assertFailsWith<ValidationException> { s.facade.limitChangeService.requestLimitRuleChange(s.requestCommand(configuration, "1001")) }
+        assertEquals(LimitRuleChangeStatus.REQUESTED, s.facade.limitChangeService.requestLimitRuleChange(s.requestCommand(configuration)).status)
     }
 
     @Test
@@ -255,7 +244,9 @@ class ContainedFundingEnvelopesTest {
         assertEquals(product.copy(name = "Renamed", description = "Description", defaultAmount = BigDecimal("150.0000"),
             metadata = mapOf("version" to 2), updatedAt = NOW), updated)
         assertEquals(productRule, s.rule(productRule.id))
-        assertFailsWith<ConflictException> { s.facade.limitChangeService.requestLimitRuleChange(s.requestCommand(updated)) }
+        val amountChange = s.facade.limitChangeService.requestLimitRuleChange(s.requestCommand(updated))
+        assertEquals(LimitRuleChangeType.UPDATE, amountChange.changeType)
+        assertEquals(productRule.id, amountChange.limitRuleId)
         val allowed = s.authorize(source, "180")
         assertEquals(AuthorizationDecision.ALLOWED, allowed.decision)
         assertEquals(setOf(broad.id, categoryRule.id, productRule.id), allowed.matchedRules.map { it.id }.toSet())

@@ -23,7 +23,6 @@ import java.time.Instant
 
 internal class ApproveLimitRuleChangeWorkflow(
     private val eligibility: LimitChangeEligibilityValidator,
-    private val candidateFactory: LimitRuleCandidateFactory,
     private val mandateValidator: LimitRuleMandateValidator,
     private val applicationWorkflow: LimitChangeApplicationWorkflow,
     private val targets: LimitChangeTargets,
@@ -45,11 +44,7 @@ internal class ApproveLimitRuleChangeWorkflow(
         val now = clockProvider.now()
 
         transactionRunner.inTransaction {
-            val locked = locks.acquireRequest(tenantId, changeRequestId) { observed ->
-                requireOpenRequest(observed, now)
-                val requested = LimitRuleSnapshotter.restoreRule(observed.requestedRule)
-                listOf(approvedCandidate(observed, requested, command, now))
-            }
+            val locked = locks.acquireRequest(tenantId, changeRequestId)
             val request = locked.request
             requireOpenRequest(request, now)
             eligibility.validateActionActor(tenantId, actor)
@@ -59,20 +54,18 @@ internal class ApproveLimitRuleChangeWorkflow(
                 throw NotFoundException("limit rule not found: ${request.limitRuleId.value}")
             }
             requireCurrentRuleVersion(request, currentRule)
-            val requestedCandidate = LimitRuleSnapshotter.restoreRule(
+            val candidate = LimitRuleSnapshotter.restoreRule(
                 snapshot = request.requestedRule,
                 createdAt = currentRule?.createdAt ?: request.createdAt,
                 updatedAt = now,
             )
-            targets.requireMatches(request, requestedCandidate)
-
-            val approvedCandidate = approvedCandidate(request, requestedCandidate, command, now)
-            validateCandidate(request, approvedCandidate, now)
-            mandateValidator.validate(approvedCandidate, request.effectiveAt ?: now)
+            targets.requireMatches(request, candidate)
+            validateCandidate(request, candidate, now)
+            mandateValidator.validate(candidate, request.effectiveAt ?: now)
 
             applicationWorkflow.approveAndApply(
                 request = request,
-                candidate = approvedCandidate,
+                candidate = candidate,
                 actor = actor,
                 reason = command.decisionReason,
                 at = now,
@@ -81,18 +74,6 @@ internal class ApproveLimitRuleChangeWorkflow(
             ).toResult()
         }
     }
-
-    private fun approvedCandidate(
-        request: LimitRuleChangeRequest,
-        requestedCandidate: LimitRule,
-        command: ApproveLimitRuleChangeCommand,
-        now: Instant,
-    ): LimitRule = command.approvedRule?.let { approvedRule ->
-        require(request.changeType in ADJUSTABLE_CHANGE_TYPES) {
-            "approvedRule is not supported for ${request.changeType} changes"
-        }
-        candidateFactory.createApprovedCandidate(requestedCandidate, approvedRule, request.effectiveAt, now)
-    } ?: requestedCandidate
 
     private fun requireOpenRequest(request: LimitRuleChangeRequest, now: Instant) {
         if (request.status != LimitRuleChangeStatus.REQUESTED) {
@@ -145,11 +126,10 @@ internal class ApproveLimitRuleChangeWorkflow(
         }
 
     private companion object {
-        val ADJUSTABLE_CHANGE_TYPES = setOf(
+        val CONFIGURATION_VALIDATED_CHANGE_TYPES = setOf(
             LimitRuleChangeType.CREATE,
             LimitRuleChangeType.UPDATE,
             LimitRuleChangeType.REACTIVATE,
         )
-        val CONFIGURATION_VALIDATED_CHANGE_TYPES = ADJUSTABLE_CHANGE_TYPES
     }
 }

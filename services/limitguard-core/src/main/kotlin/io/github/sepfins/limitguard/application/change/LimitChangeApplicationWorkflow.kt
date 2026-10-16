@@ -11,8 +11,6 @@ import io.github.sepfins.limitguard.domain.change.LimitRuleRevisionEventType
 import io.github.sepfins.limitguard.domain.change.RevisionNumber
 import io.github.sepfins.limitguard.domain.common.LimitChangePolicyId
 import io.github.sepfins.limitguard.domain.common.Metadata
-import io.github.sepfins.limitguard.domain.mandate.MandateScope
-import io.github.sepfins.limitguard.internal.hashing.TargetScopeCanonicalizer
 import io.github.sepfins.limitguard.domain.common.LimitRuleRevisionId
 import io.github.sepfins.limitguard.domain.limit.LimitRule
 import io.github.sepfins.limitguard.port.ids.IdGenerator
@@ -43,15 +41,8 @@ internal class LimitChangeApplicationWorkflow(
         policyId: LimitChangePolicyId? = null,
     ): LimitRuleChangeRequest {
         eligibility.validateApprovedIntent(request, candidate, at)
-        val target = targets.requireAvailable(candidate, request.id, at, lockedTargets)
-        val approved = changeRequestRepository.update(request.tenantId, request.approve(
-            approvedRule = LimitRuleSnapshotter.ruleSnapshot(candidate),
-            reason = reason,
-            at = at,
-            approvedTargetScope = TargetScopeCanonicalizer.snapshot(target),
-            approvedTargetScopeHash = TargetScopeCanonicalizer.hash(target),
-            approvedTargetMandateId = (candidate.mandateScope as? MandateScope.MandateSpecific)?.mandateId,
-        ))
+        targets.requireAvailable(candidate, request.id, at, lockedTargets)
+        val approved = changeRequestRepository.update(request.tenantId, request.approve(reason, at))
         changeEventRepository.insert(request.tenantId, changeEventFactory.approved(
             before = request, after = approved, now = at, actor = actor,
             eventPayload = eventPayload, policyId = policyId,

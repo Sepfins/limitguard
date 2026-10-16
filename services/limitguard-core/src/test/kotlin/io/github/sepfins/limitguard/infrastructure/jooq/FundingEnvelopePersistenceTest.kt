@@ -5,8 +5,8 @@ import io.github.sepfins.limitguard.api.Limitguard
 import io.github.sepfins.limitguard.api.LimitConfigurationFundingScope
 import io.github.sepfins.limitguard.api.AuthorizationDecision
 import io.github.sepfins.limitguard.api.LimitRuleChangeStatus
-import io.github.sepfins.limitguard.api.LimitRuleChangeType
 import io.github.sepfins.limitguard.api.ProductNodeType
+import io.github.sepfins.limitguard.api.commands.LimitRuleChangeOperation
 import io.github.sepfins.limitguard.api.commands.RegisterFundingSourceProductCommand
 import io.github.sepfins.limitguard.api.commands.SetLimitConfigurationActiveCommand
 import io.github.sepfins.limitguard.api.commands.UpdateLimitConfigurationCommand
@@ -172,26 +172,21 @@ class FundingEnvelopePersistenceTest {
         s.facade.tenantCatalogService.setLimitConfigurationActive(SetLimitConfigurationActiveCommand(s.tenant, root.id, false))
 
         assertFailsWith<ValidationException> { s.facade.limitChangeService.requestLimitRuleChange(command) }
-        assertFailsWith<ValidationException> {
-            s.facade.limitChangeService.requestLimitRuleChange(command.copy(
-                changeType = LimitRuleChangeType.UPDATE, limitRuleId = rule.id, expectedVersion = 1,
-            ))
-        }
         val allowed = s.authorize(source, "40")
         assertEquals(AuthorizationDecision.ALLOWED, allowed.decision)
         assertEquals(listOf(rule.id), allowed.matchedRules.map { it.id })
         assertEquals(AuthorizationDecision.DENIED, s.authorize(source, "501").decision)
         val deactivate = s.facade.limitChangeService.requestLimitRuleChange(command.copy(
-            changeType = LimitRuleChangeType.DEACTIVATE, requestedRule = null, limitRuleId = rule.id, expectedVersion = 1,
+            operation = LimitRuleChangeOperation.Deactivate, expectedVersion = 1,
         ))
         assertEquals(LimitRuleChangeStatus.APPLIED, s.approve(deactivate.id).status)
         assertFailsWith<ValidationException> {
             s.facade.limitChangeService.requestLimitRuleChange(command.copy(
-                changeType = LimitRuleChangeType.REACTIVATE, requestedRule = null, limitRuleId = rule.id, expectedVersion = 2,
+                operation = LimitRuleChangeOperation.Reactivate, expectedVersion = 2,
             ))
         }
         val retire = s.facade.limitChangeService.requestLimitRuleChange(command.copy(
-            changeType = LimitRuleChangeType.DELETE, requestedRule = null, limitRuleId = rule.id, expectedVersion = 2,
+            operation = LimitRuleChangeOperation.Delete, expectedVersion = 2,
         ))
         assertEquals(LimitRuleChangeStatus.APPLIED, s.approve(retire.id).status)
         assertEquals(3, s.rule(rule.id).version)

@@ -96,11 +96,8 @@ internal class ApplyDueLimitChangesWorkflow(
         val currentRule = request.limitRuleId?.let {
             limitRuleRepository.findByIdForUpdate(request.tenantId, it)
         }
-        val approvedRule = requireNotNull(request.approvedRule) {
-            "approved rule is missing from change request: ${request.id.value}"
-        }
         val candidate = LimitRuleSnapshotter.restoreRule(
-            snapshot = approvedRule,
+            snapshot = request.requestedRule,
             createdAt = currentRule?.createdAt ?: request.createdAt,
             updatedAt = dueAt,
         )

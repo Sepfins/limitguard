@@ -212,7 +212,6 @@ internal class JsonLogicPolicyValidator {
         private val MONEY_PATHS = setOf(
             "changeRequest.requestedRule.amount",
             "changeRequest.beforeRule.amount",
-            "changeRequest.approvedRule.amount",
             "currentRule.amount",
         )
     }

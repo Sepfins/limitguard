@@ -7,7 +7,6 @@ import io.github.sepfins.limitguard.api.LimitChangePolicyPhase
 import io.github.sepfins.limitguard.api.LimitChannelScope
 import io.github.sepfins.limitguard.api.LimitKind
 import io.github.sepfins.limitguard.api.Limitguard
-import io.github.sepfins.limitguard.api.LimitRuleChangeType
 import io.github.sepfins.limitguard.api.PartyProfileDelegationType
 import io.github.sepfins.limitguard.api.PartyType
 import io.github.sepfins.limitguard.api.commands.CreateLimitChangePolicyCommand
@@ -15,7 +14,8 @@ import io.github.sepfins.limitguard.api.commands.CreateLimitConfigurationCommand
 import io.github.sepfins.limitguard.api.commands.CreateMandateCommand
 import io.github.sepfins.limitguard.api.commands.CreatePartyProfileDelegationCommand
 import io.github.sepfins.limitguard.api.commands.LimitChangeActorCommand
-import io.github.sepfins.limitguard.api.commands.LimitRuleDraft
+import io.github.sepfins.limitguard.api.commands.LimitRuleChangeOperation
+import io.github.sepfins.limitguard.api.commands.LimitRuleTargetCommand
 import io.github.sepfins.limitguard.api.commands.RegisterChannelCommand
 import io.github.sepfins.limitguard.api.commands.RegisterPartyProfileCommand
 import io.github.sepfins.limitguard.api.commands.RegisterTenantCommand
@@ -53,14 +53,10 @@ class TrustedChangeScenario(
         decision = LimitChangePolicyDecision.REQUIRE_APPROVAL,
     )).id
     val command = RequestLimitRuleChangeCommand(
-        tenantId = tenant, changeType = LimitRuleChangeType.CREATE, requestedBy = party(owner),
-        targetOwnerPartyProfileId = owner, requestChannelId = channel,
-        requestedRule = LimitRuleDraft(
-            name = "Spending limit", limitKind = LimitKind.PER_TRANSACTION, amount = LimitAmount.Bounded(BigDecimal("500")),
-            currency = "EUR", configurationId = configuration,
-            channelScope = LimitChannelScope.CHANNEL, channelId = ruleChannel,
-        ),
-        idempotencyKey = "submission",
+        tenantId = tenant, requestedBy = party(owner),
+        target = LimitRuleTargetCommand(owner, configuration),
+        operation = LimitRuleChangeOperation.SetAmount(LimitAmount.Bounded(BigDecimal("500"))),
+        requestChannelId = channel, idempotencyKey = "submission",
     )
 
     fun profile(name: String): UUID = facade.tenantCatalogService.registerPartyProfile(RegisterPartyProfileCommand(

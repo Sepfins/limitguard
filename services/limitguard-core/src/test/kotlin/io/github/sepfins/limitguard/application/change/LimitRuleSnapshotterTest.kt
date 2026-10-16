@@ -1,8 +1,6 @@
 package io.github.sepfins.limitguard.application.change
 
-import io.github.sepfins.limitguard.api.LimitAmount as ApiLimitAmount
 import io.github.sepfins.limitguard.domain.limit.LimitAmount
-import io.github.sepfins.limitguard.api.commands.LimitRuleDraft
 import io.github.sepfins.limitguard.domain.change.ChangeActor
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeRequest
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeType
@@ -31,7 +29,6 @@ import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
-import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class LimitRuleSnapshotterTest {
@@ -97,26 +94,6 @@ class LimitRuleSnapshotterTest {
     }
 
     @Test
-    fun `draft matching normalizes money and metadata while respecting resolved defaults`() {
-        val rule = LimitRuleSnapshotter.restoreRule(storedSnapshot())
-        val draft = draft().copy(
-            name = " Daily transfer limit ",
-            amount = ApiLimitAmount.Bounded(BigDecimal("500.00000")),
-            metadata = rule.metadata.value + ("attempts" to BigDecimal("1.00")),
-        )
-
-        assertTrue(draft.matches(rule))
-        assertTrue(draft.copy(configurationId = rule.configurationId!!.value).matches(rule))
-        assertTrue(draft.copy(startsAt = rule.effectiveWindow.startsAt).matches(rule))
-        assertFalse(draft.copy(configurationId = UUID(0, 99)).matches(rule))
-        assertFalse(draft.copy(startsAt = now).matches(rule))
-        assertFalse(draft.copy(amount = ApiLimitAmount.Bounded(BigDecimal("501"))).matches(rule))
-        assertFalse(draft.copy(metadata = mapOf("attempts" to 2)).matches(rule))
-        assertFalse(draft.copy(operationTypeId = null).matches(rule))
-        assertFalse(draft.copy(endsAt = null).matches(rule))
-    }
-
-    @Test
     fun `cap edits change only the amount and leave the original unchanged`() {
         val snapshot = storedSnapshot()
         val requestedRule = LimitRuleSnapshotter.restoreRule(snapshot)
@@ -148,23 +125,4 @@ class LimitRuleSnapshotterTest {
     private fun storedSnapshot(): Metadata =
         JSONB.valueOf(requireNotNull(javaClass.getResource("/snapshots/limit-rule.json")).readText())
             .toMetadata()
-
-    private fun draft(): LimitRuleDraft = LimitRuleDraft(
-        name = "Daily transfer limit",
-        description = "Daily transfer cap",
-        limitKind = io.github.sepfins.limitguard.api.LimitKind.PERIODIC,
-        period = io.github.sepfins.limitguard.api.LimitPeriod.DAILY,
-        amount = ApiLimitAmount.Bounded(BigDecimal("500")),
-        currency = "EUR",
-        configurationId = UUID(0, 5),
-        mandateScope = io.github.sepfins.limitguard.api.LimitMandateScope.MANDATE,
-        mandateId = UUID(0, 4),
-        channelScope = io.github.sepfins.limitguard.api.LimitChannelScope.CHANNEL_GROUP,
-        channelGroupId = UUID(0, 6),
-        operationTypeId = UUID(0, 7),
-        usageConsumptionMode = io.github.sepfins.limitguard.api.LimitUsageConsumptionMode.ISOLATED,
-        priority = 10,
-        endsAt = Instant.parse("2026-07-01T00:00:00Z"),
-        metadata = LimitRuleSnapshotter.restoreRule(storedSnapshot()).metadata.value,
-    )
 }

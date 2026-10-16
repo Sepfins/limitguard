@@ -7,7 +7,6 @@ import io.github.sepfins.limitguard.api.commands.ApproveLimitRuleChangeCommand
 import io.github.sepfins.limitguard.api.commands.CancelLimitRuleChangeCommand
 import io.github.sepfins.limitguard.api.commands.RejectLimitRuleChangeCommand
 import io.github.sepfins.limitguard.api.commands.RequestLimitRuleChangeCommand
-import io.github.sepfins.limitguard.api.commands.LimitRuleDraft
 import io.github.sepfins.limitguard.api.results.ApplyDueChangesResult
 import io.github.sepfins.limitguard.api.results.LimitChangeRequestResult
 import io.github.sepfins.limitguard.internal.json.JsonSnapshots
@@ -96,7 +95,6 @@ internal class DefaultLimitChangeService(
     )
     private val approveWorkflow = ApproveLimitRuleChangeWorkflow(
         eligibility = eligibility,
-        candidateFactory = candidates,
         mandateValidator = mandates,
         applicationWorkflow = application,
         targets = targets,
@@ -146,17 +144,13 @@ internal class DefaultLimitChangeService(
         requestWorkflow.execute(command.copy(
             metadata = JsonSnapshots.objectValue(command.metadata),
             policyContext = JsonSnapshots.objectValue(command.policyContext, "policyContext"),
-            requestedRule = command.requestedRule?.detachedJson("requestedRule"),
         ), trustedActorContext)
 
     override fun approveLimitRuleChange(
         command: ApproveLimitRuleChangeCommand,
         trustedActorContext: TrustedChangeActorContext?,
     ): LimitChangeRequestResult {
-        val detached = command.copy(
-            metadata = JsonSnapshots.objectValue(command.metadata),
-            approvedRule = command.approvedRule?.detachedJson("approvedRule"),
-        )
+        val detached = command.copy(metadata = JsonSnapshots.objectValue(command.metadata))
         return approveWorkflow.execute(detached, trustedActorContext)
     }
 
@@ -181,7 +175,4 @@ internal class DefaultLimitChangeService(
         trustedActorContext: TrustedChangeActorContext.InternalSystem,
     ): ApplyDueChangesResult =
         applyDueWorkflow.execute(command)
-
-    private fun LimitRuleDraft.detachedJson(field: String): LimitRuleDraft =
-        copy(metadata = JsonSnapshots.objectValue(metadata, "$field.metadata"))
 }

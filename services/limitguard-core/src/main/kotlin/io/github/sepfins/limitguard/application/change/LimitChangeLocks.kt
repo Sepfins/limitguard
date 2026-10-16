@@ -22,13 +22,7 @@ internal class LimitChangeLocks(
     private val requests: LimitChangeRequestRepository,
     private val rules: LimitRuleRepository,
 ) {
-    fun discover(currentRule: LimitRule?, candidate: LimitRule): LimitChangeLockPlan =
-        LimitChangeLockPlan(
-            targetHashes = listOfNotNull(currentRule, candidate).map(::hash).toSet(),
-            ruleIds = setOfNotNull(currentRule?.id),
-        )
-
-    fun discover(request: LimitRuleChangeRequest, additionalCandidates: List<LimitRule> = emptyList()): LimitChangeLockPlan {
+    fun discover(request: LimitRuleChangeRequest): LimitChangeLockPlan {
         val current = request.limitRuleId?.let { rules.findById(request.tenantId, it) }
         // An unresolved current configuration cannot supply a target; application will fail under the row locks.
         val currentHash = current?.let {
@@ -39,7 +33,7 @@ internal class LimitChangeLocks(
                 request.targetScopeHash,
                 TargetScopeCanonicalizer.hash(request.targetScope),
                 currentHash,
-            ) + additionalCandidates.map(::hash),
+            ),
             ruleIds = setOfNotNull(request.limitRuleId),
         )
     }
@@ -58,14 +52,10 @@ internal class LimitChangeLocks(
         plans.flatMap { it.ruleIds }.distinct().sortedBy { it.value.toString() }
             .associateWith { rules.findByIdForUpdate(tenantId, it) }
 
-    fun acquireRequest(
-        tenantId: TenantId,
-        id: LimitChangeRequestId,
-        additionalCandidates: (LimitRuleChangeRequest) -> List<LimitRule> = { emptyList() },
-    ): LockedLimitChangeRequest {
+    fun acquireRequest(tenantId: TenantId, id: LimitChangeRequestId): LockedLimitChangeRequest {
         val observed = requests.findById(tenantId, id)
             ?: throw NotFoundException("limit change request not found: ${id.value}")
-        val plan = discover(observed, additionalCandidates(observed))
+        val plan = discover(observed)
         val held = acquireTargets(tenantId, listOf(plan))
         val request = requests.findByIdForUpdate(tenantId, id)
             ?: throw NotFoundException("limit change request not found: ${id.value}")

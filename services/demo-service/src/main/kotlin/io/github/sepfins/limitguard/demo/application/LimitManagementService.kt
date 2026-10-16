@@ -3,12 +3,12 @@ package io.github.sepfins.limitguard.demo.application
 import io.github.sepfins.limitguard.api.LimitAmount
 import io.github.sepfins.limitguard.api.LimitChangeActorType
 import io.github.sepfins.limitguard.api.LimitRuleChangeStatus
-import io.github.sepfins.limitguard.api.LimitRuleChangeType
 import io.github.sepfins.limitguard.api.Limitguard
 import io.github.sepfins.limitguard.api.commands.ApproveLimitRuleChangeCommand
 import io.github.sepfins.limitguard.api.commands.CancelLimitRuleChangeCommand
 import io.github.sepfins.limitguard.api.commands.LimitChangeActorCommand
-import io.github.sepfins.limitguard.api.commands.LimitRuleDraft
+import io.github.sepfins.limitguard.api.commands.LimitRuleChangeOperation
+import io.github.sepfins.limitguard.api.commands.LimitRuleTargetCommand
 import io.github.sepfins.limitguard.api.commands.RejectLimitRuleChangeCommand
 import io.github.sepfins.limitguard.api.commands.RequestLimitRuleChangeCommand
 import io.github.sepfins.limitguard.api.queries.GetLimitRuleQuery
@@ -62,38 +62,16 @@ class LimitManagementService(
         val result = limitguard.limitChangeService.requestLimitRuleChange(
             RequestLimitRuleChangeCommand(
                 tenantId = tenantId,
-                changeType = LimitRuleChangeType.UPDATE,
                 requestedBy = LimitChangeActorCommand(
                     actorType = LimitChangeActorType.PARTY_PROFILE,
                     partyProfileId = customerId,
                 ),
-                targetOwnerPartyProfileId = ownerId,
-                limitRuleId = currentRule.id,
+                target = LimitRuleTargetCommand(ownerId, currentRule.configurationId, mandateId),
+                operation = LimitRuleChangeOperation.SetAmount(LimitAmount.Bounded(amount)),
                 expectedVersion = currentRule.version,
                 requesterPartyProfileId = customerId,
                 authorityDelegationId = delegationId,
                 requestChannelId = setting.channelId,
-                targetMandateId = mandateId,
-                requestedRule = LimitRuleDraft(
-                    name = currentRule.name,
-                    description = currentRule.description,
-                    limitKind = currentRule.limitKind,
-                    period = currentRule.period,
-                    amount = LimitAmount.Bounded(amount),
-                    currency = currentRule.currency,
-                    mandateScope = currentRule.mandateScope,
-                    mandateId = currentRule.mandateId,
-                    configurationId = currentRule.configurationId,
-                    channelScope = currentRule.channelScope,
-                    channelId = currentRule.channelId,
-                    channelGroupId = currentRule.channelGroupId,
-                    operationTypeId = currentRule.operationTypeId,
-                    usageConsumptionMode = currentRule.usageConsumptionMode,
-                    priority = currentRule.priority,
-                    startsAt = currentRule.startsAt,
-                    endsAt = currentRule.endsAt,
-                    metadata = currentRule.metadata,
-                ),
                 policyContext = buildMap {
                     put("journey", "SELF_SERVICE")
                     put("currentExposure", currentExposure.toPlainString())

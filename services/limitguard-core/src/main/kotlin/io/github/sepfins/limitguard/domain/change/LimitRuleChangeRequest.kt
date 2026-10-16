@@ -26,7 +26,6 @@ data class LimitRuleChangeRequest(
     val requesterPartyProfileId: PartyProfileId? = null,
     val targetMandateId: MandateId? = null,
     val beforeRule: Metadata? = null,
-    val approvedRule: Metadata? = null,
     val policyContext: Metadata = Metadata.EMPTY,
     val effectiveAt: Instant? = null,
     val expiresAt: Instant? = null,
@@ -59,18 +58,10 @@ data class LimitRuleChangeRequest(
     }
 
     fun approve(
-        approvedRule: Metadata,
         reason: String?,
         at: Instant,
-        approvedTargetScope: Metadata = targetScope,
-        approvedTargetScopeHash: ScopeHash = targetScopeHash,
-        approvedTargetMandateId: MandateId? = targetMandateId,
     ): LimitRuleChangeRequest {
         return transitionTo(LimitRuleChangeStatus.APPROVED).copy(
-            approvedRule = approvedRule,
-            targetScope = approvedTargetScope,
-            targetScopeHash = approvedTargetScopeHash,
-            targetMandateId = approvedTargetMandateId,
             decidedAt = at,
             decisionReason = reason,
             updatedAt = at,
