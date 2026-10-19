@@ -46,6 +46,11 @@ internal class ApplyDueLimitChangesWorkflow(
             val failedRequestIds = mutableListOf<LimitChangeRequestId>()
 
             dueRequests.forEach { request ->
+                if (request.expiresAt != null && request.expiresAt <= dueAt) {
+                    markFailed(request, dueAt, DEADLINE_ELAPSED)
+                    failedRequestIds += request.id
+                    return@forEach
+                }
                 try {
                     transactionRunner.inSavepoint {
                         applicationWorkflow.applyInCurrentTransaction(
@@ -57,16 +62,16 @@ internal class ApplyDueLimitChangesWorkflow(
                     }
                     appliedRequestIds += request.id
                 } catch (exception: ConflictException) {
-                    markFailed(request, dueAt, exception)
+                    markFailed(request, dueAt, exception.message)
                     failedRequestIds += request.id
                 } catch (exception: NotFoundException) {
-                    markFailed(request, dueAt, exception)
+                    markFailed(request, dueAt, exception.message)
                     failedRequestIds += request.id
                 } catch (exception: ValidationException) {
-                    markFailed(request, dueAt, exception)
+                    markFailed(request, dueAt, exception.message)
                     failedRequestIds += request.id
                 } catch (exception: IllegalArgumentException) {
-                    markFailed(request, dueAt, exception)
+                    markFailed(request, dueAt, exception.message)
                     failedRequestIds += request.id
                 }
             }
@@ -85,9 +90,9 @@ internal class ApplyDueLimitChangesWorkflow(
     private fun markFailed(
         request: LimitRuleChangeRequest,
         dueAt: Instant,
-        exception: RuntimeException,
+        reason: String?,
     ) {
-        val failureReason = exception.message ?: "scheduled limit change application failed"
+        val failureReason = reason ?: "scheduled limit change application failed"
         val persistedFailed = changeRequestRepository.update(
             request.tenantId,
             request.fail(failureReason, dueAt),
@@ -112,4 +117,8 @@ internal class ApplyDueLimitChangesWorkflow(
                 cause = exception,
             )
         }
+
+    private companion object {
+        const val DEADLINE_ELAPSED = "limit change request deadline elapsed"
+    }
 }

@@ -202,11 +202,13 @@ class JooqLimitChangeRequestRepository(
         .on(configuration.TENANT_ID.eq(table.TENANT_ID))
         .and(configuration.ID.eq(table.CONFIGURATION_ID))
 
+    /** Approved changes whose time has come, and open requests whose deadline has passed. */
     private fun dueCondition(tenantId: TenantId, dueAt: Instant) =
-        table.TENANT_ID.eq(tenantId.value)
-            .and(table.STATUS.`in`(DUE_STATUSES))
-            .and(table.EFFECTIVE_AT.isNull.or(table.EFFECTIVE_AT.le(dueAt.toOffsetDateTime())))
-            .and(table.EXPIRES_AT.isNull.or(table.EXPIRES_AT.gt(dueAt.toOffsetDateTime())))
+        table.TENANT_ID.eq(tenantId.value).and(
+            table.STATUS.`in`(DUE_STATUSES)
+                .and(table.EFFECTIVE_AT.isNull.or(table.EFFECTIVE_AT.le(dueAt.toOffsetDateTime())))
+                .or(table.STATUS.`in`(PENDING_STATUSES).and(table.EXPIRES_AT.le(dueAt.toOffsetDateTime()))),
+        )
 
     private fun Record.toDomain(): LimitRuleChangeRequest =
         toDomain(CurrencyCode.of(requireNotNull(get(configuration.CURRENCY))))

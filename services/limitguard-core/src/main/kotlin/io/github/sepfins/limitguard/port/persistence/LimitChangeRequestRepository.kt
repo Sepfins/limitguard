@@ -15,7 +15,10 @@ interface LimitChangeRequestRepository {
 
     fun findByIdempotencyKey(tenantId: TenantId, key: IdempotencyKey): LimitRuleChangeRequest?
 
-    /** Discovers the ids of bounded, stably ordered due candidates without acquiring request-row locks. */
+    /**
+     * Discovers the ids of bounded, stably ordered due candidates without acquiring request-row
+     * locks: approved changes due at [dueAt], and open requests whose deadline is at or before it.
+     */
     fun findIdsDueForApplication(tenantId: TenantId, dueAt: Instant, limit: Int): List<LimitChangeRequestId>
 
     /**
