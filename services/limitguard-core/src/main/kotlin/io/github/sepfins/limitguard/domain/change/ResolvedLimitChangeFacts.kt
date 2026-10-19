@@ -6,5 +6,6 @@ import io.github.sepfins.limitguard.domain.limit.LimitRule
 data class ResolvedLimitChangeFacts(
     val currentRule: LimitRule?,
     val configuration: LimitConfiguration,
-    val ancestorConfigurations: List<LimitConfiguration> = emptyList(),
+    /** The target's deleted rule row, which a later set amount grants again. */
+    val deletedRule: LimitRule? = null,
 )

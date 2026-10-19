@@ -19,9 +19,8 @@ internal class LimitRuleMandateValidator(
             throw ConflictException("mandate does not belong to target owner: ${mandate.id.value}")
         }
         if (!rule.isActive) return
-        val ruleEffectiveAt = maxOf(applicationTime, rule.effectiveWindow.startsAt)
-        if (!mandate.isApplicableAt(ruleEffectiveAt)) {
-            throw ConflictException("mandate is not active at rule effective time: ${mandate.id.value}")
+        if (!mandate.isApplicableAt(applicationTime)) {
+            throw ConflictException("mandate is not active at rule application time: ${mandate.id.value}")
         }
     }
 }

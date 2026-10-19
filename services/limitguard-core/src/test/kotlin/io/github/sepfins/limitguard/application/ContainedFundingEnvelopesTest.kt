@@ -14,7 +14,6 @@ import io.github.sepfins.limitguard.api.commands.CreateLimitChangePolicyCommand
 import io.github.sepfins.limitguard.api.commands.UpdateLimitConfigurationCommand
 import io.github.sepfins.limitguard.api.errors.ValidationException
 import io.github.sepfins.limitguard.api.errors.NotFoundException
-import io.github.sepfins.limitguard.api.errors.ConflictException
 import io.github.sepfins.limitguard.support.FixedClockProvider
 import io.github.sepfins.limitguard.support.FundingEnvelopeScenario
 import io.github.sepfins.limitguard.support.PostgresFacade
@@ -218,7 +217,7 @@ class ContainedFundingEnvelopesTest {
     }
 
     @Test
-    fun `equivalent selector values retain target identity while broad and narrow granted targets coexist`() {
+    fun `equivalent configurations are distinct targets while broad and narrow granted targets coexist`() {
         val s = scenario()
         val family = s.product("FAMILY")
         val leaf = s.product("ACCOUNT", family.id, leaf = true)
@@ -236,7 +235,8 @@ class ContainedFundingEnvelopesTest {
             s.configuration("PRODUCT_EQUIVALENT", product = family.id),
         )
         equivalent.forEach { configuration ->
-            assertFailsWith<ConflictException> { s.facade.limitChangeService.requestLimitRuleChange(s.requestCommand(configuration)) }
+            val request = s.facade.limitChangeService.requestLimitRuleChange(s.requestCommand(configuration))
+            assertEquals(LimitRuleChangeType.CREATE, request.changeType)
         }
         val updated = s.facade.tenantCatalogService.updateLimitConfiguration(UpdateLimitConfigurationCommand(
             s.tenant, product.id, "Renamed", "Description", BigDecimal("150"), mapOf("version" to 2),

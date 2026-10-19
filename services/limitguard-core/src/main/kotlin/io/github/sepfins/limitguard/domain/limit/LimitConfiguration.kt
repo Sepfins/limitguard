@@ -44,6 +44,10 @@ data class LimitConfiguration(
     fun isEffectiveAt(instant: Instant): Boolean =
         isActive && effectiveWindow.contains(instant)
 
+    /** The one cap check: what amount may be granted under this envelope, and when. */
+    fun admits(amount: LimitAmount, at: Instant): Boolean =
+        isEffectiveAt(at) && amount.fitsWithin(maxAssignableAmount)
+
     fun validateAgainstParent(parent: LimitConfiguration): LimitConfiguration {
         require(parentConfigurationId == parent.id) {
             "parent configuration id must match parentConfigurationId"

@@ -5,7 +5,6 @@ import io.github.sepfins.limitguard.domain.transaction.PaymentTransaction
 import io.github.sepfins.limitguard.port.persistence.ChannelGroupMemberRepository
 import io.github.sepfins.limitguard.port.persistence.LimitConfigurationRepository
 import io.github.sepfins.limitguard.port.persistence.LimitRuleRepository
-import java.time.Instant
 
 /** Finds the rules the actor may use, then keeps those whose configurations cover the operation. */
 internal class LimitRuleMatcher(
@@ -17,34 +16,24 @@ internal class LimitRuleMatcher(
         transaction: PaymentTransaction,
         authorities: List<ResolvedFundingAuthority>,
         references: ResolvedAuthorizationReferences,
-        at: Instant,
     ): List<ApplicableLimitRule> = findMatches(
         context = transaction.toLimitEvaluationContext(),
         authorities = authorities,
         references = references,
-        at = at,
     )
 
     fun findMatches(
         context: LimitEvaluationContext,
         authorities: List<ResolvedFundingAuthority>,
         references: ResolvedAuthorizationReferences,
-        at: Instant,
     ): List<ApplicableLimitRule> {
         val rules = authorities
             .flatMap { authority ->
-                limitRuleRepository
-                    .findActiveForOwner(
-                        tenantId = context.tenantId,
-                        owner = authority.ownerPartyProfileId,
-                        at = at,
-                    )
-                    .filter { rule ->
-                        rule.mandateScope.appliesTo(
-                            directOwner = authority.directOwnership,
-                            applicableMandateIds = authority.mandateIds,
-                        )
-                    }
+                limitRuleRepository.findActiveForAuthority(
+                    tenantId = context.tenantId,
+                    owner = authority.ownerPartyProfileId,
+                    mandateIds = authority.mandateIds,
+                )
             }
             .distinctBy { it.id }
         if (rules.isEmpty()) {

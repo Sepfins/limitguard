@@ -107,7 +107,6 @@ internal class DefaultLimitEvaluationService(
                 transaction = requestedTransaction,
                 authorities = authorities,
                 references = references,
-                at = now,
             )
             val evaluation = authorizationEvaluator.evaluate(
                 transaction = requestedTransaction,

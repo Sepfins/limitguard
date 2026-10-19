@@ -67,11 +67,6 @@ enum class LimitChannelScope {
     CHANNEL_GROUP,
 }
 
-enum class LimitMandateScope {
-    ALL_OWNER_MANDATES,
-    MANDATE,
-}
-
 enum class LimitOperationScope {
     ALL_OPERATIONS,
     OPERATION_TYPE,

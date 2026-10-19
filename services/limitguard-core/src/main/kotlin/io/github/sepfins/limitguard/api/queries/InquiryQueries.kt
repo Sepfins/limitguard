@@ -13,6 +13,11 @@ data class GetLimitRuleQuery(
     val limitRuleId: UUID,
 )
 
+data class GetLimitConfigurationQuery(
+    val tenantId: UUID,
+    val limitConfigurationId: UUID,
+)
+
 data class GetTransactionHistoryQuery(
     val tenantId: UUID,
     val paymentTransactionId: UUID,

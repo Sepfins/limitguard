@@ -8,6 +8,7 @@ import io.github.sepfins.limitguard.api.queries.FindOperationTypesByCodeQuery
 import io.github.sepfins.limitguard.api.queries.FindTenantByNameQuery
 import io.github.sepfins.limitguard.api.queries.GetCurrentUsageQuery
 import io.github.sepfins.limitguard.api.queries.GetLimitChangeQuery
+import io.github.sepfins.limitguard.api.queries.GetLimitConfigurationQuery
 import io.github.sepfins.limitguard.api.queries.GetLimitRuleQuery
 import io.github.sepfins.limitguard.api.queries.GetOperationCapacityQuery
 import io.github.sepfins.limitguard.api.queries.GetTransactionHistoryQuery
@@ -27,6 +28,9 @@ interface LimitInquiryService {
     fun getLimitChange(query: GetLimitChangeQuery): LimitChangeDetailsResult
 
     fun getLimitRule(query: GetLimitRuleQuery): LimitRuleResult
+
+    /** The configuration a rule is an amount for, which supplies its kind, period, currency, and scopes. */
+    fun getLimitConfiguration(query: GetLimitConfigurationQuery): LimitConfigurationResult
 
     fun getTransactionHistory(query: GetTransactionHistoryQuery): TransactionHistoryResult
 

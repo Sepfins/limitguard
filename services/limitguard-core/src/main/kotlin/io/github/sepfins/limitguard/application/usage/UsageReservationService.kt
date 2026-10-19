@@ -7,6 +7,7 @@ import io.github.sepfins.limitguard.domain.common.TransactionEventId
 import io.github.sepfins.limitguard.domain.common.UsageBucketId
 import io.github.sepfins.limitguard.domain.common.UsageEventId
 import io.github.sepfins.limitguard.domain.common.UsageWindow
+import io.github.sepfins.limitguard.application.evaluation.ApplicableLimitRule
 import io.github.sepfins.limitguard.domain.limit.LimitKind
 import io.github.sepfins.limitguard.domain.limit.LimitRule
 import io.github.sepfins.limitguard.domain.limit.LimitViolation
@@ -28,15 +29,16 @@ internal class UsageReservationService(
 ) {
     fun planAuthorizationReservation(
         transaction: PaymentTransaction,
-        periodicRules: List<LimitRule>,
+        periodicRules: List<ApplicableLimitRule>,
         now: Instant,
     ): UsageReservationPlan {
-        require(periodicRules.all { it.limitKind is LimitKind.Periodic && it.isBounded }) {
+        require(periodicRules.all { it.configuration.limitKind is LimitKind.Periodic && it.rule.isBounded }) {
             "Usage reservations can only be planned for bounded periodic rules"
         }
 
-        val requests = periodicRules.map { rule ->
-            val period = (rule.limitKind as LimitKind.Periodic).period
+        val requests = periodicRules.map { applicable ->
+            val rule = applicable.rule
+            val period = (applicable.configuration.limitKind as LimitKind.Periodic).period
             val window = usageWindowCalculator.calculateWindow(now, period)
             ReservationBucketRequest(
                 rule = rule,

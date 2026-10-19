@@ -4,11 +4,7 @@ import io.github.sepfins.limitguard.api.AuthorizationDecision
 import io.github.sepfins.limitguard.api.LimitChangeActorType
 import io.github.sepfins.limitguard.api.LimitAmount
 import io.github.sepfins.limitguard.api.LimitKind
-import io.github.sepfins.limitguard.api.LimitChannelScope
-import io.github.sepfins.limitguard.api.LimitMandateScope
-import io.github.sepfins.limitguard.api.LimitOperationScope
 import io.github.sepfins.limitguard.api.LimitPeriod
-import io.github.sepfins.limitguard.api.LimitUsageConsumptionMode
 import io.github.sepfins.limitguard.api.LimitRuleChangeEventType
 import io.github.sepfins.limitguard.api.LimitRuleChangeStatus
 import io.github.sepfins.limitguard.api.LimitRuleRevisionEventType
@@ -21,36 +17,21 @@ import java.util.UUID
 
 data class LimitChangeDetailsResult(
     val request: LimitChangeRequestResult,
-    val requestedRule: Map<String, Any?>,
-    val beforeRule: Map<String, Any?>?,
     val events: List<LimitChangeEventResult>,
     val revisions: List<LimitRuleRevisionResult>,
 )
 
+/** A rule has no scope of its own: kind, period, currency, and scopes are its configuration's. */
 data class LimitRuleResult(
     val id: UUID,
     val tenantId: UUID,
     val ownerPartyProfileId: UUID,
-    val name: String,
-    val description: String?,
-    val limitKind: LimitKind,
-    val period: LimitPeriod?,
-    val amount: LimitAmount,
-    val currency: String,
-    val mandateScope: LimitMandateScope,
-    val mandateId: UUID?,
     val configurationId: UUID,
-    val channelScope: LimitChannelScope,
-    val channelId: UUID?,
-    val channelGroupId: UUID?,
-    val operationScope: LimitOperationScope,
-    val operationTypeId: UUID?,
-    val usageConsumptionMode: LimitUsageConsumptionMode,
-    val priority: Int,
+    /** Null applies the rule to the direct owner and every mandate of the owner. */
+    val mandateId: UUID?,
+    val amount: LimitAmount,
     val isActive: Boolean,
     val version: Int,
-    val startsAt: Instant,
-    val endsAt: Instant?,
     val metadata: Map<String, Any?>,
     val createdAt: Instant?,
     val updatedAt: Instant?,
@@ -63,8 +44,6 @@ data class LimitChangeEventResult(
     val policyId: UUID?,
     val beforeStatus: LimitRuleChangeStatus?,
     val afterStatus: LimitRuleChangeStatus?,
-    val beforeRule: Map<String, Any?>?,
-    val afterRule: Map<String, Any?>?,
     val payload: Map<String, Any?>,
     val message: String?,
     val createdAt: Instant,
@@ -76,8 +55,9 @@ data class LimitRuleRevisionResult(
     val revisionNumber: Int,
     val eventType: LimitRuleRevisionEventType,
     val actor: LimitChangeActorResult,
-    val beforeRule: Map<String, Any?>?,
-    val afterRule: Map<String, Any?>?,
+    /** Null for a CREATED revision. */
+    val beforeAmount: LimitAmount?,
+    val afterAmount: LimitAmount,
     val effectiveAt: Instant?,
     val metadata: Map<String, Any?>,
     val createdAt: Instant,

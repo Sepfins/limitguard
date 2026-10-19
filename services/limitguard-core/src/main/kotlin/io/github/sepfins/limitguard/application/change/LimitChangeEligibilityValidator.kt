@@ -135,7 +135,7 @@ internal class LimitChangeEligibilityValidator(
         }
         mandate.authorityDelegationId?.let { id ->
             requireDelegation(rule.tenantId, id, mandate.ownerPartyProfileId, mandate.assigneePartyProfileId,
-                if (rule.isActive) maxOf(at, rule.effectiveWindow.startsAt) else null)
+                if (rule.isActive) at else null)
         }
     }
 }

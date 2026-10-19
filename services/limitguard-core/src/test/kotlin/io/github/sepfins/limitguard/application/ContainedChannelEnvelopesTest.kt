@@ -219,7 +219,7 @@ class ContainedChannelEnvelopesTest {
         assertEquals(s.channel, request.requestChannelId)
         val applied = s.approve(request.id)
         assertEquals(LimitRuleChangeStatus.APPLIED, applied.status)
-        assertEquals(group.id, s.rule(requireNotNull(applied.limitRuleId)).channelGroupId)
+        assertEquals(selected.id, s.rule(requireNotNull(applied.limitRuleId)).configurationId)
     }
 
     private fun scenario() =

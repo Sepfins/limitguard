@@ -45,7 +45,6 @@ internal class LimitChangePolicyRunner(
                 tenantId = currentRequest.tenantId,
                 phase = LimitChangePolicyPhase.AUTHORIZATION,
                 changeRequest = currentRequest,
-                currentRule = currentRequest.beforeRule,
                 facts = currentRequest.policyContext,
                 evaluatedAt = at,
             )

@@ -18,7 +18,8 @@ import java.time.Instant
 
 /**
  * Evaluates JSON Logic conditions against an input document rooted at
- * `changeRequest`, `currentRule`, `facts`, `phase`, and `evaluatedAt`.
+ * `changeRequest`, `facts`, `phase`, and `evaluatedAt`. The request carries its
+ * `requestedAmount` and `beforeAmount` as decimal strings, null when unlimited or absent.
  * An empty condition is treated as an unconditional match.
  * Monetary comparisons and all ordering use `decimal_eq`, `decimal_ne`, `decimal_gt`,
  * `decimal_gte`, `decimal_lt`, or `decimal_lte` with string operands.
@@ -104,7 +105,7 @@ class JsonLogicPolicyEngine : PolicyEngine {
                     evaluateActionValue(action.getValue("currency"), input) as? String
                         ?: throw IllegalArgumentException("CAP_REQUESTED_AMOUNT currency must evaluate to a string")
                 } else {
-                    input.requestedRuleValue("currency")
+                    input.requestCurrency()
                 }
                 PolicyAction.CapRequestedAmount(
                     Money.positive(amount, CurrencyCode.of(currency))
@@ -124,12 +125,10 @@ class JsonLogicPolicyEngine : PolicyEngine {
             value
         }
 
-    private fun Map<String, Any?>.requestedRuleValue(name: String): String {
+    private fun Map<String, Any?>.requestCurrency(): String {
         val changeRequest = get("changeRequest") as? Map<*, *>
             ?: throw IllegalArgumentException("policy input is missing changeRequest")
-        val requestedRule = changeRequest["requestedRule"] as? Map<*, *>
-            ?: throw IllegalArgumentException("policy input is missing changeRequest.requestedRule")
-        return requestedRule[name] as? String
-            ?: throw IllegalArgumentException("policy input is missing changeRequest.requestedRule.$name")
+        return changeRequest["currency"] as? String
+            ?: throw IllegalArgumentException("policy input is missing changeRequest.currency")
     }
 }

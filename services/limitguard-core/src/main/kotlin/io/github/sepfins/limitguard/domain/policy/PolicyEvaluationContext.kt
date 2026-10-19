@@ -10,7 +10,6 @@ data class PolicyEvaluationContext(
     val tenantId: TenantId,
     val phase: LimitChangePolicyPhase,
     val changeRequest: LimitRuleChangeRequest,
-    val currentRule: Metadata? = null,
     val facts: Metadata = Metadata.EMPTY,
     val evaluatedAt: Instant
 )

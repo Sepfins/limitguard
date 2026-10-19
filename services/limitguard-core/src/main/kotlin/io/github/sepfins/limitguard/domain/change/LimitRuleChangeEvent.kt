@@ -16,8 +16,6 @@ data class LimitRuleChangeEvent(
     val policyId: LimitChangePolicyId? = null,
     val beforeStatus: LimitRuleChangeStatus? = null,
     val afterStatus: LimitRuleChangeStatus? = null,
-    val beforeRule: Metadata? = null,
-    val afterRule: Metadata? = null,
     val eventPayload: Metadata = Metadata.EMPTY,
     val message: String? = null,
     val createdAt: Instant? = null

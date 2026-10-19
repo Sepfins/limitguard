@@ -1,7 +1,6 @@
 package io.github.sepfins.limitguard.application.change
 
 import io.github.sepfins.limitguard.api.errors.ConflictException
-import io.github.sepfins.limitguard.api.errors.NotFoundException
 import io.github.sepfins.limitguard.domain.change.ChangeActor
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeRequest
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeStatus
@@ -10,6 +9,7 @@ import io.github.sepfins.limitguard.domain.change.LimitRuleRevision
 import io.github.sepfins.limitguard.domain.change.LimitRuleRevisionEventType
 import io.github.sepfins.limitguard.domain.change.RevisionNumber
 import io.github.sepfins.limitguard.domain.common.LimitChangePolicyId
+import io.github.sepfins.limitguard.domain.common.LimitRuleId
 import io.github.sepfins.limitguard.domain.common.Metadata
 import io.github.sepfins.limitguard.domain.common.LimitRuleRevisionId
 import io.github.sepfins.limitguard.domain.limit.LimitRule
@@ -26,22 +26,30 @@ internal class LimitChangeApplicationWorkflow(
     private val limitRuleRepository: LimitRuleRepository,
     private val limitRuleRevisionRepository: LimitRuleRevisionRepository,
     private val changeEventFactory: LimitChangeEventFactory,
-    private val targets: LimitChangeTargets,
+    private val candidateFactory: LimitRuleCandidateFactory,
+    private val mandateValidator: LimitRuleMandateValidator,
     private val eligibility: LimitChangeEligibilityValidator,
     private val idGenerator: IdGenerator,
 ) {
+    /** Checks the rule [request] would produce when it applies, against the locked target. */
+    fun validate(request: LimitRuleChangeRequest, target: LockedLimitChangeTarget, at: Instant): LimitRule {
+        val applicationTime = request.effectiveAt?.takeIf { it > at } ?: at
+        val candidate = candidateFactory.candidate(request, target, { LimitRuleId.of(idGenerator.newId()) }, applicationTime)
+        mandateValidator.validate(candidate, applicationTime)
+        eligibility.validateApprovedIntent(request, candidate, at)
+        return candidate
+    }
+
     fun approveAndApply(
         request: LimitRuleChangeRequest,
-        candidate: LimitRule,
+        target: LockedLimitChangeTarget,
         actor: ChangeActor,
         reason: String?,
         at: Instant,
-        lockedTargets: LockedLimitChangeTargets,
         eventPayload: Metadata = Metadata.EMPTY,
         policyId: LimitChangePolicyId? = null,
     ): LimitRuleChangeRequest {
-        eligibility.validateApprovedIntent(request, candidate, at)
-        targets.requireAvailable(candidate, request.id, at, lockedTargets)
+        validate(request, target, at)
         val approved = changeRequestRepository.update(request.tenantId, request.approve(reason, at))
         changeEventRepository.insert(request.tenantId, changeEventFactory.approved(
             before = request, after = approved, now = at, actor = actor,
@@ -54,15 +62,14 @@ internal class LimitChangeApplicationWorkflow(
             changeEventRepository.insert(request.tenantId, changeEventFactory.scheduled(approved, scheduled, at, actor))
             return scheduled
         }
-        return applyInCurrentTransaction(approved, candidate, actor, at, lockedTargets)
+        return applyInCurrentTransaction(approved, target, actor, at)
     }
 
     fun applyInCurrentTransaction(
         request: LimitRuleChangeRequest,
-        candidate: LimitRule,
+        target: LockedLimitChangeTarget,
         actor: ChangeActor,
         applicationTime: Instant,
-        lockedTargets: LockedLimitChangeTargets,
     ): LimitRuleChangeRequest {
         if (request.status !in APPLICABLE_STATUSES) {
             throw ConflictException("limit change request is not approved: ${request.id.value}")
@@ -73,38 +80,14 @@ internal class LimitChangeApplicationWorkflow(
         if (request.expiresAt != null && request.expiresAt <= applicationTime) {
             throw ConflictException("limit change request has expired: ${request.id.value}")
         }
-        targets.requireApplicable(request, candidate, lockedTargets)
-        eligibility.validateApprovedIntent(request, candidate, applicationTime)
+        val currentRule = target.ruleFor(request)
+        val candidate = validate(request, target, applicationTime)
 
-        val candidateAtApplication = candidate.copy(updatedAt = applicationTime)
-        val persistedRule = when (request.changeType) {
-            LimitRuleChangeType.CREATE -> limitRuleRepository.insert(request.tenantId, candidateAtApplication)
-            else -> {
-                val currentRule = limitRuleRepository.findByIdForUpdate(
-                    request.tenantId,
-                    requireNotNull(request.limitRuleId),
-                ) ?: throw NotFoundException("limit rule not found: ${request.limitRuleId.value}")
-                val expectedVersion = request.beforeRule?.let { LimitRuleSnapshotter.version(it).value }
-                    ?: throw ConflictException("limit change request is missing its expected rule version")
-                if (currentRule.version.value != expectedVersion) {
-                    throw ConflictException(
-                        "limit rule version conflict: expected $expectedVersion, found ${currentRule.version.value}"
-                    )
-                }
-                if (candidateAtApplication.version.value != currentRule.version.next().value) {
-                    throw ConflictException("approved rule has an invalid version: ${candidateAtApplication.version.value}")
-                }
-                limitRuleRepository.updateIfVersion(
-                    tenantId = request.tenantId,
-                    limitRule = candidateAtApplication,
-                    expectedVersion = currentRule.version,
-                ) ?: run {
-                    val actualVersion = limitRuleRepository.findById(request.tenantId, currentRule.id)?.version?.value
-                    throw ConflictException(
-                        "limit rule version conflict: expected $expectedVersion, found ${actualVersion ?: "missing"}"
-                    )
-                }
-            }
+        val persistedRule = if (currentRule == null) {
+            limitRuleRepository.insert(request.tenantId, candidate)
+        } else {
+            limitRuleRepository.updateIfVersion(request.tenantId, candidate, currentRule.version)
+                ?: throw ConflictException("limit rule version conflict: expected ${currentRule.version.value}")
         }
 
         limitRuleRevisionRepository.insert(
@@ -117,8 +100,8 @@ internal class LimitChangeApplicationWorkflow(
                 revisionEventType = request.changeType.toRevisionEventType(),
                 actor = actor,
                 changeRequestId = request.id,
-                beforeRule = request.beforeRule,
-                afterRule = LimitRuleSnapshotter.ruleSnapshot(persistedRule),
+                beforeAmount = request.beforeAmount,
+                afterAmount = persistedRule.amount,
                 effectiveAt = applicationTime,
                 createdAt = applicationTime,
             ),

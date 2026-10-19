@@ -7,6 +7,7 @@ import io.github.sepfins.limitguard.api.OperationCapacityStatus
 import io.github.sepfins.limitguard.api.TransactionEventType
 import io.github.sepfins.limitguard.api.TransactionStatus
 import io.github.sepfins.limitguard.api.Limitguard
+import io.github.sepfins.limitguard.api.queries.GetLimitConfigurationQuery
 import io.github.sepfins.limitguard.api.queries.GetLimitRuleQuery
 import io.github.sepfins.limitguard.api.queries.GetOperationCapacityQuery
 import io.github.sepfins.limitguard.api.queries.GetTransactionHistoryQuery
@@ -193,6 +194,9 @@ class CustomerBankingService(
 
     private fun DemoLimitSetting.toResponse(tenantId: UUID, capacity: OperationCapacityResult): LimitResponse {
         val rule = limitguard.limitInquiryService.getLimitRule(GetLimitRuleQuery(tenantId, limitRuleId))
+        val configuration = limitguard.limitInquiryService.getLimitConfiguration(
+            GetLimitConfigurationQuery(tenantId, rule.configurationId),
+        )
         val usage = capacity.applicableLimits.firstOrNull { it.limitRuleId == limitRuleId }
         val consumed = usage?.consumedAmount ?: BigDecimal.ZERO
         val reserved = usage?.reservedAmount ?: BigDecimal.ZERO
@@ -200,7 +204,7 @@ class CustomerBankingService(
         val ruleAmount = (rule.amount as LimitAmount.Bounded).value
         val available = usage?.availableAmount ?: ruleAmount
         val exposure = consumed + reserved
-        val editableMinimum = if (rule.limitKind == LimitKind.PERIODIC) {
+        val editableMinimum = if (configuration.limitKind == LimitKind.PERIODIC) {
             exposure
                 .divide(stepAmount, 0, RoundingMode.CEILING)
                 .multiply(stepAmount)
@@ -212,16 +216,16 @@ class CustomerBankingService(
             id = id,
             operation = operation,
             displayName = displayName,
-            limitKind = rule.limitKind,
-            period = rule.period,
-            currentAmount = money(ruleAmount, rule.currency),
-            minimumAmount = money(editableMinimum, rule.currency),
-            maximumAmount = money(maximumAmount, rule.currency),
-            stepAmount = money(stepAmount, rule.currency),
-            consumedAmount = money(consumed, rule.currency),
-            reservedAmount = money(reserved, rule.currency),
-            availableAmount = money(available.max(BigDecimal.ZERO), rule.currency),
-            currentExposure = money(exposure, rule.currency),
+            limitKind = configuration.limitKind,
+            period = configuration.period,
+            currentAmount = money(ruleAmount, configuration.currency),
+            minimumAmount = money(editableMinimum, configuration.currency),
+            maximumAmount = money(maximumAmount, configuration.currency),
+            stepAmount = money(stepAmount, configuration.currency),
+            consumedAmount = money(consumed, configuration.currency),
+            reservedAmount = money(reserved, configuration.currency),
+            availableAmount = money(available.max(BigDecimal.ZERO), configuration.currency),
+            currentExposure = money(exposure, configuration.currency),
             capacityStatus = usage?.let {
                 if (available.signum() == 0) OperationCapacityStatus.EXHAUSTED else OperationCapacityStatus.AVAILABLE
             } ?: capacity.status,

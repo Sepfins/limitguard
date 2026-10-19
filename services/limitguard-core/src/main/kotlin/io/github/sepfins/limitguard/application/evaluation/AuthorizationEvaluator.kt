@@ -109,8 +109,7 @@ internal class AuthorizationEvaluator(
         val reservationPlan = usageReservationService.planAuthorizationReservation(
             transaction = transaction,
             periodicRules = boundedRules
-                .filter { it.configuration.limitKind is LimitKind.Periodic }
-                .map { it.rule },
+                .filter { it.configuration.limitKind is LimitKind.Periodic },
             now = now,
         )
         val decision = decision(evaluatedRules, reservationPlan.violations)
@@ -185,7 +184,7 @@ internal class AuthorizationEvaluator(
     private fun ApplicableLimitRule.toMatchedRule(): MatchedLimitRule =
         MatchedLimitRule(
             id = rule.id,
-            name = rule.name,
+            name = configuration.name,
             limitKind = configuration.limitKind,
             amount = rule.amount,
             priority = configuration.priority,

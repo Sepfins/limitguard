@@ -27,12 +27,9 @@ internal class LimitChangeEventFactory(
             actor = changeRequest.requestedBy,
             beforeStatus = null,
             afterStatus = changeRequest.status,
-            beforeRule = changeRequest.beforeRule,
-            afterRule = changeRequest.requestedRule,
             eventPayload = Metadata(
                 mapOf(
                     "changeType" to changeRequest.changeType.name,
-                    "targetScopeHash" to changeRequest.targetScopeHash.value,
                     "effectiveAt" to changeRequest.effectiveAt?.toString(),
                 ) + (originalIntent?.let { mapOf("originalIntent" to it.value) } ?: emptyMap())
             ),
@@ -58,8 +55,6 @@ internal class LimitChangeEventFactory(
             policyId = policyId,
             beforeStatus = before.status,
             afterStatus = after.status,
-            beforeRule = before.requestedRule,
-            afterRule = after.requestedRule,
             eventPayload = eventPayload,
             message = "Limit rule change approved",
             createdAt = now,
@@ -82,8 +77,6 @@ internal class LimitChangeEventFactory(
             policyId = policyId,
             beforeStatus = before.status,
             afterStatus = after.status,
-            beforeRule = before.requestedRule,
-            afterRule = after.requestedRule,
             eventPayload = eventPayload,
             message = "Limit rule change rejected",
             createdAt = now,
@@ -104,8 +97,6 @@ internal class LimitChangeEventFactory(
             policyId = evaluation.policyId,
             beforeStatus = before.status,
             afterStatus = after.status,
-            beforeRule = before.requestedRule,
-            afterRule = after.requestedRule,
             eventPayload = Metadata(
                 mapOf(
                     "evaluationId" to evaluation.id.value.toString(),
@@ -135,8 +126,6 @@ internal class LimitChangeEventFactory(
             actor = actor,
             beforeStatus = before.status,
             afterStatus = after.status,
-            beforeRule = before.requestedRule,
-            afterRule = after.requestedRule,
             eventPayload = eventPayload,
             message = "Limit rule change cancelled",
             createdAt = now,
@@ -159,8 +148,6 @@ internal class LimitChangeEventFactory(
             policyId = policyId,
             beforeStatus = before.status,
             afterStatus = after.status,
-            beforeRule = before.requestedRule,
-            afterRule = after.requestedRule,
             eventPayload = Metadata(mapOf("reason" to failureReason) + eventPayload.value),
             message = "Limit rule change application failed",
             createdAt = now,
@@ -180,8 +167,6 @@ internal class LimitChangeEventFactory(
             actor = actor,
             beforeStatus = before.status,
             afterStatus = after.status,
-            beforeRule = before.beforeRule,
-            afterRule = after.requestedRule,
             eventPayload = Metadata(
                 mapOf("limitRuleId" to requireNotNull(after.limitRuleId).value.toString())
             ),
@@ -203,8 +188,6 @@ internal class LimitChangeEventFactory(
             actor = actor,
             beforeStatus = before.status,
             afterStatus = after.status,
-            beforeRule = before.requestedRule,
-            afterRule = after.requestedRule,
             eventPayload = Metadata(
                 mapOf("effectiveAt" to requireNotNull(after.effectiveAt).toString())
             ),

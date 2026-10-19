@@ -5,15 +5,12 @@ import io.github.sepfins.limitguard.api.errors.ConflictException
 import io.github.sepfins.limitguard.api.errors.NotFoundException
 import io.github.sepfins.limitguard.api.errors.ValidationException
 import io.github.sepfins.limitguard.api.results.ApplyDueChangesResult
-import io.github.sepfins.limitguard.application.configuration.resolveHierarchy
 import io.github.sepfins.limitguard.domain.change.ChangeActor
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeRequest
 import io.github.sepfins.limitguard.domain.common.LimitChangeRequestId
 import io.github.sepfins.limitguard.domain.common.TenantId
 import io.github.sepfins.limitguard.port.persistence.LimitChangeRequestRepository
-import io.github.sepfins.limitguard.port.persistence.LimitConfigurationRepository
 import io.github.sepfins.limitguard.port.persistence.LimitRuleChangeEventRepository
-import io.github.sepfins.limitguard.port.persistence.LimitRuleRepository
 import io.github.sepfins.limitguard.port.time.ClockProvider
 import io.github.sepfins.limitguard.port.transactions.TransactionRunner
 import java.time.Instant
@@ -21,12 +18,9 @@ import java.time.Instant
 internal class ApplyDueLimitChangesWorkflow(
     private val eligibility: LimitChangeEligibilityValidator,
     private val applicationWorkflow: LimitChangeApplicationWorkflow,
-    private val mandateValidator: LimitRuleMandateValidator,
     private val changeEventFactory: LimitChangeEventFactory,
     private val changeRequestRepository: LimitChangeRequestRepository,
     private val changeEventRepository: LimitRuleChangeEventRepository,
-    private val limitConfigurationRepository: LimitConfigurationRepository,
-    private val limitRuleRepository: LimitRuleRepository,
     private val locks: LimitChangeLocks,
     private val clockProvider: ClockProvider,
     private val transactionRunner: TransactionRunner,
@@ -38,28 +32,28 @@ internal class ApplyDueLimitChangesWorkflow(
 
         transactionRunner.inTransaction {
             eligibility.validateTenant(tenantId)
-            val candidates = changeRequestRepository.findDueForApplication(
+            val candidates = changeRequestRepository.findIdsDueForApplication(
                 tenantId = tenantId,
                 dueAt = dueAt,
                 limit = command.limit,
             )
-            val plans = candidates.associate { it.id to locks.discover(it) }
-            val lockedTargets = locks.acquireTargets(tenantId, plans.values, skipBusy = true)
-            val dueRequests = candidates.sortedBy { it.id.value.toString() }.mapNotNull { observed ->
-                val plan = plans.getValue(observed.id)
-                if (!lockedTargets.covers(plan)) return@mapNotNull null
-                changeRequestRepository.claimForApplication(tenantId, observed.id, dueAt)?.also {
-                    locks.requireSameIdentity(observed, it)
-                }
+            // A request another worker holds is skipped; its target is that worker's.
+            val dueRequests = candidates.sortedBy { it.value.toString() }.mapNotNull {
+                changeRequestRepository.claimForApplication(tenantId, it, dueAt)
             }.sortedWith(compareBy<LimitRuleChangeRequest> { it.createdAt }.thenBy { it.id.value.toString() })
-            locks.acquireRules(tenantId, dueRequests.map { plans.getValue(it.id) })
+            val lockedTargets = locks.acquireTargets(tenantId, dueRequests)
             val appliedRequestIds = mutableListOf<LimitChangeRequestId>()
             val failedRequestIds = mutableListOf<LimitChangeRequestId>()
 
             dueRequests.forEach { request ->
                 try {
                     transactionRunner.inSavepoint {
-                        applyClaimed(request, dueAt, lockedTargets)
+                        applicationWorkflow.applyInCurrentTransaction(
+                            request = request,
+                            target = lockedTargets.getValue(request.target),
+                            actor = ChangeActor.System,
+                            applicationTime = dueAt,
+                        )
                     }
                     appliedRequestIds += request.id
                 } catch (exception: ConflictException) {
@@ -86,34 +80,6 @@ internal class ApplyDueLimitChangesWorkflow(
                 failedChangeRequestIds = failedRequestIds.map { it.value },
             )
         }
-    }
-
-    private fun applyClaimed(
-        request: LimitRuleChangeRequest,
-        dueAt: Instant,
-        lockedTargets: LockedLimitChangeTargets,
-    ) {
-        val currentRule = request.limitRuleId?.let {
-            limitRuleRepository.findByIdForUpdate(request.tenantId, it)
-        }
-        val candidate = LimitRuleSnapshotter.restoreRule(
-            snapshot = request.requestedRule,
-            createdAt = currentRule?.createdAt ?: request.createdAt,
-            updatedAt = dueAt,
-        )
-        if (candidate.isActive) {
-            val hierarchy = limitConfigurationRepository.resolveHierarchy(request.tenantId, candidate.configurationId)
-            candidate.validateAgainst(hierarchy.first(), hierarchy.drop(1))
-        }
-        mandateValidator.validate(candidate, dueAt)
-
-        applicationWorkflow.applyInCurrentTransaction(
-            request = request,
-            candidate = candidate,
-            actor = ChangeActor.System,
-            applicationTime = dueAt,
-            lockedTargets = lockedTargets,
-        )
     }
 
     private fun markFailed(

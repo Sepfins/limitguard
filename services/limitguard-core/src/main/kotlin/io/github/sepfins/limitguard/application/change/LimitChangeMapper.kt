@@ -13,37 +13,20 @@ import io.github.sepfins.limitguard.domain.change.RequestActorContext
 import io.github.sepfins.limitguard.domain.common.ChannelId
 import io.github.sepfins.limitguard.domain.common.MandateId
 import io.github.sepfins.limitguard.domain.common.PartyProfileId
-import io.github.sepfins.limitguard.domain.limit.LimitConfiguration
-import io.github.sepfins.limitguard.domain.limit.LimitConfigurationFundingScope
-import io.github.sepfins.limitguard.domain.limit.LimitRule
-import io.github.sepfins.limitguard.domain.limit.LimitRuleTargetScope
+import io.github.sepfins.limitguard.domain.common.LimitConfigurationId
+import io.github.sepfins.limitguard.domain.limit.LimitRuleTarget
+import io.github.sepfins.limitguard.application.toApi
 import io.github.sepfins.limitguard.domain.mandate.MandateScope
-
-internal fun LimitRule.toTargetScope(fundingScope: LimitConfigurationFundingScope): LimitRuleTargetScope =
-    LimitRuleTargetScope(
-        owner = ownerPartyProfileId,
-        mandateScope = mandateScope,
-        channelScope = channelScope,
-        operationScope = operationScope,
-        currency = amount.currency,
-        kind = limitKind,
-        fundingScope = fundingScope,
-    )
-
-/** Every rule on a configuration shares the configuration's scope, so a target can be locked before its rule is known. */
-internal fun LimitConfiguration.targetScope(owner: PartyProfileId, mandateScope: MandateScope): LimitRuleTargetScope =
-    LimitRuleTargetScope(
-        owner = owner,
-        mandateScope = mandateScope,
-        channelScope = channelScope,
-        operationScope = operationScope,
-        currency = currency,
-        kind = limitKind,
-        fundingScope = fundingScope,
-    )
 
 internal fun RequestLimitRuleChangeCommand.toMandateScope(): MandateScope =
     target.mandateId?.let { MandateScope.MandateSpecific(MandateId.of(it)) } ?: MandateScope.AllOwnerMandates
+
+internal fun RequestLimitRuleChangeCommand.toTarget(): LimitRuleTarget =
+    LimitRuleTarget(
+        owner = PartyProfileId.of(target.ownerPartyProfileId),
+        configurationId = LimitConfigurationId.of(target.configurationId),
+        mandateScope = toMandateScope(),
+    )
 
 internal fun RequestLimitRuleChangeCommand.toChangeActor(): ChangeActor =
     requestedBy.toChangeActor()
@@ -103,7 +86,9 @@ internal fun LimitRuleChangeRequest.toResult(): LimitChangeRequestResult =
         authorityDelegationId = authorityDelegationId?.value,
         targetOwnerPartyProfileId = targetOwnerPartyProfileId.value,
         targetMandateId = targetMandateId?.value,
-        targetScopeHash = targetScopeHash.value,
+        configurationId = configurationId.value,
+        requestedAmount = requestedAmount.toApi(),
+        beforeAmount = beforeAmount?.toApi(),
         effectiveAt = effectiveAt,
         expiresAt = expiresAt,
         decidedAt = decidedAt,

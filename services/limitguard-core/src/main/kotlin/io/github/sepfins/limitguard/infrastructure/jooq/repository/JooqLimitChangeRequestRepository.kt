@@ -5,22 +5,27 @@ import io.github.sepfins.limitguard.domain.change.LimitRuleChangeRequest
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeStatus
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeType
 import io.github.sepfins.limitguard.domain.change.RequestActorContext
-import io.github.sepfins.limitguard.domain.change.ScopeHash
 import io.github.sepfins.limitguard.domain.common.ChannelId
+import io.github.sepfins.limitguard.domain.common.CurrencyCode
 import io.github.sepfins.limitguard.domain.common.IdempotencyKey
 import io.github.sepfins.limitguard.domain.common.LimitChangeRequestId
+import io.github.sepfins.limitguard.domain.common.LimitConfigurationId
 import io.github.sepfins.limitguard.domain.common.LimitRuleId
 import io.github.sepfins.limitguard.domain.common.MandateId
 import io.github.sepfins.limitguard.domain.common.PartyProfileDelegationId
 import io.github.sepfins.limitguard.domain.common.PartyProfileId
 import io.github.sepfins.limitguard.domain.common.TenantId
+import io.github.sepfins.limitguard.domain.limit.LimitAmount
 import io.github.sepfins.limitguard.infrastructure.jooq.JooqPersistenceContext
 import io.github.sepfins.limitguard.infrastructure.jooq.jooqOperation
+import io.github.sepfins.limitguard.infrastructure.jooq.storedAmount
+import io.github.sepfins.limitguard.infrastructure.jooq.storedLimitAmount
 import io.github.sepfins.limitguard.infrastructure.jooq.toJsonb
 import io.github.sepfins.limitguard.infrastructure.jooq.toMetadata
 import io.github.sepfins.limitguard.infrastructure.jooq.generated.enums.LimitChangeActorType as GeneratedLimitChangeActorType
 import io.github.sepfins.limitguard.infrastructure.jooq.generated.enums.LimitRuleChangeStatus as GeneratedLimitRuleChangeStatus
 import io.github.sepfins.limitguard.infrastructure.jooq.generated.enums.LimitRuleChangeType as GeneratedLimitRuleChangeType
+import io.github.sepfins.limitguard.infrastructure.jooq.generated.tables.LimitConfiguration as GeneratedLimitConfigurationTable
 import io.github.sepfins.limitguard.infrastructure.jooq.generated.tables.LimitRuleChangeRequest as GeneratedLimitRuleChangeRequestTable
 import io.github.sepfins.limitguard.port.persistence.LimitChangeRequestRepository
 import org.jooq.Record
@@ -32,6 +37,7 @@ class JooqLimitChangeRequestRepository(
     private val context: JooqPersistenceContext,
 ) : LimitChangeRequestRepository {
     private val table = GeneratedLimitRuleChangeRequestTable.LIMIT_RULE_CHANGE_REQUEST
+    private val configuration = GeneratedLimitConfigurationTable.LIMIT_CONFIGURATION
 
     override fun findById(tenantId: TenantId, id: LimitChangeRequestId): LimitRuleChangeRequest? =
         findById(tenantId, id, forUpdate = false)
@@ -54,55 +60,15 @@ class JooqLimitChangeRequestRepository(
             .fetchOne { it.toDomain() }
     }
 
-    override fun findByLimitRule(
-        tenantId: TenantId,
-        limitRuleId: LimitRuleId,
-    ): List<LimitRuleChangeRequest> = jooqOperation("find limit change requests by rule") {
-        selectRequests()
-            .where(table.TENANT_ID.eq(tenantId.value))
-            .and(table.LIMIT_RULE_ID.eq(limitRuleId.value))
-            .orderBy(table.CREATED_AT, table.ID)
-            .fetch { it.toDomain() }
-    }
-
-    override fun findPendingForTarget(
-        tenantId: TenantId,
-        targetScopeHash: ScopeHash,
-        at: Instant,
-    ): List<LimitRuleChangeRequest> = jooqOperation("find pending limit changes for target") {
-        val timestamp = at.toOffsetDateTime()
-        selectRequests()
-            .where(table.TENANT_ID.eq(tenantId.value))
-            .and(table.TARGET_SCOPE_HASH.eq(targetScopeHash.value))
-            .and(table.STATUS.`in`(PENDING_STATUSES))
-            .and(table.EXPIRES_AT.isNull.or(table.EXPIRES_AT.gt(timestamp)))
-            .orderBy(table.CREATED_AT, table.ID)
-            .fetch { it.toDomain() }
-    }
-
-    override fun lockTarget(tenantId: TenantId, targetScopeHash: ScopeHash) =
-        jooqOperation("lock limit change target") {
-            context.requireTransaction("locking a limit change target")
-            val lockKey = "limit-change-target:${tenantId.value}:${targetScopeHash.value}"
-            context.dsl().fetch("select pg_advisory_xact_lock(hashtextextended(?, 0))", lockKey)
-            Unit
-        }
-
-    override fun tryLockTarget(tenantId: TenantId, targetScopeHash: ScopeHash): Boolean =
-        jooqOperation("try lock limit change target") {
-            context.requireTransaction("locking a limit change target")
-            val lockKey = "limit-change-target:${tenantId.value}:${targetScopeHash.value}"
-            context.dsl().fetchValue("select pg_try_advisory_xact_lock(hashtextextended(?, 0))", lockKey) == true
-        }
-
-    override fun findDueForApplication(
+    override fun findIdsDueForApplication(
         tenantId: TenantId,
         dueAt: Instant,
         limit: Int,
-    ): List<LimitRuleChangeRequest> = jooqOperation("discover due limit change requests") {
+    ): List<LimitChangeRequestId> = jooqOperation("discover due limit change requests") {
         require(limit > 0) { "limit must be greater than zero" }
-        selectRequests().where(dueCondition(tenantId, dueAt))
-            .orderBy(table.CREATED_AT, table.ID).limit(limit).fetch { it.toDomain() }
+        context.dsl().select(table.ID).from(table).where(dueCondition(tenantId, dueAt))
+            .orderBy(table.CREATED_AT, table.ID).limit(limit)
+            .fetch { LimitChangeRequestId.of(requireNotNull(it.get(table.ID))) }
     }
 
     override fun claimForApplication(
@@ -112,23 +78,7 @@ class JooqLimitChangeRequestRepository(
     ): LimitRuleChangeRequest? = jooqOperation("claim due limit change request") {
         context.requireTransaction("claiming a due limit change request")
         selectRequests().where(dueCondition(tenantId, dueAt)).and(table.ID.eq(id.value))
-            .forUpdate().skipLocked().fetchOne { it.toDomain() }
-    }
-
-    override fun claimDueForApplication(
-        tenantId: TenantId,
-        dueAt: Instant,
-        limit: Int,
-    ): List<LimitRuleChangeRequest> = jooqOperation("claim due limit change requests") {
-        context.requireTransaction("claiming due limit change requests")
-        require(limit > 0) { "limit must be greater than zero" }
-        selectRequests()
-            .where(dueCondition(tenantId, dueAt))
-            .orderBy(table.CREATED_AT, table.ID)
-            .limit(limit)
-            .forUpdate()
-            .skipLocked()
-            .fetch { it.toDomain() }
+            .forUpdate().of(table).skipLocked().fetchOne { it.toDomain() }
     }
 
     override fun findByRequesterContext(
@@ -184,10 +134,11 @@ class JooqLimitChangeRequestRepository(
             .set(table.REQUEST_CHANNEL_ID, request.requestChannelId())
             .set(table.TARGET_OWNER_PARTY_PROFILE_ID, request.targetOwnerPartyProfileId.value)
             .set(table.TARGET_MANDATE_ID, request.targetMandateId?.value)
-            .set(table.TARGET_SCOPE, request.targetScope.toJsonb())
-            .set(table.TARGET_SCOPE_HASH, request.targetScopeHash.value)
-            .set(table.BEFORE_RULE, request.beforeRule?.toJsonb())
-            .set(table.REQUESTED_RULE, request.requestedRule.toJsonb())
+            .set(table.CONFIGURATION_ID, request.configurationId.value)
+            .set(table.BEFORE_AMOUNT, request.beforeAmount?.storedAmount)
+            .set(table.BEFORE_UNLIMITED, request.beforeAmount?.let { it is LimitAmount.Unlimited })
+            .set(table.REQUESTED_AMOUNT, request.requestedAmount.storedAmount)
+            .set(table.REQUESTED_UNLIMITED, request.requestedAmount is LimitAmount.Unlimited)
             .set(table.POLICY_CONTEXT, request.policyContext.toJsonb())
             .set(table.EFFECTIVE_AT, request.effectiveAt?.toOffsetDateTime())
             .set(table.EXPIRES_AT, request.expiresAt?.toOffsetDateTime())
@@ -200,7 +151,7 @@ class JooqLimitChangeRequestRepository(
             .set(table.METADATA, request.metadata.toJsonb())
         request.createdAt?.let { insert.set(table.CREATED_AT, it.toOffsetDateTime()) }
         request.updatedAt?.let { insert.set(table.UPDATED_AT, it.toOffsetDateTime()) }
-        requireNotNull(insert.returning(table.fields().toList()).fetchOne()).toDomain()
+        requireNotNull(insert.returning().fetchOne()).toDomain(request.requestedAmount.currency)
     }
 
     override fun update(
@@ -212,11 +163,8 @@ class JooqLimitChangeRequestRepository(
             .update(table)
             .set(table.LIMIT_RULE_ID, request.limitRuleId?.value)
             .set(table.STATUS, request.status.toGenerated())
-            .set(table.TARGET_MANDATE_ID, request.targetMandateId?.value)
-            .set(table.TARGET_SCOPE, request.targetScope.toJsonb())
-            .set(table.TARGET_SCOPE_HASH, request.targetScopeHash.value)
-            .set(table.BEFORE_RULE, request.beforeRule?.toJsonb())
-            .set(table.REQUESTED_RULE, request.requestedRule.toJsonb())
+            .set(table.REQUESTED_AMOUNT, request.requestedAmount.storedAmount)
+            .set(table.REQUESTED_UNLIMITED, request.requestedAmount is LimitAmount.Unlimited)
             .set(table.POLICY_CONTEXT, request.policyContext.toJsonb())
             .set(table.EFFECTIVE_AT, request.effectiveAt?.toOffsetDateTime())
             .set(table.EXPIRES_AT, request.expiresAt?.toOffsetDateTime())
@@ -227,12 +175,12 @@ class JooqLimitChangeRequestRepository(
             .set(table.DECISION_REASON, request.decisionReason)
             .set(table.METADATA, request.metadata.toJsonb())
         request.updatedAt?.let { update.set(table.UPDATED_AT, it.toOffsetDateTime()) }
-        requireNotNull(
-            update.where(table.TENANT_ID.eq(tenantId.value))
-                .and(table.ID.eq(request.id.value))
-                .returning(table.fields().toList())
-                .fetchOne()
-        ) { "limit change request not found: ${request.id.value}" }.toDomain()
+        val updated = update.where(table.TENANT_ID.eq(tenantId.value))
+            .and(table.ID.eq(request.id.value))
+            .returning()
+            .fetchOne()
+        require(updated != null) { "limit change request not found: ${request.id.value}" }
+        updated.toDomain(request.requestedAmount.currency)
     }
 
     private fun findById(
@@ -243,12 +191,16 @@ class JooqLimitChangeRequestRepository(
         val query = selectRequests()
             .where(table.TENANT_ID.eq(tenantId.value))
             .and(table.ID.eq(id.value))
-        if (forUpdate) query.forUpdate().fetchOne { it.toDomain() } else query.fetchOne { it.toDomain() }
+        if (forUpdate) query.forUpdate().of(table).fetchOne { it.toDomain() } else query.fetchOne { it.toDomain() }
     }
 
+    /** Amounts are in the target configuration's currency, the only currency column. */
     private fun selectRequests() = context.dsl()
-        .select(table.fields().toList())
+        .select(table.fields().toList() + configuration.CURRENCY)
         .from(table)
+        .join(configuration)
+        .on(configuration.TENANT_ID.eq(table.TENANT_ID))
+        .and(configuration.ID.eq(table.CONFIGURATION_ID))
 
     private fun dueCondition(tenantId: TenantId, dueAt: Instant) =
         table.TENANT_ID.eq(tenantId.value)
@@ -256,7 +208,10 @@ class JooqLimitChangeRequestRepository(
             .and(table.EFFECTIVE_AT.isNull.or(table.EFFECTIVE_AT.le(dueAt.toOffsetDateTime())))
             .and(table.EXPIRES_AT.isNull.or(table.EXPIRES_AT.gt(dueAt.toOffsetDateTime())))
 
-    private fun Record.toDomain(): LimitRuleChangeRequest {
+    private fun Record.toDomain(): LimitRuleChangeRequest =
+        toDomain(CurrencyCode.of(requireNotNull(get(configuration.CURRENCY))))
+
+    private fun Record.toDomain(currency: CurrencyCode): LimitRuleChangeRequest {
         val requestedBy = when (requireNotNull(get(table.REQUESTED_BY_ACTOR_TYPE))) {
             GeneratedLimitChangeActorType.SYSTEM -> ChangeActor.System
             GeneratedLimitChangeActorType.PARTY_PROFILE -> ChangeActor.PartyProfileActor(
@@ -277,16 +232,15 @@ class JooqLimitChangeRequestRepository(
             changeType = LimitRuleChangeType.valueOf(requireNotNull(get(table.CHANGE_TYPE)).name),
             requestedBy = requestedBy,
             targetOwnerPartyProfileId = PartyProfileId.of(requireNotNull(get(table.TARGET_OWNER_PARTY_PROFILE_ID))),
-            targetScope = get(table.TARGET_SCOPE).toMetadata(),
-            targetScopeHash = ScopeHash.of(requireNotNull(get(table.TARGET_SCOPE_HASH))),
-            requestedRule = get(table.REQUESTED_RULE).toMetadata(),
+            configurationId = LimitConfigurationId.of(requireNotNull(get(table.CONFIGURATION_ID))),
+            requestedAmount = storedLimitAmount(get(table.REQUESTED_AMOUNT), requireNotNull(get(table.REQUESTED_UNLIMITED)), currency),
             status = LimitRuleChangeStatus.valueOf(requireNotNull(get(table.STATUS)).name),
             limitRuleId = get(table.LIMIT_RULE_ID)?.let(LimitRuleId::of),
             authorityDelegationId = get(table.AUTHORITY_DELEGATION_ID)?.let(PartyProfileDelegationId::of),
             requestActorContext = requestActorContext,
             requesterPartyProfileId = get(table.REQUESTER_PARTY_PROFILE_ID)?.let(PartyProfileId::of),
             targetMandateId = get(table.TARGET_MANDATE_ID)?.let(MandateId::of),
-            beforeRule = get(table.BEFORE_RULE)?.toMetadata(),
+            beforeAmount = get(table.BEFORE_UNLIMITED)?.let { storedLimitAmount(get(table.BEFORE_AMOUNT), it, currency) },
             policyContext = get(table.POLICY_CONTEXT).toMetadata(),
             effectiveAt = get(table.EFFECTIVE_AT)?.toInstant(),
             expiresAt = get(table.EXPIRES_AT)?.toInstant(),

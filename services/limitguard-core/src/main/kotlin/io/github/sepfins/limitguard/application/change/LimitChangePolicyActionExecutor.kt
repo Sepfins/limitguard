@@ -30,10 +30,6 @@ internal class LimitChangePolicyActionExecutor {
         at: Instant,
     ): SingleActionExecution {
         require(action.effectiveAt > at) { "SET_EFFECTIVE_AT must schedule the request in the future" }
-        val ruleEndsAt = LimitRuleSnapshotter.restoreRule(request.requestedRule).effectiveWindow.endsAt
-        require(ruleEndsAt == null || ruleEndsAt > action.effectiveAt) {
-            "SET_EFFECTIVE_AT must be before the requested rule end"
-        }
 
         val before = request.effectiveAt
         val changed = before != action.effectiveAt
@@ -58,22 +54,16 @@ internal class LimitChangePolicyActionExecutor {
         action: PolicyAction.CapRequestedAmount,
         at: Instant,
     ): SingleActionExecution {
-        val requestedRule = LimitRuleSnapshotter.restoreRule(request.requestedRule)
-        val before = requestedRule.amount
+        val before = request.requestedAmount
         val currency = before.currency
         require(action.maximumAmount.currency == currency) {
-            "CAP_REQUESTED_AMOUNT currency must match the requested rule currency"
+            "CAP_REQUESTED_AMOUNT currency must match the requested amount currency"
         }
         val maximum = LimitAmount.Bounded(action.maximumAmount)
         val changed = !before.fitsWithin(maximum)
         val afterAmount = if (changed) maximum else before
         val after = if (changed) {
-            request.copy(
-                requestedRule = LimitRuleSnapshotter.ruleSnapshot(
-                    requestedRule.copy(amount = afterAmount),
-                ),
-                updatedAt = at,
-            )
+            request.copy(requestedAmount = afterAmount, updatedAt = at)
         } else {
             request
         }

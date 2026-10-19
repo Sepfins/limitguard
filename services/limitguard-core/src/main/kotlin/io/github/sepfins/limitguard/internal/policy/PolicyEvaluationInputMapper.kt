@@ -4,6 +4,7 @@ import io.github.sepfins.limitguard.domain.change.ChangeActor
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeRequest
 import io.github.sepfins.limitguard.domain.change.RequestActorContext
 import io.github.sepfins.limitguard.domain.common.Metadata
+import io.github.sepfins.limitguard.domain.limit.LimitAmount
 import io.github.sepfins.limitguard.domain.policy.PolicyEvaluationContext
 
 internal fun PolicyEvaluationContext.toPolicyEvaluationInput(): Metadata =
@@ -12,7 +13,6 @@ internal fun PolicyEvaluationContext.toPolicyEvaluationInput(): Metadata =
             "phase" to phase.name,
             "evaluatedAt" to evaluatedAt.toString(),
             "changeRequest" to changeRequest.toPolicyInput(),
-            "currentRule" to currentRule?.value,
             "facts" to facts.value,
         )
     )
@@ -30,10 +30,12 @@ private fun LimitRuleChangeRequest.toPolicyInput(): Map<String, Any?> =
         "authorityDelegationId" to authorityDelegationId?.value?.toString(),
         "targetOwnerPartyProfileId" to targetOwnerPartyProfileId.value.toString(),
         "targetMandateId" to targetMandateId?.value?.toString(),
-        "targetScope" to targetScope.value,
-        "targetScopeHash" to targetScopeHash.value,
-        "beforeRule" to beforeRule?.value,
-        "requestedRule" to requestedRule.value,
+        "configurationId" to configurationId.value.toString(),
+        "currency" to requestedAmount.currency.value,
+        "beforeAmount" to (beforeAmount as? LimitAmount.Bounded)?.money?.amount?.toPlainString(),
+        "beforeUnlimited" to beforeAmount?.let { it is LimitAmount.Unlimited },
+        "requestedAmount" to (requestedAmount as? LimitAmount.Bounded)?.money?.amount?.toPlainString(),
+        "requestedUnlimited" to (requestedAmount is LimitAmount.Unlimited),
         "effectiveAt" to effectiveAt?.toString(),
         "expiresAt" to expiresAt?.toString(),
         "idempotencyKey" to idempotencyKey?.value,

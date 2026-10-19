@@ -33,6 +33,9 @@ interface LimitConfigurationRepository {
     fun findByIds(tenantId: TenantId, ids: Set<LimitConfigurationId>): List<LimitConfiguration>
 
     fun findByIdForUpdate(tenantId: TenantId, id: LimitConfigurationId): LimitConfiguration?
+
+    /** Loads the configuration row and keeps it from changing until the surrounding transaction ends. */
+    fun findByIdForShare(tenantId: TenantId, id: LimitConfigurationId): LimitConfiguration?
     fun findByCode(tenantId: TenantId, code: LimitConfigurationCode): LimitConfiguration?
     fun insert(tenantId: TenantId, limitConfiguration: LimitConfiguration): LimitConfiguration
     fun update(tenantId: TenantId, limitConfiguration: LimitConfiguration): LimitConfiguration

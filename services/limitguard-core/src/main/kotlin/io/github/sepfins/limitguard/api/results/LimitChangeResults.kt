@@ -1,5 +1,6 @@
 package io.github.sepfins.limitguard.api.results
 
+import io.github.sepfins.limitguard.api.LimitAmount
 import io.github.sepfins.limitguard.api.LimitRuleChangeStatus
 import io.github.sepfins.limitguard.api.LimitRuleChangeType
 import java.time.Instant
@@ -17,7 +18,11 @@ data class LimitChangeRequestResult(
     val authorityDelegationId: UUID?,
     val targetOwnerPartyProfileId: UUID,
     val targetMandateId: UUID?,
-    val targetScopeHash: String,
+    val configurationId: UUID,
+    /** The rule's amount once the change applies; a status change keeps the current amount. */
+    val requestedAmount: LimitAmount,
+    /** The rule's amount when the change was requested; null for a CREATE. */
+    val beforeAmount: LimitAmount?,
     val effectiveAt: Instant?,
     val expiresAt: Instant?,
     val decidedAt: Instant?,

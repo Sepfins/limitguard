@@ -4,15 +4,15 @@ import io.github.sepfins.limitguard.api.commands.RequestLimitRuleChangeCommand
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeRequest
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeStatus
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeType
+import io.github.sepfins.limitguard.domain.change.ResolvedLimitChangeFacts
 import io.github.sepfins.limitguard.domain.common.IdempotencyKey
 import io.github.sepfins.limitguard.domain.common.LimitChangeRequestId
 import io.github.sepfins.limitguard.domain.common.MandateId
 import io.github.sepfins.limitguard.domain.common.Metadata
 import io.github.sepfins.limitguard.domain.common.PartyProfileDelegationId
-import io.github.sepfins.limitguard.domain.limit.LimitRule
-import io.github.sepfins.limitguard.domain.limit.LimitRuleTargetScope
-import io.github.sepfins.limitguard.domain.mandate.MandateScope
-import io.github.sepfins.limitguard.internal.hashing.TargetScopeCanonicalizer
+import io.github.sepfins.limitguard.domain.common.PartyProfileId
+import io.github.sepfins.limitguard.domain.common.TenantId
+import io.github.sepfins.limitguard.domain.limit.LimitAmount
 import java.time.Instant
 
 internal class LimitChangeRequestFactory {
@@ -20,29 +20,24 @@ internal class LimitChangeRequestFactory {
         id: LimitChangeRequestId,
         command: RequestLimitRuleChangeCommand,
         changeType: LimitRuleChangeType,
-        requestedRule: LimitRule,
-        currentRule: LimitRule?,
-        targetScope: LimitRuleTargetScope,
+        requestedAmount: LimitAmount,
+        facts: ResolvedLimitChangeFacts,
         now: Instant
     ): LimitRuleChangeRequest {
-
-        val requestedRuleSnapshot = LimitRuleSnapshotter.ruleSnapshot(requestedRule)
-
         val actor = command.toChangeActor()
 
         return LimitRuleChangeRequest(
             id = id,
-            tenantId = requestedRule.tenantId,
+            tenantId = TenantId.of(command.tenantId),
             changeType = changeType,
             status = LimitRuleChangeStatus.REQUESTED,
             requestedBy = actor,
-            limitRuleId = currentRule?.id,
-            targetOwnerPartyProfileId = requestedRule.ownerPartyProfileId,
-            targetMandateId = requestedRule.targetMandateId(),
-            targetScope = TargetScopeCanonicalizer.snapshot(targetScope),
-            targetScopeHash = TargetScopeCanonicalizer.hash(targetScope),
-            requestedRule = requestedRuleSnapshot,
-            beforeRule = currentRule?.let { LimitRuleSnapshotter.ruleSnapshot(it) },
+            limitRuleId = (facts.currentRule ?: facts.deletedRule)?.id,
+            targetOwnerPartyProfileId = PartyProfileId.of(command.target.ownerPartyProfileId),
+            targetMandateId = command.target.mandateId?.let { MandateId.of(it) },
+            configurationId = facts.configuration.id,
+            requestedAmount = requestedAmount,
+            beforeAmount = facts.currentRule?.amount,
             authorityDelegationId = command.authorityDelegationId?.let { PartyProfileDelegationId.of(it) },
             requestActorContext = command.toRequestActorContext(actor),
             requesterPartyProfileId = command.toRequesterPartyProfileId(actor),
@@ -55,10 +50,4 @@ internal class LimitChangeRequestFactory {
             updatedAt = now
         )
     }
-
-    private fun LimitRule.targetMandateId(): MandateId? =
-        when (val scope = mandateScope) {
-            MandateScope.AllOwnerMandates -> null
-            is MandateScope.MandateSpecific -> scope.mandateId
-        }
 }

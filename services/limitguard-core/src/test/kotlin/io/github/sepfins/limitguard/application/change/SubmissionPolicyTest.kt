@@ -75,7 +75,7 @@ class SubmissionPolicyTest {
         assertEquals(LimitRuleChangeStatus.REQUESTED, request.status)
         assertEquals(due, request.effectiveAt)
         assertEquals(LimitRuleChangeStatus.PENDING_EFFECTIVE_DATE, s.approve(request.id).status)
-        assertEquals("250.5000", s.details(request.id).requestedRule["amount"])
+        assertEquals(LimitAmount.Bounded(BigDecimal("250.5000")), s.details(request.id).request.requestedAmount)
     }
 
     @Test
@@ -114,7 +114,7 @@ class SubmissionPolicyTest {
         conditionExpression = condition, actionExpression = actions, denialMessage = denialMessage,
     ))
 
-    private fun amount() = mapOf("var" to "changeRequest.requestedRule.amount")
+    private fun amount() = mapOf("var" to "changeRequest.requestedAmount")
 
     private fun setAmount(amount: String) = LimitRuleChangeOperation.SetAmount(LimitAmount.Bounded(BigDecimal(amount)))
 

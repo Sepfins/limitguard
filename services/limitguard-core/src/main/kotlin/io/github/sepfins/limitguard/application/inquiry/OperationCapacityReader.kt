@@ -91,7 +91,6 @@ internal class OperationCapacityReader(
             context = context,
             authorities = authorities,
             references = references,
-            at = at,
         )
         if (matchingRules.isEmpty()) {
             return noMatchingRuleResult(
@@ -180,8 +179,8 @@ internal class OperationCapacityReader(
         return ApplicableLimitUsageResult(
             limitRuleId = rule.id.value,
             ownerPartyProfileId = rule.ownerPartyProfileId.value,
-            name = rule.name.value,
-            description = rule.description,
+            name = configuration.name.value,
+            description = configuration.description,
             limitKind = if (period == null) ApiLimitKind.PER_TRANSACTION else ApiLimitKind.PERIODIC,
             period = period?.let { ApiLimitPeriod.valueOf(it.name) },
             periodStartsAt = window?.periodStartsAt,

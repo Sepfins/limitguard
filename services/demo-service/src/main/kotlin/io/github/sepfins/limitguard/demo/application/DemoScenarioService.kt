@@ -331,7 +331,7 @@ class DemoScenarioService(
                 priority = 10,
                 conditionExpression = mapOf(
                     "decimal_lt" to listOf(
-                        mapOf("var" to "changeRequest.requestedRule.amount"),
+                        mapOf("var" to "changeRequest.requestedAmount"),
                         mapOf("var" to "facts.currentExposure"),
                     ),
                 ),
@@ -366,7 +366,7 @@ class DemoScenarioService(
         atmConfigurationId: UUID,
         transferDailyConfigurationId: UUID,
     ) {
-        val requestedAmount = mapOf("var" to "changeRequest.requestedRule.amount")
+        val requestedAmount = mapOf("var" to "changeRequest.requestedAmount")
         limitguard.tenantCatalogService.createLimitChangePolicy(
             CreateLimitChangePolicyCommand(
                 tenantId = tenantId,
@@ -392,7 +392,7 @@ class DemoScenarioService(
                                 mapOf(
                                     "decimal_gt" to listOf(
                                         requestedAmount,
-                                        mapOf("var" to "changeRequest.beforeRule.amount"),
+                                        mapOf("var" to "changeRequest.beforeAmount"),
                                     ),
                                 ),
                             ),
@@ -438,7 +438,7 @@ class DemoScenarioService(
                         mapOf(
                             "decimal_gt" to listOf(
                                 requestedAmount,
-                                mapOf("var" to "changeRequest.beforeRule.amount"),
+                                mapOf("var" to "changeRequest.beforeAmount"),
                             ),
                         ),
                     ),

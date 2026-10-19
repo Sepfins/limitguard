@@ -210,9 +210,8 @@ internal class JsonLogicPolicyValidator {
 
         private val INEXACT_COMPARISON_OPERATIONS = setOf("==", "!=", "===", "!==")
         private val MONEY_PATHS = setOf(
-            "changeRequest.requestedRule.amount",
-            "changeRequest.beforeRule.amount",
-            "currentRule.amount",
+            "changeRequest.requestedAmount",
+            "changeRequest.beforeAmount",
         )
     }
 }
