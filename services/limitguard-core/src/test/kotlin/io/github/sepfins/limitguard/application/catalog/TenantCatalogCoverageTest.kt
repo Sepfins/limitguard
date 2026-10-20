@@ -198,6 +198,28 @@ class TenantCatalogCoverageTest {
                 )
             )
         }
+        fixture.service.registerIdentifierScheme(
+            RegisterIdentifierSchemeCommand(otherTenant.id, EntityIdentifierTypes.FUNDING_SOURCE, "IBAN")
+        )
+        assertFailsWith<NotFoundException> {
+            fixture.service.assignEntityIdentifier(
+                AssignEntityIdentifierCommand(
+                    tenantId = otherTenant.id,
+                    entityType = EntityIdentifierTypes.FUNDING_SOURCE,
+                    entityId = source.id,
+                    schemeName = "IBAN",
+                    identifier = "IT60X0542811101000000123456",
+                )
+            )
+        }
+        assertFailsWith<ValidationException> {
+            fixture.service.registerIdentifierScheme(RegisterIdentifierSchemeCommand(tenant.id, "CHANNEL", "CODE"))
+        }
+        assertFailsWith<ValidationException> {
+            fixture.service.assignEntityIdentifier(
+                AssignEntityIdentifierCommand(tenant.id, "CHANNEL", source.id, "IBAN", "IT60X0542811101000000123456")
+            )
+        }
     }
 
     @Test

@@ -1089,10 +1089,10 @@ class DefaultTenantCatalogService(
         identifier: IdentifierValue,
         now: Instant,
     ): EntityIdentifier {
-        when (entityType) {
-            EntityType.PARTY_PROFILE -> requirePartyProfileExists(tenantId, PartyProfileId.of(entityId))
-            EntityType.FUNDING_SOURCE -> requireFundingSourceExists(tenantId, FundingSourceId.of(entityId))
-            else -> Unit
+        if (entityType == EntityType.PARTY_PROFILE) {
+            requirePartyProfileExists(tenantId, PartyProfileId.of(entityId))
+        } else {
+            requireFundingSourceExists(tenantId, FundingSourceId.of(entityId))
         }
         validateIdentifier(scheme, identifier)
 

@@ -6,11 +6,11 @@ value class EntityType private constructor(val value: String) {
         val PARTY_PROFILE: EntityType = EntityType("PARTY_PROFILE")
         val FUNDING_SOURCE: EntityType = EntityType("FUNDING_SOURCE")
 
-        fun of(value: String): EntityType {
-            val normalized = value.trim()
-            require(normalized.isNotBlank()) { "EntityType cannot be blank" }
-            require(normalized.length <= 50) { "EntityType cannot be longer than 50 characters" }
-            return EntityType(normalized)
-        }
+        fun of(value: String): EntityType =
+            when (value.trim()) {
+                PARTY_PROFILE.value -> PARTY_PROFILE
+                FUNDING_SOURCE.value -> FUNDING_SOURCE
+                else -> throw IllegalArgumentException("unsupported entity type: $value")
+            }
     }
 }
