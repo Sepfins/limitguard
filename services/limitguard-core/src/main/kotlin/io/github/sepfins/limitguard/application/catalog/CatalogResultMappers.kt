@@ -168,6 +168,7 @@ internal fun PartyProfileDelegation.toResult(): PartyProfileDelegationResult =
         delegationType = ApiPartyProfileDelegationType.valueOf(delegationType.name),
         startsAt = effectiveWindow.startsAt,
         endsAt = effectiveWindow.endsAt,
+        isActive = isActive,
         metadata = metadata.value,
         createdAt = requireNotNull(createdAt) {
             "PartyProfileDelegation.createdAt is required when mapping to PartyProfileDelegationResult"

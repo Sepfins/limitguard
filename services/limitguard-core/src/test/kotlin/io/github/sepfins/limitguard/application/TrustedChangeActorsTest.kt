@@ -9,6 +9,7 @@ import io.github.sepfins.limitguard.api.commands.ApplyDueLimitChangesCommand
 import io.github.sepfins.limitguard.api.commands.ApproveLimitRuleChangeCommand
 import io.github.sepfins.limitguard.api.commands.CancelLimitRuleChangeCommand
 import io.github.sepfins.limitguard.api.commands.CreatePartyProfileDelegationCommand
+import io.github.sepfins.limitguard.api.commands.DeactivateMandateCommand
 import io.github.sepfins.limitguard.api.commands.LimitChangeActorCommand
 import io.github.sepfins.limitguard.api.commands.RejectLimitRuleChangeCommand
 import io.github.sepfins.limitguard.api.commands.SetChannelActiveCommand
@@ -354,7 +355,7 @@ class TrustedChangeActorsTest {
         )
 
         fun deactivateMandate() {
-            database.execute("update mandate set is_active = false where tenant_id = ? and id = ?", scenario.tenant, scenario.mandate)
+            scenario.facade.tenantCatalogService.deactivateMandate(DeactivateMandateCommand(scenario.tenant, scenario.mandate))
         }
 
         fun setDelegationWindow(window: EffectiveWindow) {

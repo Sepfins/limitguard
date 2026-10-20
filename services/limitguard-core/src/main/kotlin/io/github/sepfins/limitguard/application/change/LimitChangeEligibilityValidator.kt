@@ -120,7 +120,7 @@ internal class LimitChangeEligibilityValidator(
         if (delegation.ownerPartyProfileId != owner || delegation.delegatePartyProfileId != representative) {
             throw ConflictException("Delegation does not match the asserted representation: ${id.value}")
         }
-        if (at != null && !delegation.effectiveWindow.contains(at)) {
+        if (at != null && !delegation.isApplicableAt(at)) {
             throw ConflictException("Delegation is not applicable at the action time: ${id.value}")
         }
     }
@@ -133,6 +133,7 @@ internal class LimitChangeEligibilityValidator(
         if (mandate.ownerPartyProfileId != rule.ownerPartyProfileId) {
             throw ConflictException("mandate does not belong to target owner: ${mandate.id.value}")
         }
+        if (rule.isActive && !mandate.isActive) throw ConflictException("mandate is deactivated: ${mandate.id.value}")
         mandate.authorityDelegationId?.let { id ->
             requireDelegation(rule.tenantId, id, mandate.ownerPartyProfileId, mandate.assigneePartyProfileId,
                 if (rule.isActive) at else null)

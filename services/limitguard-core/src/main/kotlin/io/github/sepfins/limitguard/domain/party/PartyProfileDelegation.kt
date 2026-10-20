@@ -15,6 +15,7 @@ data class PartyProfileDelegation(
     val delegatePartyProfileId: PartyProfileId,
     val delegationType: PartyProfileDelegationType,
     val effectiveWindow: EffectiveWindow,
+    val isActive: Boolean = true,
     val metadata: Metadata = Metadata.EMPTY,
     val createdAt: Instant? = null
 ) {
@@ -23,4 +24,7 @@ data class PartyProfileDelegation(
             "ownerPartyProfileId and delegatePartyProfileId must differ"
         }
     }
+
+    fun isApplicableAt(instant: Instant): Boolean =
+        isActive && effectiveWindow.contains(instant)
 }

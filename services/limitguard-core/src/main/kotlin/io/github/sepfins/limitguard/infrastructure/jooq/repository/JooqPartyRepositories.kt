@@ -346,6 +346,7 @@ class JooqPartyProfileDelegationRepository(
                     PartyProfileDelegationTable.endsAt,
                     delegation.effectiveWindow.endsAt?.toOffsetDateTime(),
                 )
+                .set(PartyProfileDelegationTable.isActive, delegation.isActive)
                 .set(PartyProfileDelegationTable.metadata, delegation.metadata.toJsonb())
             delegation.createdAt?.let {
                 insert.set(PartyProfileDelegationTable.createdAt, it.toOffsetDateTime())
@@ -375,6 +376,7 @@ class JooqPartyProfileDelegationRepository(
                         PartyProfileDelegationTable.endsAt,
                         delegation.effectiveWindow.endsAt?.toOffsetDateTime(),
                     )
+                    .set(PartyProfileDelegationTable.isActive, delegation.isActive)
                     .set(PartyProfileDelegationTable.metadata, delegation.metadata.toJsonb())
                     .where(PartyProfileDelegationTable.tenantId.eq(tenantId.value))
                     .and(PartyProfileDelegationTable.id.eq(delegation.id.value))
@@ -403,6 +405,7 @@ class JooqPartyProfileDelegationRepository(
             startsAt = requireNotNull(get(PartyProfileDelegationTable.startsAt)).toInstant(),
             endsAt = get(PartyProfileDelegationTable.endsAt)?.toInstant(),
         ),
+        isActive = requireNotNull(get(PartyProfileDelegationTable.isActive)),
         metadata = get(PartyProfileDelegationTable.metadata).toMetadata(),
         createdAt = get(PartyProfileDelegationTable.createdAt)?.toInstant(),
     )
@@ -464,6 +467,7 @@ private object PartyProfileDelegationTable {
     val delegationType = table.DELEGATION_TYPE
     val startsAt = table.STARTS_AT
     val endsAt = table.ENDS_AT
+    val isActive = table.IS_ACTIVE
     val metadata = table.METADATA
     val createdAt = table.CREATED_AT
     val fields: List<SelectFieldOrAsterisk> = table.fields().toList()

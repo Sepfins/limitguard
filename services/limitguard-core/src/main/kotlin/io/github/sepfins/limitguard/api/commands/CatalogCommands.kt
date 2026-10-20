@@ -191,6 +191,16 @@ data class AddFundingSourceGroupMemberCommand(
     val fundingSourceId: UUID,
 )
 
+data class TerminatePartyProfileDelegationCommand(
+    val tenantId: UUID,
+    val delegationId: UUID,
+)
+
+data class DeactivateMandateCommand(
+    val tenantId: UUID,
+    val mandateId: UUID,
+)
+
 data class CreateMandateCommand(
     val tenantId: UUID,
     val ownerPartyProfileId: UUID,

@@ -10,6 +10,7 @@ import io.github.sepfins.limitguard.api.commands.CreateLimitChangePolicyCommand
 import io.github.sepfins.limitguard.api.commands.CreateLimitConfigurationCommand
 import io.github.sepfins.limitguard.api.commands.CreateMandateCommand
 import io.github.sepfins.limitguard.api.commands.CreatePartyProfileDelegationCommand
+import io.github.sepfins.limitguard.api.commands.DeactivateMandateCommand
 import io.github.sepfins.limitguard.api.commands.RegisterChannelCommand
 import io.github.sepfins.limitguard.api.commands.RegisterFundingSourceCommand
 import io.github.sepfins.limitguard.api.commands.RegisterFundingSourceProductCommand
@@ -21,6 +22,7 @@ import io.github.sepfins.limitguard.api.commands.SetChannelActiveCommand
 import io.github.sepfins.limitguard.api.commands.SetFundingSourceActiveCommand
 import io.github.sepfins.limitguard.api.commands.SetFundingSourceProductActiveCommand
 import io.github.sepfins.limitguard.api.commands.SetLimitConfigurationActiveCommand
+import io.github.sepfins.limitguard.api.commands.TerminatePartyProfileDelegationCommand
 import io.github.sepfins.limitguard.api.commands.UpdateChannelCommand
 import io.github.sepfins.limitguard.api.commands.UpdateFundingSourceCommand
 import io.github.sepfins.limitguard.api.commands.UpdateFundingSourceProductCommand
@@ -66,6 +68,10 @@ interface TenantCatalogService {
 
     fun createPartyProfileDelegation(command: CreatePartyProfileDelegationCommand): PartyProfileDelegationResult
 
+    fun terminatePartyProfileDelegation(
+        command: TerminatePartyProfileDelegationCommand,
+    ): PartyProfileDelegationResult
+
     fun registerFundingSourceProduct(command: RegisterFundingSourceProductCommand): FundingSourceProductResult
 
     fun updateFundingSourceProduct(command: UpdateFundingSourceProductCommand): FundingSourceProductResult
@@ -87,6 +93,8 @@ interface TenantCatalogService {
     fun addFundingSourceGroupMember(command: AddFundingSourceGroupMemberCommand): FundingSourceGroupMemberResult
 
     fun createMandate(command: CreateMandateCommand): MandateResult
+
+    fun deactivateMandate(command: DeactivateMandateCommand): MandateResult
 
     fun createLimitConfiguration(command: CreateLimitConfigurationCommand): LimitConfigurationResult
 

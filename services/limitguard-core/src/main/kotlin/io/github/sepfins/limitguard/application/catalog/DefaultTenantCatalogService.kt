@@ -18,6 +18,7 @@ import io.github.sepfins.limitguard.api.commands.CreateLimitChangePolicyCommand
 import io.github.sepfins.limitguard.api.commands.CreateLimitConfigurationCommand
 import io.github.sepfins.limitguard.api.commands.CreateMandateCommand
 import io.github.sepfins.limitguard.api.commands.CreatePartyProfileDelegationCommand
+import io.github.sepfins.limitguard.api.commands.DeactivateMandateCommand
 import io.github.sepfins.limitguard.api.commands.RegisterChannelCommand
 import io.github.sepfins.limitguard.api.commands.RegisterFundingSourceCommand
 import io.github.sepfins.limitguard.api.commands.RegisterFundingSourceProductCommand
@@ -29,6 +30,7 @@ import io.github.sepfins.limitguard.api.commands.SetChannelActiveCommand
 import io.github.sepfins.limitguard.api.commands.SetFundingSourceActiveCommand
 import io.github.sepfins.limitguard.api.commands.SetFundingSourceProductActiveCommand
 import io.github.sepfins.limitguard.api.commands.SetLimitConfigurationActiveCommand
+import io.github.sepfins.limitguard.api.commands.TerminatePartyProfileDelegationCommand
 import io.github.sepfins.limitguard.api.commands.UpdateChannelCommand
 import io.github.sepfins.limitguard.api.commands.UpdateFundingSourceCommand
 import io.github.sepfins.limitguard.api.commands.UpdateFundingSourceProductCommand
@@ -469,6 +471,17 @@ class DefaultTenantCatalogService(
         return partyProfileDelegationRepository.insert(tenantId, delegation).toResult()
     }
 
+    override fun terminatePartyProfileDelegation(
+        command: TerminatePartyProfileDelegationCommand,
+    ): PartyProfileDelegationResult = mapValidation {
+        val tenantId = TenantId.of(command.tenantId)
+        requireTenantExists(tenantId)
+        val delegation = requirePartyProfileDelegationExists(tenantId, PartyProfileDelegationId.of(command.delegationId))
+        if (!delegation.isActive) return delegation.toResult()
+
+        return partyProfileDelegationRepository.update(tenantId, delegation.copy(isActive = false)).toResult()
+    }
+
     override fun registerFundingSourceProduct(command: RegisterFundingSourceProductCommand): FundingSourceProductResult = mapValidation {
         val tenantId = TenantId.of(command.tenantId)
         requireTenantExists(tenantId)
@@ -686,6 +699,7 @@ class DefaultTenantCatalogService(
                     "authority delegation does not connect the mandate owner and assignee: ${id.value}"
                 )
             }
+            if (!delegation.isActive) throw ConflictException("authority delegation is terminated: ${id.value}")
             delegation
         }
         val effectiveWindow = EffectiveWindow(
@@ -745,6 +759,20 @@ class DefaultTenantCatalogService(
         )
 
         return mandateRepository.insert(tenantId, mandate).toResult()
+    }
+
+    override fun deactivateMandate(command: DeactivateMandateCommand): MandateResult = mapValidation {
+        val tenantId = TenantId.of(command.tenantId)
+        requireTenantExists(tenantId)
+        val mandateId = MandateId.of(command.mandateId)
+        val mandate = mandateRepository.findById(tenantId, mandateId)
+            ?: throw NotFoundException("mandate not found: ${mandateId.value}")
+        if (!mandate.isActive) return mandate.toResult()
+
+        return mandateRepository.update(
+            tenantId,
+            mandate.copy(isActive = false, version = mandate.version.next(), updatedAt = clockProvider.now()),
+        ).toResult()
     }
 
     override fun createLimitConfiguration(command: CreateLimitConfigurationCommand): LimitConfigurationResult = mapValidation {

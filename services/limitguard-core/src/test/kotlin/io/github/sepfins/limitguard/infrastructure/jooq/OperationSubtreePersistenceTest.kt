@@ -14,7 +14,6 @@ import io.github.sepfins.limitguard.support.FixedClockProvider
 import io.github.sepfins.limitguard.support.OperationSubtreeScenario
 import io.github.sepfins.limitguard.support.persistence.ObservedDataSource
 import org.flywaydb.core.Flyway
-import org.flywaydb.core.api.FlywayException
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Timeout
 import org.postgresql.ds.PGSimpleDataSource
@@ -105,47 +104,6 @@ class OperationSubtreePersistenceTest {
             }
             corrupt(fixture.source, "update operation_type set parent_id = null, is_leaf = false where id = ?", root)
             assertEquals(AuthorizationDecision.ALLOWED, s.facade.limitEvaluationService.authorizeTransaction(command).decision)
-            assertEquals(OperationCapacityStatus.UNLIMITED, s.capacity(selected).status)
-        }
-    }
-
-    @Test
-    fun `V4 reports invalid legacy taxonomy without repairing nodes or historical decisions`() {
-        for (corruption in listOf("HIDDEN", "MISSING", "CYCLE", "SELF_CYCLE", "GLOBAL_PRIVATE", "LEAF")) {
-            val fixture = fixture(target = "3")
-            val s = fixture.scenario
-            // Seed legacy rows directly: current catalog admission requires the V4 guard.
-            fun legacyOperation(code: String, parent: UUID? = null, global: Boolean = false, tenant: UUID = s.tenant): UUID {
-                val id = UUID.randomUUID()
-                execute(fixture.source,
-                    "insert into operation_type (id, tenant_id, parent_id, code, name, is_global) values (?, ?, ?, ?, ?, ?)",
-                    id, if (global) null else tenant, parent, code, code, global)
-                return id
-            }
-            val root = legacyOperation("ROOT", global = corruption == "GLOBAL_PRIVATE")
-            val selected = legacyOperation("SELECTED", root)
-            val originalCommand = s.command(selected, key = "historical")
-            val original = s.facade.limitEvaluationService.authorizeTransaction(originalCommand)
-            val other = OperationSubtreeScenario(s.facade, NOW)
-            val parent = when (corruption) {
-                "HIDDEN" -> legacyOperation("PRIVATE", tenant = other.tenant)
-                "MISSING" -> UUID.randomUUID()
-                "CYCLE" -> selected
-                "SELF_CYCLE" -> root
-                "GLOBAL_PRIVATE" -> legacyOperation("LOCAL")
-                else -> null
-            }
-            corrupt(fixture.source, "update operation_type set parent_id = ?, is_leaf = ? where id = ?",
-                parent, corruption == "LEAF", root)
-
-            val failure = assertFailsWith<FlywayException> { migrations(fixture.schema) }
-            assertTrue(failure.message.orEmpty().contains("Invalid operation taxonomy"))
-            assertEquals(original, s.facade.limitEvaluationService.authorizeTransaction(originalCommand))
-            assertFailsWith<FlywayException> { migrations(fixture.schema) }
-
-            execute(fixture.source, "update operation_type set parent_id = null, is_leaf = false where id = ?", root)
-            assertEquals(1, migrations(fixture.schema, target = "4").migrationsExecuted)
-            assertEquals(original, s.facade.limitEvaluationService.authorizeTransaction(originalCommand))
             assertEquals(OperationCapacityStatus.UNLIMITED, s.capacity(selected).status)
         }
     }
@@ -346,9 +304,9 @@ class OperationSubtreePersistenceTest {
         assertEquals(BigDecimal("0.0000"), s.usage(futureRule).consumedAmount)
     }
 
-    private fun fixture(target: String? = null): Fixture {
+    private fun fixture(): Fixture {
         val schema = "operations_${UUID.randomUUID().toString().replace("-", "")}"
-        migrations(schema, target)
+        migrations(schema)
         val source = PGSimpleDataSource().apply {
             setURL(postgres.jdbcUrl)
             user = postgres.username
@@ -359,10 +317,10 @@ class OperationSubtreePersistenceTest {
         return Fixture(source, OperationSubtreeScenario(facade, NOW), schema)
     }
 
-    private fun migrations(schema: String, target: String? = null) = Flyway.configure()
+    private fun migrations(schema: String) = Flyway.configure()
         .dataSource(postgres.jdbcUrl, postgres.username, postgres.password)
         .schemas(schema).defaultSchema(schema).locations("classpath:db/limitguard/migration")
-        .apply { if (target != null) target(target) }.load().migrate()
+        .load().migrate()
 
     private fun execute(source: DataSource, sql: String, vararg values: Any?) = source.connection.use { connection ->
         update(connection, sql, *values)

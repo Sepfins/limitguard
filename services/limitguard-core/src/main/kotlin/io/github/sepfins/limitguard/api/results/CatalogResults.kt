@@ -103,6 +103,7 @@ data class PartyProfileDelegationResult(
     val delegationType: PartyProfileDelegationType,
     val startsAt: Instant,
     val endsAt: Instant?,
+    val isActive: Boolean,
     val metadata: Map<String, Any?>,
     val createdAt: Instant,
 )

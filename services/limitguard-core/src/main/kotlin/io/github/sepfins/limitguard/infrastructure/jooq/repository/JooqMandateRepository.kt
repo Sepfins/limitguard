@@ -17,6 +17,7 @@ import io.github.sepfins.limitguard.infrastructure.jooq.toJsonb
 import io.github.sepfins.limitguard.infrastructure.jooq.toMetadata
 import io.github.sepfins.limitguard.infrastructure.jooq.generated.enums.LimitFundingScope as GeneratedLimitFundingScope
 import io.github.sepfins.limitguard.infrastructure.jooq.generated.tables.Mandate as GeneratedMandateTable
+import io.github.sepfins.limitguard.infrastructure.jooq.generated.tables.PartyProfileDelegation as GeneratedPartyProfileDelegationTable
 import io.github.sepfins.limitguard.port.persistence.MandateRepository
 import org.jooq.Condition
 import org.jooq.Record
@@ -133,6 +134,7 @@ class JooqMandateRepository(
             .and(MandateTable.isActive.isTrue)
             .and(MandateTable.startsAt.le(at.toOffsetDateTime()))
             .and(MandateTable.endsAt.isNull.or(MandateTable.endsAt.gt(at.toOffsetDateTime())))
+            .and(MandateTable.authorityDelegationId.isNull.or(DSL.exists(activeAuthorityDelegation())))
             .and(condition)
             .orderBy(MandateTable.createdAt, MandateTable.id)
             .fetch { it.toDomain() }
@@ -149,6 +151,13 @@ class JooqMandateRepository(
                         MandateTable.fundingSourceGroupId.eq(scope.fundingSourceGroupId.value)
                 }
             )
+
+    private fun activeAuthorityDelegation() = context.dsl()
+        .selectOne()
+        .from(DelegationTable)
+        .where(DelegationTable.TENANT_ID.eq(MandateTable.tenantId))
+        .and(DelegationTable.ID.eq(MandateTable.authorityDelegationId))
+        .and(DelegationTable.IS_ACTIVE.isTrue)
 
     private fun selectMandates() = context.dsl().select(MandateTable.fields).from(MandateTable.table)
 
@@ -221,5 +230,7 @@ private object MandateTable {
     val updatedAt = table.UPDATED_AT
     val fields: List<SelectFieldOrAsterisk> = table.fields().toList()
 }
+
+private val DelegationTable = GeneratedPartyProfileDelegationTable.PARTY_PROFILE_DELEGATION
 
 private fun Instant.toOffsetDateTime(): OffsetDateTime = OffsetDateTime.ofInstant(this, ZoneOffset.UTC)
