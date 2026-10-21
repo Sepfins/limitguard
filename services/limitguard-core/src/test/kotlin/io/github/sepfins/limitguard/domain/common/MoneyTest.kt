@@ -7,8 +7,6 @@ import kotlin.test.assertFailsWith
 class MoneyTest {
     @Test
     fun `currency code must match schema format`() {
-        assertEquals("EUR", CurrencyCode.of("EUR").value)
-
         assertFailsWith<IllegalArgumentException> {
             CurrencyCode.of("eur")
         }

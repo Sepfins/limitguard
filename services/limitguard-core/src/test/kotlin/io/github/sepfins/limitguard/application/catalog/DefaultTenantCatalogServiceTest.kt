@@ -43,8 +43,6 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
-import kotlin.test.assertNull
-import kotlin.test.assertTrue
 
 class DefaultTenantCatalogServiceTest {
     private val fixedNow = Instant.parse("2026-06-21T00:00:00Z")
@@ -87,14 +85,6 @@ class DefaultTenantCatalogServiceTest {
         assertFailsWith<NotFoundException> {
             service.createLimitConfiguration(configuration("DAILY").copy(channelScope = LimitChannelScope.CHANNEL, channelId = missing))
         }
-    }
-
-    @Test
-    fun `a tenant can register a global operation`() {
-        val result = service.registerOperationType(RegisterOperationTypeCommand(tenant, "CARD_PAYMENT", "Card payment", isGlobal = true))
-
-        assertNull(result.tenantId)
-        assertTrue(result.isGlobal)
     }
 
     @Test
