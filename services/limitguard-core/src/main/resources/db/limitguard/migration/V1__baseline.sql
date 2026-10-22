@@ -141,6 +141,7 @@ CREATE TABLE party_profile_delegation (
     delegation_type party_profile_delegation_type NOT NULL,
     starts_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     ends_at TIMESTAMPTZ,
+    is_active BOOLEAN NOT NULL DEFAULT true,
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (
@@ -167,6 +168,9 @@ CREATE TABLE party_profile_delegation (
         ends_at IS NULL OR ends_at > starts_at
     )
 );
+
+COMMENT ON COLUMN party_profile_delegation.is_active IS
+    'False once the delegation is terminated. A terminated delegation authorizes no representation and justifies no mandate.';
 
 CREATE INDEX idx_party_profile_delegation_owner
     ON party_profile_delegation (tenant_id, owner_party_profile_id);
@@ -362,13 +366,108 @@ CREATE UNIQUE INDEX uq_operation_type_tenant_code
 CREATE INDEX idx_operation_type_parent
     ON operation_type (parent_id);
 
-CREATE TABLE operation_type_closure (
-    ancestor_id UUID NOT NULL REFERENCES operation_type(id) ON DELETE CASCADE,
-    descendant_id UUID NOT NULL REFERENCES operation_type(id) ON DELETE CASCADE,
-    depth INT NOT NULL,
-    PRIMARY KEY (ancestor_id, descendant_id),
-    CONSTRAINT chk_operation_type_closure_depth CHECK (depth >= 0)
+COMMENT ON COLUMN operation_type.is_leaf IS
+    'Declared terminal node: may not have children. Non-leaf nodes remain valid transaction targets, including before any children are registered.';
+
+-- Parent relationships are authoritative; ancestry is walked, never materialized.
+CREATE FUNCTION assert_operation_type_integrity()
+RETURNS VOID AS $$
+DECLARE
+    invalid_id UUID;
+    invalid_reason TEXT;
+BEGIN
+    SELECT child.id,
+           CASE
+               WHEN parent.id IS NULL THEN 'missing parent'
+               WHEN child.is_global AND NOT parent.is_global THEN 'global node has a tenant-private parent'
+               WHEN NOT child.is_global AND NOT parent.is_global AND child.tenant_id <> parent.tenant_id
+                   THEN 'parent belongs to another tenant'
+               WHEN parent.is_leaf THEN 'declared leaf has children'
+           END
+    INTO invalid_id, invalid_reason
+    FROM operation_type child
+    LEFT JOIN operation_type parent ON parent.id = child.parent_id
+    WHERE child.parent_id IS NOT NULL
+      AND (parent.id IS NULL
+           OR (child.is_global AND NOT parent.is_global)
+           OR (NOT child.is_global AND NOT parent.is_global AND child.tenant_id <> parent.tenant_id)
+           OR parent.is_leaf)
+    ORDER BY child.id
+    LIMIT 1;
+
+    IF invalid_id IS NULL THEN
+        WITH RECURSIVE ancestry AS (
+            SELECT id AS selected_id, id, parent_id FROM operation_type
+            UNION ALL
+            SELECT child.selected_id, parent.id, parent.parent_id
+            FROM ancestry child
+            JOIN operation_type parent ON parent.id = child.parent_id
+        ) CYCLE id SET is_cycle USING visited_ids
+        SELECT selected_id, 'cyclic ancestry'
+        INTO invalid_id, invalid_reason
+        FROM ancestry
+        WHERE is_cycle
+        ORDER BY selected_id
+        LIMIT 1;
+    END IF;
+
+    IF invalid_id IS NOT NULL THEN
+        RAISE EXCEPTION 'Invalid operation taxonomy at %: %', invalid_id, invalid_reason
+            USING ERRCODE = '23514';
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TABLE operation_type_catalog_guard (
+    singleton BOOLEAN PRIMARY KEY DEFAULT true CHECK (singleton)
 );
+INSERT INTO operation_type_catalog_guard (singleton) VALUES (true);
+
+COMMENT ON TABLE operation_type_catalog_guard IS
+    'Internal serialization row for operation taxonomy writes. A real row update also prevents stale-snapshot write skew under repeatable-read isolation.';
+
+CREATE FUNCTION lock_operation_type_catalog()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Lock before catalog rows; updating also makes stale snapshot writers abort.
+    UPDATE operation_type_catalog_guard SET singleton = singleton WHERE singleton;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Operation taxonomy serialization row is missing' USING ERRCODE = '23514';
+    END IF;
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE FUNCTION enforce_operation_type_integrity()
+RETURNS TRIGGER AS $$
+BEGIN
+    PERFORM assert_operation_type_integrity();
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Bind guards to their owning schema, including schema-qualified writes by other callers.
+DO $$
+DECLARE
+    schema_name TEXT := current_schema();
+    function_name TEXT;
+BEGIN
+    FOREACH function_name IN ARRAY ARRAY[
+        'assert_operation_type_integrity', 'lock_operation_type_catalog', 'enforce_operation_type_integrity'
+    ] LOOP
+        EXECUTE format('ALTER FUNCTION %I.%I() SET search_path = %I, pg_temp',
+                       schema_name, function_name, schema_name);
+    END LOOP;
+END;
+$$;
+
+CREATE TRIGGER trg_operation_type_catalog_lock
+    BEFORE INSERT OR UPDATE OR DELETE ON operation_type
+    FOR EACH STATEMENT EXECUTE FUNCTION lock_operation_type_catalog();
+
+CREATE TRIGGER trg_operation_type_integrity
+    AFTER INSERT OR UPDATE OR DELETE ON operation_type
+    FOR EACH STATEMENT EXECUTE FUNCTION enforce_operation_type_integrity();
 
 -- ============================================================================
 -- Transactions and transaction events
@@ -594,10 +693,6 @@ CREATE TYPE limit_channel_scope AS ENUM (
     'CHANNEL',
     'CHANNEL_GROUP'
 );
-CREATE TYPE limit_mandate_scope AS ENUM (
-    'ALL_OWNER_MANDATES',
-    'MANDATE'
-);
 CREATE TYPE limit_configuration_funding_scope AS ENUM (
     'ALL_FUNDING_SOURCES',
     'FUNDING_SOURCE_CATEGORY',
@@ -625,7 +720,9 @@ CREATE TABLE limit_configuration (
     channel_id UUID,
     channel_group_id UUID,
     operation_type_id UUID REFERENCES operation_type(id),
-    max_assignable_amount NUMERIC(20, 4) NOT NULL,
+    usage_consumption_mode limit_usage_consumption_mode NOT NULL DEFAULT 'CASCADING',
+    max_assignable_amount NUMERIC(20, 4),
+    max_assignable_unlimited BOOLEAN NOT NULL DEFAULT false,
     default_amount NUMERIC(20, 4),
     priority INT NOT NULL DEFAULT 100,
     is_active BOOLEAN NOT NULL DEFAULT true,
@@ -687,14 +784,18 @@ CREATE TABLE limit_configuration (
         )
     ),
     CONSTRAINT chk_limit_configuration_amounts CHECK (
-        max_assignable_amount > 0 AND
+        (max_assignable_amount IS NULL) = max_assignable_unlimited AND
+        (max_assignable_amount IS NULL OR max_assignable_amount > 0) AND
         (
             default_amount IS NULL OR
             (
                 default_amount > 0 AND
-                default_amount <= max_assignable_amount
+                (max_assignable_unlimited OR default_amount <= max_assignable_amount)
             )
         )
+    ),
+    CONSTRAINT chk_limit_configuration_usage_consumption_mode CHECK (
+        limit_kind = 'PERIODIC' OR usage_consumption_mode = 'CASCADING'
     ),
     CONSTRAINT chk_limit_configuration_priority CHECK (priority >= 0),
     CONSTRAINT chk_limit_configuration_window CHECK (
@@ -747,7 +848,8 @@ BEGIN
                 RAISE EXCEPTION 'limit_configuration child must match parent kind, period, and currency';
             END IF;
 
-            IF NEW.max_assignable_amount > parent_configuration.max_assignable_amount THEN
+            IF (NEW.max_assignable_unlimited AND NOT parent_configuration.max_assignable_unlimited) OR
+               NEW.max_assignable_amount > parent_configuration.max_assignable_amount THEN
                 RAISE EXCEPTION 'limit_configuration child max cannot exceed parent max';
             END IF;
 
@@ -767,6 +869,7 @@ BEGIN
               child.limit_kind <> NEW.limit_kind OR
               child.period IS DISTINCT FROM NEW.period OR
               child.currency <> NEW.currency OR
+              (child.max_assignable_unlimited AND NOT NEW.max_assignable_unlimited) OR
               child.max_assignable_amount > NEW.max_assignable_amount OR
               child.default_amount > NEW.max_assignable_amount
           )
@@ -785,6 +888,7 @@ CREATE TRIGGER trg_limit_configuration_parent
         period,
         currency,
         max_assignable_amount,
+        max_assignable_unlimited,
         default_amount
     ON limit_configuration
     FOR EACH ROW
@@ -797,7 +901,13 @@ COMMENT ON COLUMN limit_configuration.parent_configuration_id IS
     'Optional broader configuration cap. Child configurations must be evaluated against their ancestors so a specific cap/default cannot exceed a broader tenant cap.';
 
 COMMENT ON COLUMN limit_configuration.max_assignable_amount IS
-    'Largest limit amount the tenant allows to be granted for this scope.';
+    'Largest limit amount the tenant allows to be granted for this scope; NULL exactly when max_assignable_unlimited.';
+
+COMMENT ON COLUMN limit_configuration.max_assignable_unlimited IS
+    'True when rules under this configuration may be granted an unlimited amount.';
+
+COMMENT ON COLUMN limit_configuration.usage_consumption_mode IS
+    'For periodic configurations, CASCADING continues to broader priority tiers while ISOLATED includes its peer tier and terminates the usage-bucket cascade for this owner. Per-transaction configurations must use CASCADING and are always evaluated.';
 
 COMMENT ON COLUMN limit_configuration.default_amount IS
     'Default amount policies may apply when the matching limit rule does not exist.';
@@ -927,116 +1037,56 @@ CREATE TABLE limit_rule (
     id UUID PRIMARY KEY DEFAULT uuidv7(),
     tenant_id UUID NOT NULL REFERENCES tenant(id),
     owner_party_profile_id UUID NOT NULL,
-    name VARCHAR(255) NOT NULL,
-    description TEXT,
-    limit_kind limit_kind NOT NULL,
-    period limit_period,
-    amount NUMERIC(20, 4) NOT NULL,
-    currency CHAR(3) NOT NULL,
-    mandate_scope limit_mandate_scope NOT NULL DEFAULT 'ALL_OWNER_MANDATES',
+    configuration_id UUID NOT NULL,
     mandate_id UUID,
-    configuration_id UUID,
-    channel_scope limit_channel_scope NOT NULL DEFAULT 'ALL_CHANNELS',
-    channel_id UUID,
-    channel_group_id UUID,
-    operation_type_id UUID REFERENCES operation_type(id),
-    usage_consumption_mode limit_usage_consumption_mode NOT NULL DEFAULT 'CASCADING',
-    priority INT NOT NULL DEFAULT 100,
+    amount NUMERIC(20, 4),
+    amount_unlimited BOOLEAN NOT NULL DEFAULT false,
     is_active BOOLEAN NOT NULL DEFAULT true,
     version INT NOT NULL DEFAULT 1,
-    starts_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    ends_at TIMESTAMPTZ,
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (tenant_id, id),
-    UNIQUE (tenant_id, owner_party_profile_id, name),
+    CONSTRAINT uq_limit_rule_target UNIQUE NULLS NOT DISTINCT (
+        tenant_id,
+        owner_party_profile_id,
+        configuration_id,
+        mandate_id
+    ),
     FOREIGN KEY (tenant_id, owner_party_profile_id)
         REFERENCES party_profile(tenant_id, id),
     FOREIGN KEY (tenant_id, owner_party_profile_id, mandate_id)
         REFERENCES mandate(tenant_id, owner_party_profile_id, id),
     FOREIGN KEY (tenant_id, configuration_id)
         REFERENCES limit_configuration(tenant_id, id),
-    FOREIGN KEY (tenant_id, channel_id)
-        REFERENCES channel(tenant_id, id),
-    FOREIGN KEY (tenant_id, channel_group_id)
-        REFERENCES channel_group(tenant_id, id),
-    CONSTRAINT chk_limit_rule_kind_period CHECK (
-        (limit_kind = 'PER_TRANSACTION' AND period IS NULL) OR
-        (limit_kind = 'PERIODIC' AND period IS NOT NULL)
+    CONSTRAINT chk_limit_rule_amount CHECK (
+        (amount IS NULL) = amount_unlimited AND
+        (amount IS NULL OR amount > 0)
     ),
-    CONSTRAINT chk_limit_rule_amount CHECK (amount > 0),
-    CONSTRAINT chk_limit_rule_currency CHECK (currency ~ '^[A-Z]{3}$'),
-    CONSTRAINT chk_limit_rule_mandate_scope CHECK (
-        (
-            mandate_scope = 'ALL_OWNER_MANDATES' AND
-            mandate_id IS NULL
-        ) OR
-        (
-            mandate_scope = 'MANDATE' AND
-            mandate_id IS NOT NULL
-        )
-    ),
-    CONSTRAINT chk_limit_rule_channel_scope CHECK (
-        (
-            channel_scope = 'ALL_CHANNELS' AND
-            channel_id IS NULL AND
-            channel_group_id IS NULL
-        ) OR
-        (
-            channel_scope = 'CHANNEL' AND
-            channel_id IS NOT NULL AND
-            channel_group_id IS NULL
-        ) OR
-        (
-            channel_scope = 'CHANNEL_GROUP' AND
-            channel_id IS NULL AND
-            channel_group_id IS NOT NULL
-        )
-    ),
-    CONSTRAINT chk_limit_rule_usage_consumption_mode CHECK (
-        limit_kind = 'PERIODIC' OR usage_consumption_mode = 'CASCADING'
-    ),
-    CONSTRAINT chk_limit_rule_priority CHECK (priority >= 0),
-    CONSTRAINT chk_limit_rule_version CHECK (version > 0),
-    CONSTRAINT chk_limit_rule_effective_window CHECK (
-        ends_at IS NULL OR ends_at > starts_at
-    )
+    CONSTRAINT chk_limit_rule_version CHECK (version > 0)
 );
 
 COMMENT ON TABLE limit_rule IS
-    'A limit rule combines a mandate selector, channel scope, operation type, amount, and period.';
+    'An owner''s granted amount, or explicit unlimited, for one limit configuration, optionally narrowed to one mandate. The configuration supplies kind, period, currency, scopes, usage mode, and priority.';
 
 COMMENT ON COLUMN limit_rule.owner_party_profile_id IS
     'The party profile that owns the funding sources governed by this rule.';
 
-COMMENT ON COLUMN limit_rule.mandate_scope IS
-    'ALL_OWNER_MANDATES applies to the direct owner and every active mandate of the owner; MANDATE applies only to one owner-to-assignee funding envelope.';
-
 COMMENT ON COLUMN limit_rule.configuration_id IS
-    'Configuration row that supplied or constrained this rule amount, when the rule was created from tenant configuration.';
+    'Configuration this rule is an amount for. The configuration bounds the amount.';
 
-COMMENT ON COLUMN limit_rule.usage_consumption_mode IS
-    'For periodic rules, CASCADING continues to broader priority tiers while ISOLATED includes its peer tier and terminates the usage-bucket cascade for this owner. Per-transaction rules must use CASCADING and are always evaluated.';
+COMMENT ON COLUMN limit_rule.mandate_id IS
+    'NULL applies to the direct owner and every active mandate of the owner; a value narrows the rule to one owner-to-assignee funding envelope.';
 
-CREATE INDEX idx_limit_rule_active_owner
-    ON limit_rule (tenant_id, owner_party_profile_id, is_active, starts_at, ends_at);
+COMMENT ON COLUMN limit_rule.amount IS
+    'Granted amount in the configuration currency; NULL exactly when amount_unlimited.';
+
+COMMENT ON COLUMN limit_rule.amount_unlimited IS
+    'True when the owner removed the cap. Allowed only under a configuration whose maximum is unlimited.';
 
 CREATE INDEX idx_limit_rule_mandate
     ON limit_rule (tenant_id, mandate_id)
     WHERE mandate_id IS NOT NULL;
-
-CREATE INDEX idx_limit_rule_configuration
-    ON limit_rule (tenant_id, configuration_id)
-    WHERE configuration_id IS NOT NULL;
-
-CREATE INDEX idx_limit_rule_channel
-    ON limit_rule (tenant_id, channel_id)
-    WHERE channel_id IS NOT NULL;
-
-CREATE INDEX idx_limit_rule_channel_group
-    ON limit_rule (tenant_id, channel_group_id)
-    WHERE channel_group_id IS NOT NULL;
 
 CREATE TYPE limit_change_actor_type AS ENUM (
     'PARTY_PROFILE',
@@ -1131,11 +1181,11 @@ CREATE TABLE limit_rule_change_request (
     request_channel_id UUID,
     target_owner_party_profile_id UUID NOT NULL,
     target_mandate_id UUID,
-    target_scope JSONB NOT NULL,
-    target_scope_hash VARCHAR(128) NOT NULL,
-    before_rule JSONB,
-    requested_rule JSONB NOT NULL,
-    approved_rule JSONB,
+    configuration_id UUID NOT NULL,
+    before_amount NUMERIC(20, 4),
+    before_unlimited BOOLEAN,
+    requested_amount NUMERIC(20, 4),
+    requested_unlimited BOOLEAN NOT NULL DEFAULT false,
     policy_context JSONB NOT NULL DEFAULT '{}'::jsonb,
     effective_at TIMESTAMPTZ,
     expires_at TIMESTAMPTZ,
@@ -1163,6 +1213,8 @@ CREATE TABLE limit_rule_change_request (
         REFERENCES party_profile(tenant_id, id),
     FOREIGN KEY (tenant_id, target_owner_party_profile_id, target_mandate_id)
         REFERENCES mandate(tenant_id, owner_party_profile_id, id),
+    FOREIGN KEY (tenant_id, configuration_id)
+        REFERENCES limit_configuration(tenant_id, id),
     FOREIGN KEY (tenant_id, superseded_by_change_request_id)
         REFERENCES limit_rule_change_request(tenant_id, id),
     CONSTRAINT chk_limit_rule_change_request_actor CHECK (
@@ -1178,22 +1230,25 @@ CREATE TABLE limit_rule_change_request (
     CONSTRAINT chk_limit_rule_change_request_channel CHECK (
         requested_by_actor_type = 'SYSTEM' OR request_channel_id IS NOT NULL
     ),
+    CONSTRAINT chk_limit_rule_change_request_requested_amount CHECK (
+        (requested_amount IS NULL) = requested_unlimited AND
+        (requested_amount IS NULL OR requested_amount > 0)
+    ),
     CONSTRAINT chk_limit_rule_change_request_target_rule CHECK (
         (
             change_type = 'CREATE' AND
-            before_rule IS NULL
+            before_unlimited IS NULL AND
+            before_amount IS NULL
         ) OR
         (
             change_type <> 'CREATE' AND
             limit_rule_id IS NOT NULL AND
-            before_rule IS NOT NULL
+            before_unlimited IS NOT NULL AND
+            (before_amount IS NULL) = before_unlimited AND
+            (before_amount IS NULL OR before_amount > 0)
         )
     ),
     CONSTRAINT chk_limit_rule_change_request_json CHECK (
-        jsonb_typeof(target_scope) = 'object' AND
-        (before_rule IS NULL OR jsonb_typeof(before_rule) = 'object') AND
-        jsonb_typeof(requested_rule) = 'object' AND
-        (approved_rule IS NULL OR jsonb_typeof(approved_rule) = 'object') AND
         jsonb_typeof(policy_context) = 'object' AND
         jsonb_typeof(metadata) = 'object'
     ),
@@ -1214,8 +1269,14 @@ COMMENT ON COLUMN limit_rule_change_request.requester_party_profile_id IS
 COMMENT ON COLUMN limit_rule_change_request.authority_delegation_id IS
     'Delegation record used when the requester acts for another profile, such as a legal representative changing a company delegate limit.';
 
-COMMENT ON COLUMN limit_rule_change_request.target_scope_hash IS
-    'Service-generated stable hash of the logical mandate, channel, operation, kind, period, and currency scope, used by policies to find or block pending changes even before a rule exists.';
+COMMENT ON COLUMN limit_rule_change_request.configuration_id IS
+    'Configuration of the target rule. With the owner and mandate it names the target, even before the rule exists.';
+
+COMMENT ON COLUMN limit_rule_change_request.before_amount IS
+    'Rule amount when the change was requested; NULL for CREATE and when before_unlimited.';
+
+COMMENT ON COLUMN limit_rule_change_request.requested_amount IS
+    'Amount the rule has once the change applies; NULL exactly when requested_unlimited.';
 
 COMMENT ON COLUMN limit_rule_change_request.policy_context IS
     'Extra facts supplied to policy evaluation, such as mandate identifiers, funding-source identifiers, IBAN country prefix, channel family, configuration matches, or representative role metadata.';
@@ -1230,13 +1291,14 @@ CREATE UNIQUE INDEX uq_limit_rule_change_request_idempotency
 CREATE INDEX idx_limit_rule_change_request_status
     ON limit_rule_change_request (tenant_id, status, effective_at, created_at);
 
-CREATE INDEX idx_limit_rule_change_request_pending_target
+CREATE UNIQUE INDEX uq_limit_rule_change_request_pending_target
     ON limit_rule_change_request (
         tenant_id,
-        target_scope_hash,
-        effective_at,
-        created_at
+        target_owner_party_profile_id,
+        configuration_id,
+        target_mandate_id
     )
+    NULLS NOT DISTINCT
     WHERE status IN (
         'REQUESTED',
         'APPROVED',
@@ -1274,23 +1336,10 @@ CREATE INDEX idx_limit_rule_change_request_target_mandate
 CREATE INDEX idx_limit_rule_change_request_channel
     ON limit_rule_change_request (tenant_id, request_channel_id, created_at);
 
--- Limit-change policies are tenant-owned rules evaluated by the limits service
--- while processing a limit_rule_change_request. They are configuration, not
--- history: changing a policy changes how future requests are interpreted.
---
--- Evaluation flow:
--- 1. Select active policies for the request phase, ordered by priority.
--- 2. Use applies_to as cheap pre-filtering hints, for example actor type,
---    channel, operation type, funding-source attributes, or IBAN country.
--- 3. Evaluate condition_expression with the configured engine against the full
---    request context: current limit_rule, requested rule, pending requests,
---    channel, requester, mandate, configuration, delegation, and policy_context
---    facts.
--- 4. Apply action_expression/decision, for example deny the request, mutate the
---    requested rule, set a delayed effective_at, cancel older pending requests,
---    create a default rule from limit_configuration, or require extra approval.
--- 5. Insert one limit_change_policy_evaluation row for auditability, including
---    a policy_snapshot so later policy edits do not rewrite history.
+-- Limit-change policies are tenant-owned rules evaluated while processing a
+-- limit_rule_change_request. Changing a policy changes how future requests are
+-- interpreted. Each evaluation stores a policy_snapshot in
+-- limit_change_policy_evaluation, so later policy edits do not rewrite history.
 CREATE TABLE limit_change_policy (
     id UUID PRIMARY KEY DEFAULT uuidv7(),
     tenant_id UUID NOT NULL REFERENCES tenant(id),
@@ -1339,7 +1388,7 @@ COMMENT ON COLUMN limit_change_policy.applies_to IS
     'Fast-match scope hints, such as operation type, funding-source category, channel group, actor type, or IBAN country prefix.';
 
 COMMENT ON COLUMN limit_change_policy.condition_expression IS
-    'Policy-engine expression evaluated against the change request, current rule, requested rule, pending requests, requester authority, mandate, configuration, and policy_context facts.';
+    'Policy-engine expression evaluated against the change request, current rule, requested amount, pending requests, requester authority, mandate, configuration, and policy_context facts.';
 
 COMMENT ON COLUMN limit_change_policy.action_expression IS
     'Ordered actions emitted when the condition matches, such as REQUIRE_CHANNEL, SET_EFFECTIVE_AT, CANCEL_PENDING, ENFORCE_CONFIGURATION_CAP, or CREATE_DEFAULT_FROM_CONFIGURATION.';
@@ -1409,15 +1458,6 @@ CREATE TABLE limit_rule_change_event (
     policy_id UUID,
     before_status limit_rule_change_status,
     after_status limit_rule_change_status,
-    -- Snapshot of the relevant rule/request state before this workflow event.
-    -- For policy or status-only events this may be NULL or may contain the
-    -- candidate/requested rule rather than a persisted limit_rule row.
-    before_rule JSONB,
-
-    -- Snapshot after this workflow event. For example, a scheduling policy may
-    -- show the requested rule after effective_at was delayed, while an APPLY
-    -- event can show the rule that was written to limit_rule.
-    after_rule JSONB,
     event_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
     message TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -1440,8 +1480,6 @@ CREATE TABLE limit_rule_change_event (
         )
     ),
     CONSTRAINT chk_limit_rule_change_event_json CHECK (
-        (before_rule IS NULL OR jsonb_typeof(before_rule) = 'object') AND
-        (after_rule IS NULL OR jsonb_typeof(after_rule) = 'object') AND
         jsonb_typeof(event_payload) = 'object'
     )
 );
@@ -1465,14 +1503,11 @@ CREATE TABLE limit_rule_revision (
     revision_event_type limit_rule_revision_event_type NOT NULL,
     actor_type limit_change_actor_type NOT NULL DEFAULT 'SYSTEM',
     actor_party_profile_id UUID,
-    -- Full JSON snapshot of the persisted limit_rule before this revision.
-    -- NULL for CREATED revisions because no prior rule existed.
-    before_rule JSONB,
-
-    -- Full JSON snapshot of the persisted limit_rule after this revision.
-    -- NULL can represent a hard delete; for soft deletes/deactivation it should
-    -- contain the rule with is_active=false or ends_at populated.
-    after_rule JSONB,
+    -- Amount before this revision; both NULL for CREATED revisions.
+    before_amount NUMERIC(20, 4),
+    before_unlimited BOOLEAN,
+    after_amount NUMERIC(20, 4),
+    after_unlimited BOOLEAN NOT NULL DEFAULT false,
     effective_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -1495,18 +1530,20 @@ CREATE TABLE limit_rule_revision (
             actor_party_profile_id IS NULL
         )
     ),
-    CONSTRAINT chk_limit_rule_revision_json CHECK (
-        before_rule IS NOT NULL OR after_rule IS NOT NULL
+    CONSTRAINT chk_limit_rule_revision_amounts CHECK (
+        (before_amount IS NULL OR before_unlimited IS NOT NULL) AND
+        (before_unlimited IS NULL OR (before_amount IS NULL) = before_unlimited) AND
+        (before_amount IS NULL OR before_amount > 0) AND
+        (after_amount IS NULL) = after_unlimited AND
+        (after_amount IS NULL OR after_amount > 0)
     ),
     CONSTRAINT chk_limit_rule_revision_json_types CHECK (
-        (before_rule IS NULL OR jsonb_typeof(before_rule) = 'object') AND
-        (after_rule IS NULL OR jsonb_typeof(after_rule) = 'object') AND
         jsonb_typeof(metadata) = 'object'
     )
 );
 
 COMMENT ON TABLE limit_rule_revision IS
-    'Immutable applied-change history for limit_rule, linking each version to the request, actor, and before/after snapshots.';
+    'Immutable applied-change history for limit_rule, linking each version to the request, actor, and before and after amounts.';
 
 CREATE INDEX idx_limit_rule_revision_rule
     ON limit_rule_revision (tenant_id, limit_rule_id, revision_number DESC);
