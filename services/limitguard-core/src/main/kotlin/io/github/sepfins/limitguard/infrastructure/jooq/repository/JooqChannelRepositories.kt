@@ -11,6 +11,7 @@ import io.github.sepfins.limitguard.domain.common.ChannelGroupId
 import io.github.sepfins.limitguard.domain.common.ChannelId
 import io.github.sepfins.limitguard.domain.common.TenantId
 import io.github.sepfins.limitguard.infrastructure.jooq.JooqPersistenceContext
+import io.github.sepfins.limitguard.infrastructure.jooq.containsIgnoreCaseLiteral
 import io.github.sepfins.limitguard.infrastructure.jooq.jooqOperation
 import io.github.sepfins.limitguard.infrastructure.jooq.toJsonb
 import io.github.sepfins.limitguard.infrastructure.jooq.toMetadata
@@ -20,8 +21,10 @@ import io.github.sepfins.limitguard.infrastructure.jooq.generated.tables.Channel
 import io.github.sepfins.limitguard.port.persistence.ChannelGroupMemberRepository
 import io.github.sepfins.limitguard.port.persistence.ChannelGroupRepository
 import io.github.sepfins.limitguard.port.persistence.ChannelRepository
+import org.jooq.Condition
 import org.jooq.Record
 import org.jooq.SelectFieldOrAsterisk
+import org.jooq.impl.DSL
 import java.time.Instant
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
@@ -63,6 +66,32 @@ class JooqChannelRepository(
                 .fetchOne { it.toChannel() }
         }
 
+    override fun findPage(
+        tenantId: TenantId,
+        search: String?,
+        active: Boolean?,
+        offset: Int,
+        limit: Int,
+    ): List<Channel> = jooqOperation("list channels") {
+        selectChannels()
+            .where(channelFilter(tenantId, search, active))
+            .orderBy(ChannelTable.code, ChannelTable.id)
+            .offset(offset)
+            .limit(limit)
+            .fetch { it.toChannel() }
+    }
+
+    override fun count(tenantId: TenantId, search: String?, active: Boolean?): Long =
+        jooqOperation("count channels") {
+            requireNotNull(
+                context.dsl()
+                    .select(DSL.count())
+                    .from(ChannelTable.table)
+                    .where(channelFilter(tenantId, search, active))
+                    .fetchOne(0, Long::class.java),
+            )
+        }
+
     override fun insert(tenantId: TenantId, channel: Channel): Channel = jooqOperation("insert channel") {
         require(channel.tenantId == tenantId) { "channel tenant does not match repository tenant" }
         val insert = context.dsl()
@@ -95,6 +124,20 @@ class JooqChannelRepository(
 
     private fun selectChannels() = context.dsl().select(ChannelTable.fields).from(ChannelTable.table)
 
+    private fun channelFilter(tenantId: TenantId, search: String?, active: Boolean?): Condition {
+        var condition: Condition = ChannelTable.tenantId.eq(tenantId.value)
+        if (search != null) {
+            condition = condition.and(
+                ChannelTable.code.containsIgnoreCaseLiteral(search)
+                    .or(ChannelTable.name.containsIgnoreCaseLiteral(search)),
+            )
+        }
+        if (active != null) {
+            condition = condition.and(ChannelTable.isActive.eq(active))
+        }
+        return condition
+    }
+
     private fun Record.toChannel(): Channel = Channel(
         id = ChannelId.of(requireNotNull(get(ChannelTable.id))),
         tenantId = TenantId.of(requireNotNull(get(ChannelTable.tenantId))),
@@ -124,6 +167,30 @@ class JooqChannelGroupRepository(
                 .and(ChannelGroupTable.code.eq(code.value))
                 .fetchOne { it.toGroup() }
         }
+
+    override fun findPage(
+        tenantId: TenantId,
+        search: String?,
+        offset: Int,
+        limit: Int,
+    ): List<ChannelGroup> = jooqOperation("list channel groups") {
+        selectGroups()
+            .where(groupFilter(tenantId, search))
+            .orderBy(ChannelGroupTable.code, ChannelGroupTable.id)
+            .offset(offset)
+            .limit(limit)
+            .fetch { it.toGroup() }
+    }
+
+    override fun count(tenantId: TenantId, search: String?): Long = jooqOperation("count channel groups") {
+        requireNotNull(
+            context.dsl()
+                .select(DSL.count())
+                .from(ChannelGroupTable.table)
+                .where(groupFilter(tenantId, search))
+                .fetchOne(0, Long::class.java),
+        )
+    }
 
     override fun insert(tenantId: TenantId, channelGroup: ChannelGroup): ChannelGroup =
         jooqOperation("insert channel group") {
@@ -157,6 +224,15 @@ class JooqChannelGroupRepository(
 
     private fun selectGroups() = context.dsl().select(ChannelGroupTable.fields).from(ChannelGroupTable.table)
 
+    private fun groupFilter(tenantId: TenantId, search: String?): Condition {
+        val condition = ChannelGroupTable.tenantId.eq(tenantId.value)
+        if (search == null) return condition
+        return condition.and(
+            ChannelGroupTable.code.containsIgnoreCaseLiteral(search)
+                .or(ChannelGroupTable.name.containsIgnoreCaseLiteral(search)),
+        )
+    }
+
     private fun Record.toGroup(): ChannelGroup = ChannelGroup(
         id = ChannelGroupId.of(requireNotNull(get(ChannelGroupTable.id))),
         tenantId = TenantId.of(requireNotNull(get(ChannelGroupTable.tenantId))),
@@ -178,6 +254,18 @@ class JooqChannelGroupMemberRepository(
                 .orderBy(ChannelGroupMemberTable.createdAt, ChannelGroupMemberTable.channelId)
                 .fetch { it.toMember() }
         }
+
+    override fun findByGroups(
+        tenantId: TenantId,
+        groupIds: Collection<ChannelGroupId>,
+    ): List<ChannelGroupMember> = jooqOperation("find members of channel groups") {
+        if (groupIds.isEmpty()) return@jooqOperation emptyList()
+        selectMembers()
+            .where(ChannelGroupMemberTable.tenantId.eq(tenantId.value))
+            .and(ChannelGroupMemberTable.groupId.`in`(groupIds.map { it.value }))
+            .orderBy(ChannelGroupMemberTable.createdAt, ChannelGroupMemberTable.channelId)
+            .fetch { it.toMember() }
+    }
 
     override fun findGroupIdsContaining(tenantId: TenantId, channelId: ChannelId): Set<ChannelGroupId> =
         jooqOperation("find channel groups containing channel") {

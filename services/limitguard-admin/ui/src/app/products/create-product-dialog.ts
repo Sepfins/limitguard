@@ -23,7 +23,7 @@ import { AdminApiService } from '../core/admin-api.service';
   selector: 'app-create-product-dialog',
   imports: [ReactiveFormsModule, LucideAngularModule],
   templateUrl: './create-product-dialog.html',
-  styleUrl: './create-product-dialog.css',
+  styleUrl: '../shared/dialog.css',
   changeDetection: ChangeDetectionStrategy.OnPush
 })
 export class CreateProductDialog {

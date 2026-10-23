@@ -6,15 +6,24 @@ import io.github.sepfins.limitguard.api.Limitguard
 import io.github.sepfins.limitguard.api.NoMatchingRuleBehavior
 import io.github.sepfins.limitguard.api.FundingSourceCategory
 import io.github.sepfins.limitguard.api.ProductNodeType
+import io.github.sepfins.limitguard.api.commands.AddChannelGroupMemberCommand
+import io.github.sepfins.limitguard.api.commands.CreateChannelGroupCommand
+import io.github.sepfins.limitguard.api.commands.RegisterChannelCommand
 import io.github.sepfins.limitguard.api.commands.RegisterFundingSourceProductCommand
 import io.github.sepfins.limitguard.api.commands.RegisterTenantCommand
+import io.github.sepfins.limitguard.api.commands.SetChannelActiveCommand
 import io.github.sepfins.limitguard.api.errors.NotFoundException
 import io.github.sepfins.limitguard.api.errors.ValidationException
 import io.github.sepfins.limitguard.api.queries.GetTenantQuery
+import io.github.sepfins.limitguard.api.queries.ListChannelGroupsQuery
+import io.github.sepfins.limitguard.api.queries.ListChannelsQuery
 import io.github.sepfins.limitguard.api.queries.ListFundingSourceProductsQuery
 import io.github.sepfins.limitguard.api.queries.ListTenantsQuery
 import io.github.sepfins.limitguard.api.queries.MAX_CATALOG_PAGE_SIZE
 import io.github.sepfins.limitguard.api.queries.MAX_CATALOG_SEARCH_LENGTH
+import io.github.sepfins.limitguard.api.results.ChannelGroupMemberResult
+import io.github.sepfins.limitguard.api.results.ChannelGroupResult
+import io.github.sepfins.limitguard.api.results.ChannelResult
 import io.github.sepfins.limitguard.api.results.FundingSourceProductResult
 import io.github.sepfins.limitguard.api.results.PageResult
 import io.github.sepfins.limitguard.api.results.TenantResult
@@ -106,6 +115,39 @@ class AdminCatalogApplicationService(
                 metadata = emptyMap(),
             ),
         )
+    }
+
+    fun listChannels(identity: AdminIdentity, query: ListChannelsQuery): PageResult<ChannelResult> {
+        authorizer.requireTenantRead(identity, query.tenantId)
+        return limitguard.tenantCatalogQueryService.listChannels(query)
+    }
+
+    fun registerChannel(identity: AdminIdentity, command: RegisterChannelCommand): ChannelResult {
+        authorizer.requireTenantMutation(identity, command.tenantId)
+        return limitguard.tenantCatalogService.registerChannel(command)
+    }
+
+    fun setChannelActive(identity: AdminIdentity, command: SetChannelActiveCommand): ChannelResult {
+        authorizer.requireTenantMutation(identity, command.tenantId)
+        return limitguard.tenantCatalogService.setChannelActive(command)
+    }
+
+    fun listChannelGroups(identity: AdminIdentity, query: ListChannelGroupsQuery): PageResult<ChannelGroupResult> {
+        authorizer.requireTenantRead(identity, query.tenantId)
+        return limitguard.tenantCatalogQueryService.listChannelGroups(query)
+    }
+
+    fun createChannelGroup(identity: AdminIdentity, command: CreateChannelGroupCommand): ChannelGroupResult {
+        authorizer.requireTenantMutation(identity, command.tenantId)
+        return limitguard.tenantCatalogService.createChannelGroup(command)
+    }
+
+    fun addChannelGroupMember(
+        identity: AdminIdentity,
+        command: AddChannelGroupMemberCommand,
+    ): ChannelGroupMemberResult {
+        authorizer.requireTenantMutation(identity, command.tenantId)
+        return limitguard.tenantCatalogService.addChannelGroupMember(command)
     }
 
     private fun validatePage(page: Int, size: Int) {

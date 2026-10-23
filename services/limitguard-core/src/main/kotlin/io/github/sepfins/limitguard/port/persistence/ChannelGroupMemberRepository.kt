@@ -7,6 +7,7 @@ import io.github.sepfins.limitguard.domain.channel.ChannelGroupMember
 
 interface ChannelGroupMemberRepository {
     fun findByGroup(tenantId: TenantId, groupId: ChannelGroupId): List<ChannelGroupMember>
+    fun findByGroups(tenantId: TenantId, groupIds: Collection<ChannelGroupId>): List<ChannelGroupMember>
 
     fun findGroupIdsContaining(
         tenantId: TenantId,

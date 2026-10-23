@@ -326,7 +326,7 @@ class DefaultTenantCatalogService(
             createdAt = clockProvider.now(),
         )
 
-        return channelGroupRepository.insert(tenantId, group).toResult()
+        return channelGroupRepository.insert(tenantId, group).toResult(memberChannelIds = emptyList())
     }
 
     override fun addChannelGroupMember(

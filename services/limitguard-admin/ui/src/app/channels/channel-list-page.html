@@ -1,0 +1,197 @@
+<section class="page-heading">
+  <div>
+    <h1>Channels</h1>
+    <p class="page-summary">{{ channels().totalElements }} {{ channels().totalElements === 1 ? 'channel' : 'channels' }}</p>
+  </div>
+  @if (auth.canManageTenant(tenantId)) {
+    <button class="button primary" type="button" (click)="channelDialog.open()">
+      <lucide-icon name="plus" [size]="17" />
+      Create channel
+    </button>
+  }
+</section>
+
+<section class="data-section" aria-labelledby="channel-table-title">
+  <div class="table-toolbar">
+    <h2 id="channel-table-title">Channels</h2>
+    <div class="toolbar-controls">
+      <div class="segmented" aria-label="Filter by active status">
+        <button type="button" [class.selected]="activeFilter() === 'all'" (click)="setActiveFilter('all')">All</button>
+        <button type="button" [class.selected]="activeFilter() === 'active'" (click)="setActiveFilter('active')">Active</button>
+        <button type="button" [class.selected]="activeFilter() === 'inactive'" (click)="setActiveFilter('inactive')">Inactive</button>
+      </div>
+      <label class="search-control">
+        <lucide-icon name="search" [size]="17" />
+        <span class="sr-only">Search channels</span>
+        <input [formControl]="search" type="search" placeholder="Search code or name" maxlength="100" />
+      </label>
+    </div>
+  </div>
+
+  @if (loading()) {
+    <div class="state-block" aria-live="polite">
+      <span class="spinner"></span>
+      <strong>Loading channels</strong>
+    </div>
+  } @else if (error()) {
+    <div class="state-block error-state" role="alert">
+      <strong>{{ error() }}</strong>
+      <button class="button secondary" type="button" (click)="load()">
+        <lucide-icon name="refresh-cw" [size]="16" />
+        Retry
+      </button>
+    </div>
+  } @else if (channels().items.length === 0) {
+    <div class="state-block">
+      <app-guilloche class="state-rosette" variant="rosette" [seed]="tenantId" />
+      <strong>{{ search.value ? 'No channels match your search' : 'No channels registered' }}</strong>
+    </div>
+  } @else {
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">Code and name</th>
+            <th scope="col">Id</th>
+            <th scope="col">Status</th>
+            @if (auth.canManageTenant(tenantId)) {
+              <th scope="col"><span class="sr-only">Actions</span></th>
+            }
+          </tr>
+        </thead>
+        <tbody>
+          @for (channel of channels().items; track channel.id) {
+            <tr>
+              <td data-label="Channel">
+                <div class="code-cell">
+                  <code>{{ channel.code }}</code>
+                  <strong>{{ channel.name }}</strong>
+                </div>
+              </td>
+              <td data-label="Id"><app-copy-id [id]="channel.id" /></td>
+              <td data-label="Status">
+                <span class="status" [class.active]="channel.isActive" [class.inactive]="!channel.isActive">
+                  {{ channel.isActive ? 'Active' : 'Inactive' }}
+                </span>
+              </td>
+              @if (auth.canManageTenant(tenantId)) {
+                <td data-label="Actions">
+                  <button class="button secondary compact" type="button" (click)="toggleActive(channel)">
+                    {{ channel.isActive ? 'Deactivate' : 'Reactivate' }}
+                  </button>
+                </td>
+              }
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+
+    <footer class="pagination">
+      <span>Page {{ channels().page + 1 }} of {{ channels().totalPages }}</span>
+      <div>
+        <button class="icon-button bordered" type="button" title="Previous page" aria-label="Previous page"
+          [disabled]="channels().page === 0" (click)="load(channels().page - 1)">
+          <lucide-icon name="chevron-left" [size]="18" />
+        </button>
+        <button class="icon-button bordered" type="button" title="Next page" aria-label="Next page"
+          [disabled]="channels().page + 1 >= channels().totalPages" (click)="load(channels().page + 1)">
+          <lucide-icon name="chevron-right" [size]="18" />
+        </button>
+      </div>
+    </footer>
+  }
+</section>
+
+<section class="data-section" aria-labelledby="group-table-title">
+  <div class="table-toolbar">
+    <h2 id="group-table-title">Channel groups</h2>
+    <div class="toolbar-controls">
+      @if (auth.canManageTenant(tenantId)) {
+        <button class="button secondary compact" type="button" (click)="groupDialog.open()">
+          <lucide-icon name="plus" [size]="16" />
+          Create channel group
+        </button>
+      }
+      <label class="search-control">
+        <lucide-icon name="search" [size]="17" />
+        <span class="sr-only">Search channel groups</span>
+        <input [formControl]="groupSearch" type="search" placeholder="Search code or name" maxlength="100" />
+      </label>
+    </div>
+  </div>
+
+  @if (groupsLoading()) {
+    <div class="state-block" aria-live="polite">
+      <span class="spinner"></span>
+      <strong>Loading channel groups</strong>
+    </div>
+  } @else if (groupsError()) {
+    <div class="state-block error-state" role="alert">
+      <strong>{{ groupsError() }}</strong>
+      <button class="button secondary" type="button" (click)="loadGroups()">
+        <lucide-icon name="refresh-cw" [size]="16" />
+        Retry
+      </button>
+    </div>
+  } @else if (groups().items.length === 0) {
+    <div class="state-block">
+      <app-guilloche class="state-rosette" variant="rosette" [seed]="tenantId" />
+      <strong>{{ groupSearch.value ? 'No channel groups match your search' : 'No channel groups defined' }}</strong>
+    </div>
+  } @else {
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">Code and name</th>
+            <th scope="col">Id</th>
+            <th scope="col">Members</th>
+            @if (auth.canManageTenant(tenantId)) {
+              <th scope="col"><span class="sr-only">Actions</span></th>
+            }
+          </tr>
+        </thead>
+        <tbody>
+          @for (group of groups().items; track group.id) {
+            <tr>
+              <td data-label="Channel group">
+                <div class="code-cell">
+                  <code>{{ group.code }}</code>
+                  <strong>{{ group.name }}</strong>
+                </div>
+              </td>
+              <td data-label="Id"><app-copy-id [id]="group.id" /></td>
+              <td data-label="Members" class="parent-cell">{{ memberCodes(group) }}</td>
+              @if (auth.canManageTenant(tenantId)) {
+                <td data-label="Actions">
+                  <button class="button secondary compact" type="button" (click)="memberDialog.open(group)">
+                    Add channel
+                  </button>
+                </td>
+              }
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+
+    <footer class="pagination">
+      <span>Page {{ groups().page + 1 }} of {{ groups().totalPages }}</span>
+      <div>
+        <button class="icon-button bordered" type="button" title="Previous page" aria-label="Previous page"
+          [disabled]="groups().page === 0" (click)="loadGroups(groups().page - 1)">
+          <lucide-icon name="chevron-left" [size]="18" />
+        </button>
+        <button class="icon-button bordered" type="button" title="Next page" aria-label="Next page"
+          [disabled]="groups().page + 1 >= groups().totalPages" (click)="loadGroups(groups().page + 1)">
+          <lucide-icon name="chevron-right" [size]="18" />
+        </button>
+      </div>
+    </footer>
+  }
+</section>
+
+<app-code-name-dialog #channelDialog noun="channel" [save]="registerChannel" (created)="channelCreated()" />
+<app-code-name-dialog #groupDialog noun="channel group" [save]="createGroup" (created)="groupSearch.setValue('', { emitEvent: false }); loadGroups(0)" />
+<app-add-member-dialog #memberDialog [tenantId]="tenantId" [channels]="channelCatalog()" (added)="loadGroups()" />

@@ -3,10 +3,14 @@ package io.github.sepfins.limitguard.admin.web.dto
 import io.github.sepfins.limitguard.api.FundingSourceCategory
 import io.github.sepfins.limitguard.api.NoMatchingRuleBehavior
 import io.github.sepfins.limitguard.api.ProductNodeType
+import io.github.sepfins.limitguard.api.results.ChannelGroupMemberResult
+import io.github.sepfins.limitguard.api.results.ChannelGroupResult
+import io.github.sepfins.limitguard.api.results.ChannelResult
 import io.github.sepfins.limitguard.api.results.FundingSourceProductResult
 import io.github.sepfins.limitguard.api.results.PageResult
 import io.github.sepfins.limitguard.api.results.TenantResult
 import jakarta.validation.constraints.NotBlank
+import jakarta.validation.constraints.NotNull
 import jakarta.validation.constraints.Size
 import java.time.Instant
 import java.util.UUID
@@ -63,6 +67,56 @@ data class FundingSourceProductResponse(
     val createdAt: Instant,
 )
 
+data class CreateChannelRequest(
+    @field:NotBlank
+    @field:Size(max = 100)
+    val code: String,
+    @field:NotBlank
+    @field:Size(max = 255)
+    val name: String,
+)
+
+data class SetChannelActiveRequest(
+    @field:NotNull
+    val isActive: Boolean?,
+)
+
+data class ChannelResponse(
+    val id: UUID,
+    val code: String,
+    val name: String,
+    val isActive: Boolean,
+    val createdAt: Instant,
+)
+
+data class CreateChannelGroupRequest(
+    @field:NotBlank
+    @field:Size(max = 100)
+    val code: String,
+    @field:NotBlank
+    @field:Size(max = 255)
+    val name: String,
+)
+
+data class AddChannelGroupMemberRequest(
+    @field:NotNull
+    val channelId: UUID?,
+)
+
+data class ChannelGroupResponse(
+    val id: UUID,
+    val code: String,
+    val name: String,
+    val memberChannelIds: List<UUID>,
+    val createdAt: Instant,
+)
+
+data class ChannelGroupMemberResponse(
+    val channelGroupId: UUID,
+    val channelId: UUID,
+    val createdAt: Instant,
+)
+
 data class PageResponse<T>(
     val items: List<T>,
     val page: Int,
@@ -91,6 +145,28 @@ fun FundingSourceProductResult.toAdminResponse(): FundingSourceProductResponse =
         isActive = isActive,
         createdAt = createdAt,
     )
+
+fun ChannelResult.toAdminResponse(): ChannelResponse = ChannelResponse(
+    id = id,
+    code = code,
+    name = name,
+    isActive = isActive,
+    createdAt = createdAt,
+)
+
+fun ChannelGroupResult.toAdminResponse(): ChannelGroupResponse = ChannelGroupResponse(
+    id = id,
+    code = code,
+    name = name,
+    memberChannelIds = memberChannelIds,
+    createdAt = createdAt,
+)
+
+fun ChannelGroupMemberResult.toAdminResponse(): ChannelGroupMemberResponse = ChannelGroupMemberResponse(
+    channelGroupId = channelGroupId,
+    channelId = channelId,
+    createdAt = createdAt,
+)
 
 fun <T, R> PageResult<T>.toAdminResponse(mapper: (T) -> R): PageResponse<R> = PageResponse(
     items = items.map(mapper),

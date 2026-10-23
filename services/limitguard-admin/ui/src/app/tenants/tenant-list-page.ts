@@ -23,7 +23,7 @@ import { CreateTenantDialog } from './create-tenant-dialog';
     Guilloche
   ],
   templateUrl: './tenant-list-page.html',
-  styleUrls: ['../products/product-list-page.css', './tenant-list-page.css'],
+  styleUrls: ['../shared/list-page.css', './tenant-list-page.css'],
   changeDetection: ChangeDetectionStrategy.OnPush
 })
 export class TenantListPage {

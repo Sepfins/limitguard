@@ -56,6 +56,7 @@ import io.github.sepfins.limitguard.domain.operation.OperationTypeScope
 import io.github.sepfins.limitguard.domain.party.PartyProfile
 import io.github.sepfins.limitguard.domain.party.PartyProfileDelegation
 import io.github.sepfins.limitguard.domain.tenant.Tenant
+import java.util.UUID
 
 internal fun Tenant.toResult(): TenantResult =
     TenantResult(
@@ -109,7 +110,7 @@ internal fun Channel.toResult(): ChannelResult =
         },
     )
 
-internal fun ChannelGroup.toResult(): ChannelGroupResult =
+internal fun ChannelGroup.toResult(memberChannelIds: List<UUID>): ChannelGroupResult =
     ChannelGroupResult(
         id = id.value,
         tenantId = tenantId.value,
@@ -119,6 +120,7 @@ internal fun ChannelGroup.toResult(): ChannelGroupResult =
         createdAt = requireNotNull(createdAt) {
             "ChannelGroup.createdAt is required when mapping to ChannelGroupResult"
         },
+        memberChannelIds = memberChannelIds,
     )
 
 internal fun ChannelGroupMember.toResult(): ChannelGroupMemberResult =

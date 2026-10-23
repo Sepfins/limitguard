@@ -24,7 +24,7 @@ type ActiveFilter = 'all' | 'active' | 'inactive';
     Guilloche
   ],
   templateUrl: './product-list-page.html',
-  styleUrl: './product-list-page.css',
+  styleUrl: '../shared/list-page.css',
   changeDetection: ChangeDetectionStrategy.OnPush
 })
 export class ProductListPage {

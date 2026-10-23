@@ -64,6 +64,27 @@ export interface CreateFundingSourceProductRequest {
   isActive: boolean;
 }
 
+export interface Channel {
+  id: string;
+  code: string;
+  name: string;
+  isActive: boolean;
+  createdAt: string;
+}
+
+export interface ChannelGroup {
+  id: string;
+  code: string;
+  name: string;
+  memberChannelIds: string[];
+  createdAt: string;
+}
+
+export interface CodeNameRequest {
+  code: string;
+  name: string;
+}
+
 export interface FieldViolation {
   field: string;
   message: string;

@@ -60,19 +60,19 @@
   width: min(270px, 30vw);
 }
 
-.product-cell code,
-.product-cell strong {
+.code-cell code,
+.code-cell strong {
   display: block;
 }
 
-.product-cell code {
+.code-cell code {
   margin-bottom: 2px;
   color: var(--ink);
   font-size: 13px;
   font-weight: 600;
 }
 
-.product-cell strong {
+.code-cell strong {
   font-weight: 400;
 }
 
@@ -216,3 +216,6 @@
   }
 }
 
+.data-section + .data-section {
+  margin-top: 24px;
+}

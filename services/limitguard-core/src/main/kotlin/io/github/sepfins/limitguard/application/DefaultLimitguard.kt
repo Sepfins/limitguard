@@ -128,6 +128,9 @@ class DefaultLimitguard(
         identifierSchemeRepository = identifierSchemeRepository,
         entityIdentifierRepository = entityIdentifierRepository,
         fundingSourceProductRepository = fundingSourceProductRepository,
+        channelRepository = channelRepository,
+        channelGroupRepository = channelGroupRepository,
+        channelGroupMemberRepository = channelGroupMemberRepository,
         transactionRunner = transactionRunner,
     )
 

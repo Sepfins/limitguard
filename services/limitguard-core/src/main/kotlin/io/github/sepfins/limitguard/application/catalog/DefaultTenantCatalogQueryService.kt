@@ -3,12 +3,16 @@ package io.github.sepfins.limitguard.application.catalog
 import io.github.sepfins.limitguard.api.TenantCatalogQueryService
 import io.github.sepfins.limitguard.api.errors.NotFoundException
 import io.github.sepfins.limitguard.api.errors.ValidationException
+import io.github.sepfins.limitguard.api.queries.ListChannelGroupsQuery
+import io.github.sepfins.limitguard.api.queries.ListChannelsQuery
 import io.github.sepfins.limitguard.api.queries.ListFundingSourceProductsQuery
 import io.github.sepfins.limitguard.api.queries.ListTenantsQuery
 import io.github.sepfins.limitguard.api.queries.GetTenantQuery
 import io.github.sepfins.limitguard.api.queries.MAX_CATALOG_PAGE_SIZE
 import io.github.sepfins.limitguard.api.queries.MAX_CATALOG_SEARCH_LENGTH
 import io.github.sepfins.limitguard.api.queries.ResolveEntityIdentifierQuery
+import io.github.sepfins.limitguard.api.results.ChannelGroupResult
+import io.github.sepfins.limitguard.api.results.ChannelResult
 import io.github.sepfins.limitguard.api.results.EntityIdentifierResult
 import io.github.sepfins.limitguard.api.results.FundingSourceProductResult
 import io.github.sepfins.limitguard.api.results.PageResult
@@ -17,17 +21,24 @@ import io.github.sepfins.limitguard.domain.common.TenantId
 import io.github.sepfins.limitguard.domain.identifier.EntityType
 import io.github.sepfins.limitguard.domain.identifier.IdentifierValue
 import io.github.sepfins.limitguard.domain.identifier.SchemeName
+import io.github.sepfins.limitguard.port.persistence.ChannelGroupMemberRepository
+import io.github.sepfins.limitguard.port.persistence.ChannelGroupRepository
+import io.github.sepfins.limitguard.port.persistence.ChannelRepository
 import io.github.sepfins.limitguard.port.persistence.EntityIdentifierRepository
 import io.github.sepfins.limitguard.port.persistence.FundingSourceProductRepository
 import io.github.sepfins.limitguard.port.persistence.IdentifierSchemeRepository
 import io.github.sepfins.limitguard.port.persistence.TenantRepository
 import io.github.sepfins.limitguard.port.transactions.TransactionRunner
+import java.util.UUID
 
 class DefaultTenantCatalogQueryService(
     private val tenantRepository: TenantRepository,
     private val identifierSchemeRepository: IdentifierSchemeRepository,
     private val entityIdentifierRepository: EntityIdentifierRepository,
     private val fundingSourceProductRepository: FundingSourceProductRepository,
+    private val channelRepository: ChannelRepository,
+    private val channelGroupRepository: ChannelGroupRepository,
+    private val channelGroupMemberRepository: ChannelGroupMemberRepository,
     private val transactionRunner: TransactionRunner,
 ) : TenantCatalogQueryService {
     override fun getTenant(query: GetTenantQuery): TenantResult = mapValidation {
@@ -75,25 +86,53 @@ class DefaultTenantCatalogQueryService(
 
     override fun listFundingSourceProducts(
         query: ListFundingSourceProductsQuery,
-    ): PageResult<FundingSourceProductResult> = mapValidation {
-        val tenantId = TenantId.of(query.tenantId)
-        val page = pageCoordinates(query.page, query.size)
-        val search = normalizeSearch(query.search)
+    ): PageResult<FundingSourceProductResult> =
+        tenantPage(query.tenantId, query.page, query.size, query.search) { tenantId, search, page ->
+            val total = fundingSourceProductRepository.count(tenantId, search, query.active)
+            val products = fundingSourceProductRepository.findPage(
+                tenantId = tenantId,
+                search = search,
+                active = query.active,
+                offset = page.offset,
+                limit = page.size,
+            )
+            products.map { it.toResult() } to total
+        }
+
+    override fun listChannels(query: ListChannelsQuery): PageResult<ChannelResult> =
+        tenantPage(query.tenantId, query.page, query.size, query.search) { tenantId, search, page ->
+            val total = channelRepository.count(tenantId, search, query.active)
+            val channels = channelRepository.findPage(tenantId, search, query.active, page.offset, page.size)
+            channels.map { it.toResult() } to total
+        }
+
+    override fun listChannelGroups(query: ListChannelGroupsQuery): PageResult<ChannelGroupResult> =
+        tenantPage(query.tenantId, query.page, query.size, query.search) { tenantId, search, page ->
+            val total = channelGroupRepository.count(tenantId, search)
+            val groups = channelGroupRepository.findPage(tenantId, search, page.offset, page.size)
+            val members = channelGroupMemberRepository.findByGroups(tenantId, groups.map { it.id })
+                .groupBy({ it.groupId }, { it.channelId.value })
+            groups.map { it.toResult(members[it.id].orEmpty()) } to total
+        }
+
+    private fun <T> tenantPage(
+        rawTenantId: UUID,
+        rawPage: Int,
+        rawSize: Int,
+        rawSearch: String?,
+        load: (TenantId, String?, PageCoordinates) -> Pair<List<T>, Long>,
+    ): PageResult<T> = mapValidation {
+        val tenantId = TenantId.of(rawTenantId)
+        val page = pageCoordinates(rawPage, rawSize)
+        val search = normalizeSearch(rawSearch)
 
         transactionRunner.inTransaction {
             if (!tenantRepository.exists(tenantId)) {
                 throw NotFoundException("tenant not found: ${tenantId.value}")
             }
-
-            val total = fundingSourceProductRepository.count(tenantId, search, query.active)
+            val (items, total) = load(tenantId, search, page)
             PageResult(
-                items = fundingSourceProductRepository.findPage(
-                    tenantId = tenantId,
-                    search = search,
-                    active = query.active,
-                    offset = page.offset,
-                    limit = page.size,
-                ).map { it.toResult() },
+                items = items,
                 page = page.number,
                 size = page.size,
                 totalElements = total,

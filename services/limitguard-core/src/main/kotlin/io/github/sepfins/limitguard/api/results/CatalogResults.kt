@@ -66,6 +66,7 @@ data class ChannelGroupResult(
     val name: String,
     val metadata: Map<String, Any?>,
     val createdAt: Instant,
+    val memberChannelIds: List<UUID>,
 )
 
 data class ChannelGroupMemberResult(

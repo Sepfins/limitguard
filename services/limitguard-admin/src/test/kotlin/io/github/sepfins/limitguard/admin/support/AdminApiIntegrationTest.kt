@@ -10,11 +10,14 @@ import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Import
+import org.springframework.http.MediaType
 import org.springframework.jdbc.datasource.DelegatingDataSource
 import org.springframework.jdbc.datasource.DriverManagerDataSource
 import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository
+import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.ResultActionsDsl
+import org.springframework.test.web.servlet.post
 import org.testcontainers.postgresql.PostgreSQLContainer
 import java.util.Properties
 import java.util.UUID
@@ -43,6 +46,15 @@ abstract class AdminApiIntegrationTest {
         val response = result.andExpect { status { isCreated() } }.andReturn().response
         return UUID.fromString(response.getHeader("Location")!!.substringAfterLast('/'))
     }
+
+    protected fun createTenant(name: String): UUID = createdId(
+        mockMvc.post("/limitguard/admin/api/v1/tenants") {
+            with(platformAdmin())
+            with(csrf())
+            contentType = MediaType.APPLICATION_JSON
+            content = """{"name":"$name"}"""
+        },
+    )
 
     @TestConfiguration(proxyBeanMethods = false)
     class TestBeans {

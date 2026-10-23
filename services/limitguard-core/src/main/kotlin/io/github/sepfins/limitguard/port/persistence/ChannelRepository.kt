@@ -11,6 +11,8 @@ interface ChannelRepository {
     fun findById(tenantId: TenantId, channelId: ChannelId): Channel?
     fun findByIdForUpdate(tenantId: TenantId, channelId: ChannelId): Channel?
     fun findByCode(tenantId: TenantId, code: ChannelCode): Channel?
+    fun findPage(tenantId: TenantId, search: String?, active: Boolean?, offset: Int, limit: Int): List<Channel>
+    fun count(tenantId: TenantId, search: String?, active: Boolean?): Long
     fun insert(tenantId: TenantId, channel: Channel): Channel
     fun update(tenantId: TenantId, channel: Channel): Channel
 }

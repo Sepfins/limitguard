@@ -2,6 +2,9 @@ import { HttpClient, HttpParams } from '@angular/common/http';
 import { Injectable } from '@angular/core';
 import { Observable } from 'rxjs';
 import {
+  Channel,
+  ChannelGroup,
+  CodeNameRequest,
   CreateFundingSourceProductRequest,
   CreateTenantRequest,
   FundingSourceProduct,
@@ -54,5 +57,51 @@ export class AdminApiService {
       `${this.baseUrl}/tenants/${tenantId}/funding-source-products`,
       request
     );
+  }
+
+  listChannels(
+    tenantId: string,
+    search: string,
+    active: boolean | null,
+    page: number,
+    size = 25
+  ): Observable<PageResponse<Channel>> {
+    let params = new HttpParams().set('page', page).set('size', size);
+    if (search.trim()) params = params.set('search', search.trim());
+    if (active !== null) params = params.set('active', active);
+    return this.http.get<PageResponse<Channel>>(`${this.baseUrl}/tenants/${tenantId}/channels`, { params });
+  }
+
+  registerChannel(tenantId: string, request: CodeNameRequest): Observable<Channel> {
+    return this.http.post<Channel>(`${this.baseUrl}/tenants/${tenantId}/channels`, request);
+  }
+
+  setChannelActive(tenantId: string, channelId: string, isActive: boolean): Observable<Channel> {
+    return this.http.put<Channel>(`${this.baseUrl}/tenants/${tenantId}/channels/${channelId}/active`, {
+      isActive
+    });
+  }
+
+  listChannelGroups(
+    tenantId: string,
+    search: string,
+    page: number,
+    size = 25
+  ): Observable<PageResponse<ChannelGroup>> {
+    let params = new HttpParams().set('page', page).set('size', size);
+    if (search.trim()) params = params.set('search', search.trim());
+    return this.http.get<PageResponse<ChannelGroup>>(`${this.baseUrl}/tenants/${tenantId}/channel-groups`, {
+      params
+    });
+  }
+
+  createChannelGroup(tenantId: string, request: CodeNameRequest): Observable<ChannelGroup> {
+    return this.http.post<ChannelGroup>(`${this.baseUrl}/tenants/${tenantId}/channel-groups`, request);
+  }
+
+  addChannelGroupMember(tenantId: string, channelGroupId: string, channelId: string): Observable<unknown> {
+    return this.http.post(`${this.baseUrl}/tenants/${tenantId}/channel-groups/${channelGroupId}/members`, {
+      channelId
+    });
   }
 }

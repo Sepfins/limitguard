@@ -87,15 +87,6 @@ class TenantProductJourneyTest : AdminApiIntegrationTest() {
         }
     }
 
-    private fun createTenant(name: String): UUID = createdId(
-        mockMvc.post("/limitguard/admin/api/v1/tenants") {
-            with(platformAdmin())
-            with(csrf())
-            contentType = MediaType.APPLICATION_JSON
-            content = """{"name":"$name"}"""
-        },
-    )
-
     private fun createProduct(tenantId: UUID, request: String): UUID = createdId(
         mockMvc.post("/limitguard/admin/api/v1/tenants/$tenantId/funding-source-products") {
             with(tenantAdmin(tenantId))
