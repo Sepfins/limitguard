@@ -1,11 +1,15 @@
 import { ApplicationConfig, importProvidersFrom, provideBrowserGlobalErrorListeners } from '@angular/core';
 import { provideHttpClient, withXsrfConfiguration } from '@angular/common/http';
-import { provideRouter } from '@angular/router';
+import { provideRouter, withRouterConfig } from '@angular/router';
 import {
   ArrowLeft,
   ArrowRight,
+  Check,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
+  Copy,
   LogOut,
   LucideAngularModule,
   Plus,
@@ -23,8 +27,12 @@ export const appConfig: ApplicationConfig = {
       LucideAngularModule.pick({
         ArrowLeft,
         ArrowRight,
+        Check,
+        ChevronDown,
         ChevronLeft,
         ChevronRight,
+        ChevronUp,
+        Copy,
         LogOut,
         Plus,
         RefreshCw,
@@ -35,6 +43,6 @@ export const appConfig: ApplicationConfig = {
     provideHttpClient(
       withXsrfConfiguration({ cookieName: 'XSRF-TOKEN', headerName: 'X-XSRF-TOKEN' })
     ),
-    provideRouter(routes)
+    provideRouter(routes, withRouterConfig({ paramsInheritanceStrategy: 'always' }))
   ]
 };

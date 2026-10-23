@@ -6,6 +6,9 @@ import io.github.sepfins.limitguard.admin.security.AdminIdentityResolver
 import io.github.sepfins.limitguard.admin.security.AdminSecurityErrorWriter
 import io.github.sepfins.limitguard.admin.security.AdminSecurityProperties
 import io.github.sepfins.limitguard.admin.security.SecurityConfiguration
+import io.github.sepfins.limitguard.admin.support.platformAdmin
+import io.github.sepfins.limitguard.admin.support.tenantAdmin
+import io.github.sepfins.limitguard.admin.support.viewer
 import io.github.sepfins.limitguard.admin.web.error.AdminExceptionHandler
 import io.github.sepfins.limitguard.api.FundingSourceCategory
 import io.github.sepfins.limitguard.api.Limitguard
@@ -39,7 +42,6 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.http.MediaType
 import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository
 import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf
-import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.oidcLogin
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.post
@@ -294,28 +296,6 @@ class AdminApiWebTest @Autowired constructor(
             jsonPath("$.fieldViolations[0].field") { value("name") }
         }
     }
-
-    private fun platformAdmin() = oidcLogin()
-        .idToken { token ->
-            token.subject("admin-user")
-            token.claim("name", "Platform Admin")
-            token.claim("realm_access", mapOf("roles" to listOf("PLATFORM_ADMIN")))
-        }
-
-    private fun tenantAdmin(tenantId: UUID) = oidcLogin()
-        .idToken { token ->
-            token.subject("admin-user")
-            token.claim("name", "Tenant Admin")
-            token.claim("limitguard_tenant_ids", listOf(tenantId.toString()))
-            token.claim("realm_access", mapOf("roles" to listOf("TENANT_ADMIN")))
-        }
-
-    private fun viewer(tenantId: UUID) = oidcLogin()
-        .idToken { token ->
-            token.subject("viewer-user")
-            token.claim("limitguard_tenant_ids", listOf(tenantId.toString()))
-            token.claim("realm_access", mapOf("roles" to listOf("VIEWER")))
-        }
 
     private fun tenantResult(
         id: UUID = UUID.randomUUID(),

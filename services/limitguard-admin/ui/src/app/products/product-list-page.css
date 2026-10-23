@@ -216,16 +216,3 @@
   }
 }
 
-
-.back-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  margin-bottom: 14px;
-  font-size: 13px;
-  text-decoration: none;
-}
-
-.back-link:hover {
-  text-decoration: underline;
-}

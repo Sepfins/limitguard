@@ -12,7 +12,8 @@ class AdminSpaController {
         "/limitguard/admin",
         "/limitguard/admin/",
         "/limitguard/admin/tenants",
-        "/limitguard/admin/tenants/{tenantId}/products",
+        "/limitguard/admin/tenants/{tenantId}",
+        "/limitguard/admin/tenants/{tenantId}/{area:products|channels|operations|configurations|policies}",
     )
     fun adminApplication(): String = "forward:/limitguard/admin/index.html"
 }

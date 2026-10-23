@@ -1,13 +1,14 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, inject, signal, viewChild } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormControl, ReactiveFormsModule } from '@angular/forms';
-import { ActivatedRoute, RouterLink } from '@angular/router';
+import { ActivatedRoute } from '@angular/router';
 import { LucideAngularModule } from 'lucide-angular';
 import { debounceTime, distinctUntilChanged, finalize } from 'rxjs';
 import { apiErrorMessage } from '../core/api-error';
-import { FundingSourceProduct, PageResponse, Tenant } from '../core/admin-api.models';
+import { FundingSourceProduct, PageResponse } from '../core/admin-api.models';
 import { AdminApiService } from '../core/admin-api.service';
 import { AuthStore } from '../core/auth.store';
+import { CopyId } from '../shared/copy-id';
 import { Guilloche } from '../shared/guilloche';
 import { CreateProductDialog } from './create-product-dialog';
 
@@ -17,8 +18,8 @@ type ActiveFilter = 'all' | 'active' | 'inactive';
   selector: 'app-product-list-page',
   imports: [
     ReactiveFormsModule,
-    RouterLink,
     CreateProductDialog,
+    CopyId,
     LucideAngularModule,
     Guilloche
   ],
@@ -32,7 +33,6 @@ export class ProductListPage {
   private readonly destroyRef = inject(DestroyRef);
   private readonly createDialog = viewChild.required(CreateProductDialog);
   protected readonly auth = inject(AuthStore);
-  protected readonly tenant = signal<Tenant | null>(null);
   protected readonly search = new FormControl('', { nonNullable: true });
   protected readonly activeFilter = signal<ActiveFilter>('all');
   protected readonly loading = signal(true);
@@ -50,7 +50,6 @@ export class ProductListPage {
     this.search.valueChanges
       .pipe(debounceTime(250), distinctUntilChanged(), takeUntilDestroyed(this.destroyRef))
       .subscribe(() => this.load(0));
-    this.loadTenant();
     this.load(0, true);
   }
 
@@ -99,9 +98,4 @@ export class ProductListPage {
     return value.replaceAll('_', ' ');
   }
 
-  private loadTenant(): void {
-    this.api.listTenants('', 0, 100).subscribe({
-      next: (result) => this.tenant.set(result.items.find((tenant) => tenant.id === this.tenantId) ?? null)
-    });
-  }
 }

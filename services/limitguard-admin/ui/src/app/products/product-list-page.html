@@ -1,12 +1,7 @@
-<a class="back-link" routerLink="/tenants">
-  <lucide-icon name="arrow-left" [size]="16" />
-  Tenants
-</a>
-
 <section class="page-heading">
   <div>
     <h1>Funding source products</h1>
-    <p class="page-summary">{{ tenant()?.name ?? 'Tenant' }} · {{ result().totalElements }} catalog {{ result().totalElements === 1 ? 'node' : 'nodes' }}</p>
+    <p class="page-summary">{{ result().totalElements }} catalog {{ result().totalElements === 1 ? 'node' : 'nodes' }}</p>
   </div>
   @if (auth.canManageTenant(tenantId)) {
     <button class="button primary" type="button" (click)="openCreateDialog()">
@@ -57,6 +52,7 @@
         <thead>
           <tr>
             <th scope="col">Code and name</th>
+            <th scope="col">Id</th>
             <th scope="col">Type</th>
             <th scope="col">Category</th>
             <th scope="col">Parent</th>
@@ -72,6 +68,7 @@
                   <strong>{{ product.name }}</strong>
                 </div>
               </td>
+              <td data-label="Id"><app-copy-id [id]="product.id" /></td>
               <td data-label="Type"><span class="type-label">{{ label(product.nodeType) }}</span></td>
               <td data-label="Category">{{ label(product.category) }}</td>
               <td data-label="Parent" class="parent-cell">{{ parentName(product.parentId) }}</td>

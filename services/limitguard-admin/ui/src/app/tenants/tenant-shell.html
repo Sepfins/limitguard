@@ -1,0 +1,42 @@
+<header class="band">
+  <app-guilloche class="band-lines" [seed]="tenantId" />
+  <div class="band-copy">
+    <a class="all-tenants" routerLink="/tenants">
+      <lucide-icon name="arrow-left" [size]="14" />
+      All tenants
+    </a>
+    <p class="tenant-name">{{ tenantName() }}</p>
+    <code class="tenant-id" [title]="tenantId">tenant …{{ tenantId.slice(-8) }}</code>
+  </div>
+  <p class="microprint" aria-hidden="true">{{ microprint() }}</p>
+</header>
+
+<div class="tenant-body" [class.nav-open]="navOpen()">
+  <button
+    class="nav-toggle"
+    type="button"
+    aria-controls="tenant-nav"
+    [attr.aria-expanded]="navOpen()"
+    (click)="navOpen.set(!navOpen())"
+  >
+    {{ currentSection() }}
+    <lucide-icon [name]="navOpen() ? 'chevron-up' : 'chevron-down'" [size]="16" />
+  </button>
+
+  <nav id="tenant-nav" class="tenant-nav" aria-label="Tenant sections">
+    @for (section of sections; track section.path) {
+      <a
+        [routerLink]="['/tenants', tenantId, section.path]"
+        routerLinkActive="active"
+        ariaCurrentWhenActive="page"
+        (click)="navOpen.set(false)"
+      >
+        {{ section.label }}
+      </a>
+    }
+  </nav>
+
+  <div class="tenant-content">
+    <router-outlet />
+  </div>
+</div>
