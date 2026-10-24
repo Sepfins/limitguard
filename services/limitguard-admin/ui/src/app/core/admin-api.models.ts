@@ -80,6 +80,24 @@ export interface ChannelGroup {
   createdAt: string;
 }
 
+export interface OperationType {
+  id: string;
+  parentId: string | null;
+  code: string;
+  name: string;
+  isLeaf: boolean;
+  isGlobal: boolean;
+  createdAt: string;
+}
+
+export interface CreateOperationTypeRequest {
+  code: string;
+  name: string;
+  parentId: string | null;
+  isLeaf: boolean;
+  isGlobal: boolean;
+}
+
 export interface CodeNameRequest {
   code: string;
   name: string;

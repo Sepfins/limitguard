@@ -26,8 +26,12 @@ export const routes: Routes = [
             path: 'channels',
             loadComponent: () => import('./channels/channel-list-page').then((m) => m.ChannelListPage)
           },
+          {
+            path: 'operations',
+            loadComponent: () =>
+              import('./operations/operation-type-list-page').then((m) => m.OperationTypeListPage)
+          },
           ...[
-            { path: 'operations', title: 'Operation types' },
             { path: 'configurations', title: 'Limit configurations' },
             { path: 'policies', title: 'Limit-change policies' }
           ].map(({ path, title }) => ({

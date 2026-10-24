@@ -9,6 +9,7 @@ import io.github.sepfins.limitguard.domain.operation.OperationTypeCode
 import io.github.sepfins.limitguard.domain.operation.OperationTypeName
 import io.github.sepfins.limitguard.domain.operation.OperationTypeScope
 import io.github.sepfins.limitguard.infrastructure.jooq.JooqPersistenceContext
+import io.github.sepfins.limitguard.infrastructure.jooq.containsIgnoreCaseLiteral
 import io.github.sepfins.limitguard.infrastructure.jooq.jooqOperation
 import io.github.sepfins.limitguard.infrastructure.jooq.generated.tables.OperationType as GeneratedOperationTypeTable
 import io.github.sepfins.limitguard.infrastructure.jooq.generated.tables.OperationTypeCatalogGuard
@@ -76,6 +77,51 @@ class JooqOperationTypeRepository(
             .orderBy(OperationTypeTable.code, OperationTypeTable.id)
             .fetch { it.toDomain() }
     }
+
+    override fun findPage(
+        tenantId: TenantId,
+        search: String?,
+        leaf: Boolean?,
+        offset: Int,
+        limit: Int,
+    ): List<OperationType> = jooqOperation("list operation types") {
+        val dsl = context.dsl()
+        val child = OperationTypeTable.table.`as`("child")
+        val treeTable = DSL.table(DSL.name("operation_tree"))
+        val treeId = DSL.field(DSL.name("operation_tree", "id"), UUID::class.java)
+        val treePath = DSL.field(DSL.name("operation_tree", "path"), Array<String>::class.java)
+        // Sorting by the path of codes from the root puts each parent before its children.
+        val tree = DSL.name("operation_tree").fields("id", "path").`as`(
+            dsl.select(OperationTypeTable.id, DSL.array(OperationTypeTable.code.cast(String::class.java)))
+                .from(OperationTypeTable.table)
+                .where(visibleTo(tenantId)).and(OperationTypeTable.parentId.isNull)
+                .unionAll(
+                    dsl.select(child.ID, DSL.arrayAppend(treePath, child.CODE))
+                        .from(child).join(treeTable).on(child.PARENT_ID.eq(treeId))
+                        .where(visibleTo(tenantId, child)),
+                ),
+        )
+        dsl.withRecursive(tree)
+            .select(OperationTypeTable.fields)
+            .from(OperationTypeTable.table)
+            .join(tree).on(OperationTypeTable.id.eq(tree.field("id", UUID::class.java)))
+            .where(operationFilter(tenantId, search, leaf))
+            .orderBy(tree.field("path"), OperationTypeTable.id)
+            .offset(offset)
+            .limit(limit)
+            .fetch { it.toDomain() }
+    }
+
+    override fun count(tenantId: TenantId, search: String?, leaf: Boolean?): Long =
+        jooqOperation("count operation types") {
+            requireNotNull(
+                context.dsl()
+                    .select(DSL.count())
+                    .from(OperationTypeTable.table)
+                    .where(operationFilter(tenantId, search, leaf))
+                    .fetchOne(0, Long::class.java),
+            )
+        }
 
     override fun hasChildren(tenantId: TenantId, parentId: OperationTypeId): Boolean =
         jooqOperation("check operation type children") {
@@ -156,6 +202,20 @@ class JooqOperationTypeRepository(
         tenantId: TenantId,
         table: GeneratedOperationTypeTable = OperationTypeTable.table,
     ): Condition = table.TENANT_ID.isNull.or(table.TENANT_ID.eq(tenantId.value))
+
+    private fun operationFilter(tenantId: TenantId, search: String?, leaf: Boolean?): Condition {
+        var condition = visibleTo(tenantId)
+        if (search != null) {
+            condition = condition.and(
+                OperationTypeTable.code.containsIgnoreCaseLiteral(search)
+                    .or(OperationTypeTable.name.containsIgnoreCaseLiteral(search)),
+            )
+        }
+        if (leaf != null) {
+            condition = condition.and(OperationTypeTable.isLeaf.eq(leaf))
+        }
+        return condition
+    }
 
     private fun selectOperationTypes() = context.dsl()
         .select(OperationTypeTable.fields)

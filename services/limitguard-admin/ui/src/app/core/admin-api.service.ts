@@ -6,9 +6,11 @@ import {
   ChannelGroup,
   CodeNameRequest,
   CreateFundingSourceProductRequest,
+  CreateOperationTypeRequest,
   CreateTenantRequest,
   FundingSourceProduct,
   MeResponse,
+  OperationType,
   PageResponse,
   Tenant
 } from './admin-api.models';
@@ -103,5 +105,24 @@ export class AdminApiService {
     return this.http.post(`${this.baseUrl}/tenants/${tenantId}/channel-groups/${channelGroupId}/members`, {
       channelId
     });
+  }
+
+  listOperationTypes(
+    tenantId: string,
+    search: string,
+    leaf: boolean | null,
+    page: number,
+    size = 25
+  ): Observable<PageResponse<OperationType>> {
+    let params = new HttpParams().set('page', page).set('size', size);
+    if (search.trim()) params = params.set('search', search.trim());
+    if (leaf !== null) params = params.set('leaf', leaf);
+    return this.http.get<PageResponse<OperationType>>(`${this.baseUrl}/tenants/${tenantId}/operation-types`, {
+      params
+    });
+  }
+
+  registerOperationType(tenantId: string, request: CreateOperationTypeRequest): Observable<OperationType> {
+    return this.http.post<OperationType>(`${this.baseUrl}/tenants/${tenantId}/operation-types`, request);
   }
 }

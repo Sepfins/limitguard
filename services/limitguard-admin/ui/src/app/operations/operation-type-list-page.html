@@ -1,0 +1,98 @@
+<section class="page-heading">
+  <div>
+    <h1>Operation types</h1>
+    <p class="page-summary">{{ operations().totalElements }} {{ operations().totalElements === 1 ? 'operation type' : 'operation types' }}, global ones included</p>
+  </div>
+  @if (auth.canManageTenant(tenantId)) {
+    <button class="button primary" type="button" (click)="operationDialog.open()">
+      <lucide-icon name="plus" [size]="17" />
+      Create operation type
+    </button>
+  }
+</section>
+
+<section class="data-section" aria-labelledby="operation-table-title">
+  <div class="table-toolbar">
+    <h2 id="operation-table-title">Operation tree</h2>
+    <div class="toolbar-controls">
+      <label class="search-control">
+        <lucide-icon name="search" [size]="17" />
+        <span class="sr-only">Search operation types</span>
+        <input [formControl]="search" type="search" placeholder="Search code or name" maxlength="100" />
+      </label>
+    </div>
+  </div>
+
+  @if (loading()) {
+    <div class="state-block" aria-live="polite">
+      <span class="spinner"></span>
+      <strong>Loading operation types</strong>
+    </div>
+  } @else if (error()) {
+    <div class="state-block error-state" role="alert">
+      <strong>{{ error() }}</strong>
+      <button class="button secondary" type="button" (click)="load()">
+        <lucide-icon name="refresh-cw" [size]="16" />
+        Retry
+      </button>
+    </div>
+  } @else if (operations().items.length === 0) {
+    <div class="state-block">
+      <app-guilloche class="state-rosette" variant="rosette" [seed]="tenantId" />
+      <strong>{{ search.value ? 'No operation types match your search' : 'No operation types registered' }}</strong>
+    </div>
+  } @else {
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">Code and name</th>
+            <th scope="col">Id</th>
+            <th scope="col">Kind</th>
+            <th scope="col">Scope</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (operation of operations().items; track operation.id) {
+            <tr>
+              <td data-label="Operation type">
+                <div class="code-cell" [style.padding-left.px]="depth(operation) * 24">
+                  <code>{{ operation.code }}</code>
+                  <strong>{{ operation.name }}</strong>
+                </div>
+              </td>
+              <td data-label="Id"><app-copy-id [id]="operation.id" /></td>
+              <td data-label="Kind">{{ operation.isLeaf ? 'Leaf' : 'Branch' }}</td>
+              <td data-label="Scope">
+                <span class="status" [class.active]="operation.isGlobal" [class.neutral]="!operation.isGlobal">
+                  {{ operation.isGlobal ? 'Global' : 'Tenant' }}
+                </span>
+              </td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+
+    <footer class="pagination">
+      <span>Page {{ operations().page + 1 }} of {{ operations().totalPages }}</span>
+      <div>
+        <button class="icon-button bordered" type="button" title="Previous page" aria-label="Previous page"
+          [disabled]="operations().page === 0" (click)="load(operations().page - 1)">
+          <lucide-icon name="chevron-left" [size]="18" />
+        </button>
+        <button class="icon-button bordered" type="button" title="Next page" aria-label="Next page"
+          [disabled]="operations().page + 1 >= operations().totalPages" (click)="load(operations().page + 1)">
+          <lucide-icon name="chevron-right" [size]="18" />
+        </button>
+      </div>
+    </footer>
+  }
+</section>
+
+<app-create-operation-type-dialog
+  #operationDialog
+  [tenantId]="tenantId"
+  [parentOptions]="parents()"
+  (created)="created()"
+/>

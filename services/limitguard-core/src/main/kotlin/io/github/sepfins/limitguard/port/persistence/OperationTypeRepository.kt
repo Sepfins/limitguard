@@ -18,6 +18,10 @@ interface OperationTypeRepository {
     fun findByCodeVisibleToTenant(tenantId: TenantId, code: OperationTypeCode): List<OperationType>
     fun findByParentId(tenantId: TenantId, parentId: OperationTypeId): List<OperationType>
 
+    /** Pages the visible set in tree order: each parent before its children, siblings by code. */
+    fun findPage(tenantId: TenantId, search: String?, leaf: Boolean?, offset: Int, limit: Int): List<OperationType>
+    fun count(tenantId: TenantId, search: String?, leaf: Boolean?): Long
+
     /**
      * Checks a visible parent's structural leaf status without exposing child identities.
      * Shared-taxonomy adapters must include private children of global parents too.

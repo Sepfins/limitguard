@@ -7,6 +7,7 @@ import io.github.sepfins.limitguard.api.results.ChannelGroupMemberResult
 import io.github.sepfins.limitguard.api.results.ChannelGroupResult
 import io.github.sepfins.limitguard.api.results.ChannelResult
 import io.github.sepfins.limitguard.api.results.FundingSourceProductResult
+import io.github.sepfins.limitguard.api.results.OperationTypeResult
 import io.github.sepfins.limitguard.api.results.PageResult
 import io.github.sepfins.limitguard.api.results.TenantResult
 import jakarta.validation.constraints.NotBlank
@@ -117,6 +118,28 @@ data class ChannelGroupMemberResponse(
     val createdAt: Instant,
 )
 
+data class CreateOperationTypeRequest(
+    @field:NotBlank
+    @field:Size(max = 100)
+    val code: String,
+    @field:NotBlank
+    @field:Size(max = 255)
+    val name: String,
+    val parentId: UUID? = null,
+    val isLeaf: Boolean = false,
+    val isGlobal: Boolean = false,
+)
+
+data class OperationTypeResponse(
+    val id: UUID,
+    val parentId: UUID?,
+    val code: String,
+    val name: String,
+    val isLeaf: Boolean,
+    val isGlobal: Boolean,
+    val createdAt: Instant,
+)
+
 data class PageResponse<T>(
     val items: List<T>,
     val page: Int,
@@ -165,6 +188,16 @@ fun ChannelGroupResult.toAdminResponse(): ChannelGroupResponse = ChannelGroupRes
 fun ChannelGroupMemberResult.toAdminResponse(): ChannelGroupMemberResponse = ChannelGroupMemberResponse(
     channelGroupId = channelGroupId,
     channelId = channelId,
+    createdAt = createdAt,
+)
+
+fun OperationTypeResult.toAdminResponse(): OperationTypeResponse = OperationTypeResponse(
+    id = id,
+    parentId = parentId,
+    code = code,
+    name = name,
+    isLeaf = isLeaf,
+    isGlobal = isGlobal,
     createdAt = createdAt,
 )
 

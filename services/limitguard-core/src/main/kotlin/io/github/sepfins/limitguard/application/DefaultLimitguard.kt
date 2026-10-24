@@ -131,6 +131,7 @@ class DefaultLimitguard(
         channelRepository = channelRepository,
         channelGroupRepository = channelGroupRepository,
         channelGroupMemberRepository = channelGroupMemberRepository,
+        operationTypeRepository = operationTypeRepository,
         transactionRunner = transactionRunner,
     )
 
