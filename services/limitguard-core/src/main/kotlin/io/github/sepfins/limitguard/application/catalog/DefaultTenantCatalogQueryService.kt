@@ -6,6 +6,7 @@ import io.github.sepfins.limitguard.api.errors.ValidationException
 import io.github.sepfins.limitguard.api.queries.ListChannelGroupsQuery
 import io.github.sepfins.limitguard.api.queries.ListChannelsQuery
 import io.github.sepfins.limitguard.api.queries.ListFundingSourceProductsQuery
+import io.github.sepfins.limitguard.api.queries.ListLimitChangePoliciesQuery
 import io.github.sepfins.limitguard.api.queries.ListLimitConfigurationsQuery
 import io.github.sepfins.limitguard.api.queries.ListOperationTypesQuery
 import io.github.sepfins.limitguard.api.queries.ListTenantsQuery
@@ -17,10 +18,12 @@ import io.github.sepfins.limitguard.api.results.ChannelGroupResult
 import io.github.sepfins.limitguard.api.results.ChannelResult
 import io.github.sepfins.limitguard.api.results.EntityIdentifierResult
 import io.github.sepfins.limitguard.api.results.FundingSourceProductResult
+import io.github.sepfins.limitguard.api.results.LimitChangePolicyResult
 import io.github.sepfins.limitguard.api.results.LimitConfigurationResult
 import io.github.sepfins.limitguard.api.results.OperationTypeResult
 import io.github.sepfins.limitguard.api.results.PageResult
 import io.github.sepfins.limitguard.api.results.TenantResult
+import io.github.sepfins.limitguard.domain.change.LimitChangePolicyPhase
 import io.github.sepfins.limitguard.domain.common.LimitConfigurationId
 import io.github.sepfins.limitguard.domain.common.TenantId
 import io.github.sepfins.limitguard.domain.identifier.EntityType
@@ -32,6 +35,7 @@ import io.github.sepfins.limitguard.port.persistence.ChannelRepository
 import io.github.sepfins.limitguard.port.persistence.EntityIdentifierRepository
 import io.github.sepfins.limitguard.port.persistence.FundingSourceProductRepository
 import io.github.sepfins.limitguard.port.persistence.IdentifierSchemeRepository
+import io.github.sepfins.limitguard.port.persistence.LimitChangePolicyRepository
 import io.github.sepfins.limitguard.port.persistence.LimitConfigurationRepository
 import io.github.sepfins.limitguard.port.persistence.OperationTypeRepository
 import io.github.sepfins.limitguard.port.persistence.TenantRepository
@@ -48,6 +52,7 @@ class DefaultTenantCatalogQueryService(
     private val channelGroupMemberRepository: ChannelGroupMemberRepository,
     private val operationTypeRepository: OperationTypeRepository,
     private val limitConfigurationRepository: LimitConfigurationRepository,
+    private val limitChangePolicyRepository: LimitChangePolicyRepository,
     private val transactionRunner: TransactionRunner,
 ) : TenantCatalogQueryService {
     override fun getTenant(query: GetTenantQuery): TenantResult = mapValidation {
@@ -146,6 +151,23 @@ class DefaultTenantCatalogQueryService(
                 limit = page.size,
             )
             configurations.map { it.toResult() } to total
+        }
+
+    override fun listLimitChangePolicies(
+        query: ListLimitChangePoliciesQuery,
+    ): PageResult<LimitChangePolicyResult> =
+        tenantPage(query.tenantId, query.page, query.size, rawSearch = null) { tenantId, _, page ->
+            val phase = query.phase?.let { LimitChangePolicyPhase.valueOf(it.name) }
+            val configurationId = query.limitConfigurationId?.let { LimitConfigurationId.of(it) }
+            val total = limitChangePolicyRepository.count(tenantId, phase, configurationId)
+            val policies = limitChangePolicyRepository.findPage(
+                tenantId = tenantId,
+                phase = phase,
+                limitConfigurationId = configurationId,
+                offset = page.offset,
+                limit = page.size,
+            )
+            policies.map { it.toResult() } to total
         }
 
     private fun <T> tenantPage(

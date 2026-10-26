@@ -38,9 +38,13 @@ export const routes: Routes = [
           },
           {
             path: 'policies',
-            data: { title: 'Limit-change policies' },
             loadComponent: () =>
-              import('./tenants/tenant-area-placeholder').then((m) => m.TenantAreaPlaceholder)
+              import('./policies/limit-change-policy-list-page').then((m) => m.LimitChangePolicyListPage)
+          },
+          {
+            path: 'policies/new',
+            loadComponent: () =>
+              import('./policies/new-limit-change-policy-page').then((m) => m.NewLimitChangePolicyPage)
           }
         ]
       }

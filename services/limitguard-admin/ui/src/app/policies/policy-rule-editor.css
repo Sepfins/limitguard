@@ -1,0 +1,340 @@
+:host {
+  --rail: 56px;
+  display: grid;
+  gap: 20px;
+}
+
+.part {
+  display: grid;
+  gap: 8px;
+}
+
+h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.005em;
+}
+
+/* Rows hang off a rail; the and/or keys sit on it, so the logic reads before the clauses. */
+.level {
+  position: relative;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.level::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--rail) / 2);
+  width: 1px;
+  background: var(--border);
+}
+
+.level.nested {
+  background: var(--paper);
+}
+
+.level.nested::before {
+  background: var(--ink-line);
+}
+
+.row {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--rail) minmax(0, 1fr) 36px;
+  align-items: center;
+  min-height: 50px;
+  padding: 7px 4px 7px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.key {
+  justify-self: center;
+  min-width: 34px;
+  padding: 2px 6px;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-align: center;
+  text-transform: uppercase;
+  background: var(--surface);
+  border: 1px solid transparent;
+  border-radius: 2px;
+}
+
+.key:empty {
+  visibility: hidden;
+}
+
+.nested .key {
+  background: var(--paper);
+}
+
+.key.switch {
+  border-color: var(--ink);
+  cursor: pointer;
+  transition: background-color 120ms ease-out, color 120ms ease-out;
+}
+
+.key.switch:hover {
+  color: #fff;
+  background: var(--ink);
+}
+
+.clause {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 14px;
+}
+
+.clause select,
+.clause input {
+  height: 32px;
+  min-width: 0;
+  padding: 0 8px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+}
+
+.clause select:focus,
+.clause input:focus {
+  border-color: var(--ink);
+  outline: 0;
+  box-shadow: 0 0 0 1px var(--ink);
+}
+
+.clause input {
+  width: 170px;
+}
+
+.clause .amount-input {
+  width: 100px;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A source and its value wrap as one, so "a fixed amount 500" never splits. */
+.pair {
+  display: inline-flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.chip {
+  height: 30px;
+  padding: 0 9px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.chip:hover:not(.on) {
+  border-color: var(--ink);
+}
+
+.chip.on {
+  color: #fff;
+  background: var(--ink);
+  border-color: var(--ink);
+}
+
+.muted {
+  color: var(--text-muted);
+}
+
+.group-row {
+  align-items: start;
+}
+
+.group-row > .key,
+.group-row > .clause,
+.group-row > .remove {
+  margin-top: 4px;
+}
+
+.group-body {
+  grid-column: 2 / 4;
+  padding: 10px 12px 4px 0;
+}
+
+.remove {
+  justify-self: end;
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  color: var(--text-muted);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.remove:hover {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.empty {
+  margin: 0;
+  padding: 14px 16px 6px var(--rail);
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.add {
+  position: relative;
+  padding: 10px 0 10px var(--rail);
+}
+
+.add-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 0;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.add-button:hover {
+  text-decoration: underline;
+}
+
+.menu {
+  position: absolute;
+  top: calc(100% - 6px);
+  left: var(--rail);
+  z-index: 20;
+  display: grid;
+  min-width: 280px;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: 0 10px 28px rgb(22 22 29 / 14%);
+  animation: menu-in 140ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.menu button {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 9px 10px;
+  color: var(--text);
+  font-size: 14px;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.menu button:hover,
+.menu button:focus-visible {
+  background: var(--ink-soft);
+  outline: 0;
+}
+
+.menu small {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+@keyframes menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.footer small {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.switch-error {
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.code-editor {
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.hint {
+  color: var(--text-muted);
+}
+
+@media (max-width: 760px) {
+  :host {
+    --rail: 40px;
+  }
+
+  .key {
+    min-width: 30px;
+    padding: 2px 3px;
+  }
+
+  .group-body {
+    padding-right: 6px;
+  }
+}
+
+@media (max-width: 600px) {
+
+  .clause input {
+    width: 140px;
+  }
+
+  .clause .amount-input {
+    width: 76px;
+  }
+
+  .clause select {
+    padding: 0 4px;
+  }
+
+  .menu {
+    left: 8px;
+    right: 8px;
+    min-width: 0;
+  }
+
+  .footer {
+    align-items: start;
+    flex-direction: column;
+  }
+}

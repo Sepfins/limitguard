@@ -28,7 +28,9 @@ import io.github.sepfins.limitguard.infrastructure.jooq.generated.tables.LimitCh
 import io.github.sepfins.limitguard.infrastructure.jooq.generated.tables.LimitChangePolicyEvaluation as GeneratedLimitChangePolicyEvaluationTable
 import io.github.sepfins.limitguard.port.persistence.LimitChangePolicyEvaluationRepository
 import io.github.sepfins.limitguard.port.persistence.LimitChangePolicyRepository
+import org.jooq.Condition
 import org.jooq.Record
+import org.jooq.impl.DSL
 import java.time.Instant
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
@@ -70,6 +72,35 @@ class JooqLimitChangePolicyRepository(
             .and(table.ENDS_AT.isNull.or(table.ENDS_AT.gt(timestamp)))
             .orderBy(table.PRIORITY, table.CODE, table.ID)
             .fetch { it.toPolicy() }
+    }
+
+    override fun findPage(
+        tenantId: TenantId,
+        phase: LimitChangePolicyPhase?,
+        limitConfigurationId: LimitConfigurationId?,
+        offset: Int,
+        limit: Int,
+    ): List<LimitChangePolicy> = jooqOperation("list limit change policies") {
+        selectPolicies()
+            .where(pageFilter(tenantId, phase, limitConfigurationId))
+            .orderBy(table.PRIORITY, table.CODE, table.ID)
+            .offset(offset)
+            .limit(limit)
+            .fetch { it.toPolicy() }
+    }
+
+    override fun count(
+        tenantId: TenantId,
+        phase: LimitChangePolicyPhase?,
+        limitConfigurationId: LimitConfigurationId?,
+    ): Long = jooqOperation("count limit change policies") {
+        requireNotNull(
+            context.dsl()
+                .select(DSL.count())
+                .from(table)
+                .where(pageFilter(tenantId, phase, limitConfigurationId))
+                .fetchOne(0, Long::class.java),
+        )
     }
 
     override fun insert(tenantId: TenantId, policy: LimitChangePolicy): LimitChangePolicy =
@@ -131,6 +162,21 @@ class JooqLimitChangePolicyRepository(
                     .fetchOne()
             ) { "limit change policy not found: ${policy.id.value}" }.toPolicy()
         }
+
+    private fun pageFilter(
+        tenantId: TenantId,
+        phase: LimitChangePolicyPhase?,
+        limitConfigurationId: LimitConfigurationId?,
+    ): Condition {
+        var condition: Condition = table.TENANT_ID.eq(tenantId.value)
+        if (phase != null) {
+            condition = condition.and(table.PHASE.eq(phase.toGenerated()))
+        }
+        if (limitConfigurationId != null) {
+            condition = condition.and(table.LIMIT_CONFIGURATION_ID.eq(limitConfigurationId.value))
+        }
+        return condition
+    }
 
     private fun selectPolicies() = context.dsl()
         .select(table.fields().toList())

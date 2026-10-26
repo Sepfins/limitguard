@@ -2,6 +2,8 @@ package io.github.sepfins.limitguard.admin.web.dto
 
 import io.github.sepfins.limitguard.api.FundingSourceCategory
 import io.github.sepfins.limitguard.api.LimitAmount
+import io.github.sepfins.limitguard.api.LimitChangePolicyDecision
+import io.github.sepfins.limitguard.api.LimitChangePolicyPhase
 import io.github.sepfins.limitguard.api.LimitChannelScope
 import io.github.sepfins.limitguard.api.LimitConfigurationFundingScope
 import io.github.sepfins.limitguard.api.LimitKind
@@ -13,6 +15,7 @@ import io.github.sepfins.limitguard.api.results.ChannelGroupMemberResult
 import io.github.sepfins.limitguard.api.results.ChannelGroupResult
 import io.github.sepfins.limitguard.api.results.ChannelResult
 import io.github.sepfins.limitguard.api.results.FundingSourceProductResult
+import io.github.sepfins.limitguard.api.results.LimitChangePolicyResult
 import io.github.sepfins.limitguard.api.results.LimitConfigurationResult
 import io.github.sepfins.limitguard.api.results.OperationTypeResult
 import io.github.sepfins.limitguard.api.results.PageResult
@@ -226,6 +229,48 @@ data class LimitConfigurationResponse(
     val createdAt: Instant,
 )
 
+/** Condition and actions are JSON values handed to the core unchanged; the core validates them. */
+data class CreateLimitChangePolicyRequest(
+    @field:NotBlank
+    @field:Size(max = 100)
+    val code: String,
+    @field:NotBlank
+    @field:Size(max = 255)
+    val name: String,
+    val description: String? = null,
+    val phase: LimitChangePolicyPhase = LimitChangePolicyPhase.AUTHORIZATION,
+    @field:NotNull
+    val decision: LimitChangePolicyDecision?,
+    val limitConfigurationId: UUID? = null,
+    val priority: Int = 100,
+    val conditionExpression: Map<String, Any?> = emptyMap(),
+    val actionExpression: List<Map<String, Any?>> = emptyList(),
+    @field:Size(max = 100)
+    val denialCode: String? = null,
+    val denialMessage: String? = null,
+    val startsAt: Instant? = null,
+    val endsAt: Instant? = null,
+)
+
+data class LimitChangePolicyResponse(
+    val id: UUID,
+    val code: String,
+    val name: String,
+    val description: String?,
+    val phase: LimitChangePolicyPhase,
+    val decision: LimitChangePolicyDecision,
+    val limitConfigurationId: UUID?,
+    val priority: Int,
+    val isActive: Boolean,
+    val conditionExpression: Map<String, Any?>,
+    val actionExpression: List<Map<String, Any?>>,
+    val denialCode: String?,
+    val denialMessage: String?,
+    val startsAt: Instant,
+    val endsAt: Instant?,
+    val createdAt: Instant,
+)
+
 data class PageResponse<T>(
     val items: List<T>,
     val page: Int,
@@ -309,6 +354,25 @@ fun LimitConfigurationResult.toAdminResponse(): LimitConfigurationResponse = Lim
     priority = priority,
     usageConsumptionMode = usageConsumptionMode,
     isActive = isActive,
+    startsAt = startsAt,
+    endsAt = endsAt,
+    createdAt = createdAt,
+)
+
+fun LimitChangePolicyResult.toAdminResponse(): LimitChangePolicyResponse = LimitChangePolicyResponse(
+    id = id,
+    code = code,
+    name = name,
+    description = description,
+    phase = phase,
+    decision = decision,
+    limitConfigurationId = limitConfigurationId,
+    priority = priority,
+    isActive = isActive,
+    conditionExpression = conditionExpression,
+    actionExpression = actionExpression,
+    denialCode = denialCode,
+    denialMessage = denialMessage,
     startsAt = startsAt,
     endsAt = endsAt,
     createdAt = createdAt,

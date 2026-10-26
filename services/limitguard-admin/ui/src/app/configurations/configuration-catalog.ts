@@ -20,6 +20,11 @@ export const emptyCatalog: ConfigurationCatalog = {
   configurations: []
 };
 
+// A datetime-local value as an ISO instant; empty means "not set".
+export function isoOrNull(localDateTime: string): string | null {
+  return localDateTime ? new Date(localDateTime).toISOString() : null;
+}
+
 function codeOf(items: { id: string; code: string }[], id: string | null): string {
   return items.find((item) => item.id === id)?.code ?? id?.slice(0, 8) ?? '';
 }

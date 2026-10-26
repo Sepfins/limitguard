@@ -1,0 +1,121 @@
+<a class="back" [routerLink]="['/tenants', tenantId, 'policies']">
+  <lucide-icon name="arrow-left" [size]="14" />
+  Policies
+</a>
+<h1>New limit-change policy</h1>
+<p class="summary">Runs when a limit-change request is authorized, after every policy with a lower priority number.</p>
+
+<form [formGroup]="form" (ngSubmit)="submit()">
+  <section class="form-section" aria-labelledby="section-policy">
+    <h2 id="section-policy">Policy</h2>
+    <div class="fields">
+      <div class="identity">
+        <label class="field">
+          <span>Code</span>
+          <input class="mono" formControlName="code" autocomplete="off" maxlength="100" placeholder="RAISE_NEEDS_APPROVAL" />
+          @if (form.controls.code.touched && form.controls.code.hasError('required')) {
+            <small>A code is required.</small>
+          }
+        </label>
+        <label class="field">
+          <span>Name</span>
+          <input formControlName="name" autocomplete="off" maxlength="255" placeholder="Raises need approval" />
+          @if (form.controls.name.touched && form.controls.name.hasError('required')) {
+            <small>A name is required.</small>
+          }
+        </label>
+        <label class="field">
+          <span>Priority</span>
+          <input class="mono" formControlName="priority" type="number" min="0" step="1" title="Lower numbers run first" />
+        </label>
+      </div>
+      <label class="field">
+        <span>Description <em>optional</em></span>
+        <input formControlName="description" autocomplete="off" />
+      </label>
+    </div>
+  </section>
+
+  <section class="form-section" aria-labelledby="section-scope">
+    <h2 id="section-scope">Applies to</h2>
+    <div class="fields">
+      <label class="field">
+        <span>Limit configuration</span>
+        <select formControlName="limitConfigurationId">
+          <option value="">Every configuration</option>
+          @for (configuration of configurations(); track configuration.id) {
+            <option [value]="configuration.id">{{ configuration.code }} · {{ configuration.name }}</option>
+          }
+        </select>
+        <small class="hint">A bound policy applies to that configuration only, not to its children.</small>
+      </label>
+    </div>
+  </section>
+
+  <section class="form-section" aria-labelledby="section-rule">
+    <h2 id="section-rule">Rule</h2>
+    <div class="fields">
+      <div class="field">
+        <span id="decision-label">Decision when the rule matches</span>
+        <div class="segmented" role="radiogroup" aria-labelledby="decision-label">
+          @for (option of decisions; track option.value) {
+            <button
+              type="button"
+              role="radio"
+              [class.selected]="decision() === option.value"
+              [attr.aria-checked]="decision() === option.value"
+              (click)="form.controls.decision.setValue(option.value)"
+            >
+              {{ option.label }}
+            </button>
+          }
+        </div>
+      </div>
+
+      <app-policy-rule-editor [channels]="channels()" [decision]="decision()" />
+
+      @if (decision() === 'DENY') {
+        <div class="two">
+          <label class="field">
+            <span>Denial code</span>
+            <input class="mono" formControlName="denialCode" autocomplete="off" maxlength="100" placeholder="PROXY_MAY_ONLY_LOWER" />
+          </label>
+          <label class="field">
+            <span>Denial message</span>
+            <input formControlName="denialMessage" autocomplete="off" placeholder="Only the owner can raise this limit." />
+          </label>
+        </div>
+      }
+    </div>
+  </section>
+
+  <section class="form-section" aria-labelledby="section-schedule">
+    <h2 id="section-schedule">Schedule</h2>
+    <div class="fields two">
+      <label class="field">
+        <span>Effective from</span>
+        <input formControlName="startsAt" type="datetime-local" />
+        <small class="hint">Leave empty to start now.</small>
+      </label>
+      <label class="field">
+        <span>Effective until</span>
+        <input formControlName="endsAt" type="datetime-local" />
+        <small class="hint">Optional.</small>
+      </label>
+    </div>
+  </section>
+
+  <footer class="actions">
+    <div class="readback" aria-live="polite">
+      @if (error()) {
+        <p class="action-error" role="alert">{{ error() }}</p>
+      }
+      <span>Reads as</span>
+      <p>{{ readback() }}</p>
+    </div>
+    <a class="button secondary" [routerLink]="['/tenants', tenantId, 'policies']">Cancel</a>
+    <button class="button primary" type="submit" [disabled]="submitting()">
+      {{ submitting() ? 'Creating…' : 'Create policy' }}
+    </button>
+  </footer>
+</form>

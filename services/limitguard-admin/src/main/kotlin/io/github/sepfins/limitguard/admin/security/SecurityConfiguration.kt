@@ -56,6 +56,7 @@ class SecurityConfiguration {
                         "/limitguard/admin/tenants/*/operations",
                         "/limitguard/admin/tenants/*/configurations",
                         "/limitguard/admin/tenants/*/policies",
+                        "/limitguard/admin/tenants/*/policies/new",
                     ).authenticated()
                     .anyRequest().denyAll()
             }

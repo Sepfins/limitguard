@@ -8,6 +8,7 @@ import io.github.sepfins.limitguard.api.FundingSourceCategory
 import io.github.sepfins.limitguard.api.ProductNodeType
 import io.github.sepfins.limitguard.api.commands.AddChannelGroupMemberCommand
 import io.github.sepfins.limitguard.api.commands.CreateChannelGroupCommand
+import io.github.sepfins.limitguard.api.commands.CreateLimitChangePolicyCommand
 import io.github.sepfins.limitguard.api.commands.CreateLimitConfigurationCommand
 import io.github.sepfins.limitguard.api.commands.RegisterChannelCommand
 import io.github.sepfins.limitguard.api.commands.RegisterFundingSourceProductCommand
@@ -22,6 +23,7 @@ import io.github.sepfins.limitguard.api.queries.GetTenantQuery
 import io.github.sepfins.limitguard.api.queries.ListChannelGroupsQuery
 import io.github.sepfins.limitguard.api.queries.ListChannelsQuery
 import io.github.sepfins.limitguard.api.queries.ListFundingSourceProductsQuery
+import io.github.sepfins.limitguard.api.queries.ListLimitChangePoliciesQuery
 import io.github.sepfins.limitguard.api.queries.ListLimitConfigurationsQuery
 import io.github.sepfins.limitguard.api.queries.ListOperationTypesQuery
 import io.github.sepfins.limitguard.api.queries.ListTenantsQuery
@@ -31,6 +33,7 @@ import io.github.sepfins.limitguard.api.results.ChannelGroupMemberResult
 import io.github.sepfins.limitguard.api.results.ChannelGroupResult
 import io.github.sepfins.limitguard.api.results.ChannelResult
 import io.github.sepfins.limitguard.api.results.FundingSourceProductResult
+import io.github.sepfins.limitguard.api.results.LimitChangePolicyResult
 import io.github.sepfins.limitguard.api.results.LimitConfigurationResult
 import io.github.sepfins.limitguard.api.results.OperationTypeResult
 import io.github.sepfins.limitguard.api.results.PageResult
@@ -200,6 +203,22 @@ class AdminCatalogApplicationService(
     ): LimitConfigurationResult {
         authorizer.requireTenantMutation(identity, command.tenantId)
         return limitguard.tenantCatalogService.setLimitConfigurationActive(command)
+    }
+
+    fun listLimitChangePolicies(
+        identity: AdminIdentity,
+        query: ListLimitChangePoliciesQuery,
+    ): PageResult<LimitChangePolicyResult> {
+        authorizer.requireTenantRead(identity, query.tenantId)
+        return limitguard.tenantCatalogQueryService.listLimitChangePolicies(query)
+    }
+
+    fun createLimitChangePolicy(
+        identity: AdminIdentity,
+        command: CreateLimitChangePolicyCommand,
+    ): LimitChangePolicyResult {
+        authorizer.requireTenantMutation(identity, command.tenantId)
+        return limitguard.tenantCatalogService.createLimitChangePolicy(command)
     }
 
     private fun validatePage(page: Int, size: Int) {

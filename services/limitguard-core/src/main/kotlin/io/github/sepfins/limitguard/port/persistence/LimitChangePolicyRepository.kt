@@ -4,6 +4,7 @@ import io.github.sepfins.limitguard.domain.change.LimitChangePolicy
 import io.github.sepfins.limitguard.domain.change.LimitChangePolicyCode
 import io.github.sepfins.limitguard.domain.change.LimitChangePolicyPhase
 import io.github.sepfins.limitguard.domain.common.LimitChangePolicyId
+import io.github.sepfins.limitguard.domain.common.LimitConfigurationId
 import io.github.sepfins.limitguard.domain.common.TenantId
 import java.time.Instant
 
@@ -22,6 +23,21 @@ interface LimitChangePolicyRepository {
         configurationId: LimitConfigurationId,
         at: Instant,
     ): List<LimitChangePolicy>
+
+    /** Pages every policy of the tenant, including inactive ones, ordered by priority then code. */
+    fun findPage(
+        tenantId: TenantId,
+        phase: LimitChangePolicyPhase?,
+        limitConfigurationId: LimitConfigurationId?,
+        offset: Int,
+        limit: Int,
+    ): List<LimitChangePolicy>
+    fun count(
+        tenantId: TenantId,
+        phase: LimitChangePolicyPhase?,
+        limitConfigurationId: LimitConfigurationId?,
+    ): Long
+
     fun insert(tenantId: TenantId, policy: LimitChangePolicy): LimitChangePolicy
     fun update(tenantId: TenantId, policy: LimitChangePolicy): LimitChangePolicy
 }

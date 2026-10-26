@@ -1,0 +1,182 @@
+:host {
+  display: block;
+}
+
+.back,
+h1,
+.summary,
+.form-section {
+  max-width: 1040px;
+}
+
+.back {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 10px;
+  font-size: 13px;
+  text-decoration: none;
+}
+
+.back:hover {
+  text-decoration: underline;
+}
+
+h1 {
+  margin: 0 0 4px;
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  line-height: 1.15;
+}
+
+.summary {
+  margin: 0 0 28px;
+  color: var(--text-muted);
+}
+
+.form-section {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  gap: 24px;
+  padding: 20px 0;
+  border-top: 1px solid var(--border);
+}
+
+.form-section h2 {
+  margin: 6px 0 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.fields {
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+}
+
+.two {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+}
+
+.identity {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) 110px;
+  gap: 16px;
+}
+
+.field em {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 400;
+}
+
+.field .mono {
+  font-family: var(--mono);
+}
+
+.segmented {
+  width: fit-content;
+  max-width: 100%;
+}
+
+/* The policy as a sentence rides with the submit button, so it stays in view while the rule grows. */
+.readback {
+  min-width: 0;
+  margin-right: auto;
+}
+
+.readback span {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.readback p {
+  max-width: 80ch;
+  margin: 2px 0 0;
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.45;
+  text-wrap: pretty;
+}
+
+.actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin: 0 -40px;
+  padding: 14px 40px;
+  background: var(--surface);
+  border-top: 1px solid var(--ink);
+}
+
+.action-error {
+  margin: 0 0 4px;
+  color: var(--danger);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+@media (max-width: 860px) {
+  .form-section {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .form-section h2 {
+    margin: 0;
+  }
+}
+
+@media (max-width: 760px) {
+  h1 {
+    font-size: 24px;
+  }
+
+  .two,
+  .identity {
+    grid-template-columns: 1fr;
+  }
+
+  .segmented {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .segmented button {
+    min-height: 38px;
+  }
+
+  .segmented button:nth-child(3) {
+    border-left: 0;
+  }
+
+  .segmented button:nth-child(n + 3) {
+    border-top: 1px solid var(--border-strong);
+  }
+
+  /* On a phone a sticky sentence would cover the rule, so the footer stays at the end. */
+  .actions {
+    position: static;
+    flex-wrap: wrap;
+    margin: 0 -16px;
+    padding: 12px 16px;
+  }
+
+  .readback {
+    flex-basis: 100%;
+  }
+
+  .readback p {
+    font-size: 14px;
+  }
+}

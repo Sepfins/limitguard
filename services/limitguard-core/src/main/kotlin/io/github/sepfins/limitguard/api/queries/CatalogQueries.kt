@@ -1,5 +1,6 @@
 package io.github.sepfins.limitguard.api.queries
 
+import io.github.sepfins.limitguard.api.LimitChangePolicyPhase
 import java.util.UUID
 
 data class GetTenantQuery(
@@ -55,6 +56,14 @@ data class ListLimitConfigurationsQuery(
     val search: String? = null,
     val active: Boolean? = null,
     val parentConfigurationId: UUID? = null,
+    val page: Int = 0,
+    val size: Int = DEFAULT_CATALOG_PAGE_SIZE,
+)
+
+data class ListLimitChangePoliciesQuery(
+    val tenantId: UUID,
+    val phase: LimitChangePolicyPhase? = null,
+    val limitConfigurationId: UUID? = null,
     val page: Int = 0,
     val size: Int = DEFAULT_CATALOG_PAGE_SIZE,
 )

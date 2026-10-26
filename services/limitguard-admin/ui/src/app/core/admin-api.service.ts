@@ -6,10 +6,12 @@ import {
   ChannelGroup,
   CodeNameRequest,
   CreateFundingSourceProductRequest,
+  CreateLimitChangePolicyRequest,
   CreateLimitConfigurationRequest,
   CreateOperationTypeRequest,
   CreateTenantRequest,
   FundingSourceProduct,
+  LimitChangePolicy,
   LimitConfiguration,
   MeResponse,
   OperationType,
@@ -174,5 +176,22 @@ export class AdminApiService {
       `${this.baseUrl}/tenants/${tenantId}/limit-configurations/${configurationId}/active`,
       { isActive }
     );
+  }
+
+  listLimitChangePolicies(
+    tenantId: string,
+    limitConfigurationId: string | null,
+    page: number,
+    size = 25
+  ): Observable<PageResponse<LimitChangePolicy>> {
+    let params = new HttpParams().set('page', page).set('size', size);
+    if (limitConfigurationId) params = params.set('limitConfigurationId', limitConfigurationId);
+    return this.http.get<PageResponse<LimitChangePolicy>>(`${this.baseUrl}/tenants/${tenantId}/limit-change-policies`, {
+      params
+    });
+  }
+
+  createLimitChangePolicy(tenantId: string, request: CreateLimitChangePolicyRequest): Observable<LimitChangePolicy> {
+    return this.http.post<LimitChangePolicy>(`${this.baseUrl}/tenants/${tenantId}/limit-change-policies`, request);
   }
 }

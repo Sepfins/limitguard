@@ -162,6 +162,45 @@ export interface UpdateLimitConfigurationRequest {
   defaultAmount: string | null;
 }
 
+export type LimitChangePolicyPhase = 'AUTHORIZATION';
+export type LimitChangePolicyDecision = 'ALLOW' | 'DENY' | 'REQUIRE_APPROVAL' | 'NO_OP';
+
+// Condition and actions are JSON Logic values stored as the core received them.
+export interface LimitChangePolicy {
+  id: string;
+  code: string;
+  name: string;
+  description: string | null;
+  phase: LimitChangePolicyPhase;
+  decision: LimitChangePolicyDecision;
+  limitConfigurationId: string | null;
+  priority: number;
+  isActive: boolean;
+  conditionExpression: Record<string, unknown>;
+  actionExpression: Record<string, unknown>[];
+  denialCode: string | null;
+  denialMessage: string | null;
+  startsAt: string;
+  endsAt: string | null;
+  createdAt: string;
+}
+
+export interface CreateLimitChangePolicyRequest {
+  code: string;
+  name: string;
+  description: string | null;
+  phase: LimitChangePolicyPhase;
+  decision: LimitChangePolicyDecision;
+  limitConfigurationId: string | null;
+  priority: number;
+  conditionExpression: unknown;
+  actionExpression: unknown;
+  denialCode: string | null;
+  denialMessage: string | null;
+  startsAt: string | null;
+  endsAt: string | null;
+}
+
 export interface CodeNameRequest {
   code: string;
   name: string;

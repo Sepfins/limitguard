@@ -13,7 +13,15 @@ import {
   LimitUsageConsumptionMode
 } from '../core/admin-api.models';
 import { AdminApiService } from '../core/admin-api.service';
-import { amountLabel, ConfigurationCatalog, decimalAmount, emptyCatalog, kindLabel, scopeSummary } from './configuration-catalog';
+import {
+  amountLabel,
+  ConfigurationCatalog,
+  decimalAmount,
+  emptyCatalog,
+  isoOrNull,
+  kindLabel,
+  scopeSummary
+} from './configuration-catalog';
 
 const categories: FundingSourceCategory[] = [
   'TRANSACTIONAL',
@@ -24,10 +32,6 @@ const categories: FundingSourceCategory[] = [
   'SECURITIES',
   'EWALLET'
 ];
-
-function isoOrNull(localDateTime: string): string | null {
-  return localDateTime ? new Date(localDateTime).toISOString() : null;
-}
 
 @Component({
   selector: 'app-create-limit-configuration-dialog',
