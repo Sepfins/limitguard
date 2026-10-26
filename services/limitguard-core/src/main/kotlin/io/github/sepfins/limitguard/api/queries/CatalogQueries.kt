@@ -50,6 +50,15 @@ data class ListOperationTypesQuery(
     val size: Int = DEFAULT_CATALOG_PAGE_SIZE,
 )
 
+data class ListLimitConfigurationsQuery(
+    val tenantId: UUID,
+    val search: String? = null,
+    val active: Boolean? = null,
+    val parentConfigurationId: UUID? = null,
+    val page: Int = 0,
+    val size: Int = DEFAULT_CATALOG_PAGE_SIZE,
+)
+
 const val DEFAULT_CATALOG_PAGE_SIZE: Int = 25
 const val MAX_CATALOG_PAGE_SIZE: Int = 100
 const val MAX_CATALOG_SEARCH_LENGTH: Int = 100

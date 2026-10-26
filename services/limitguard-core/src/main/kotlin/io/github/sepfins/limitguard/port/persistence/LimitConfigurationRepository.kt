@@ -22,6 +22,18 @@ interface LimitConfigurationRepository {
 
     /** Includes disabled configurations and every effective window. */
     fun findAll(tenantId: TenantId): List<LimitConfiguration>
+
+    /** Pages every configuration of the tenant, including disabled ones, ordered by code. */
+    fun findPage(
+        tenantId: TenantId,
+        search: String?,
+        active: Boolean?,
+        parentId: LimitConfigurationId?,
+        offset: Int,
+        limit: Int,
+    ): List<LimitConfiguration>
+    fun count(tenantId: TenantId, search: String?, active: Boolean?, parentId: LimitConfigurationId?): Long
+
     fun findAllActive(tenantId: TenantId, at: Instant): List<LimitConfiguration>
     fun findActiveByChannelScope(tenantId: TenantId, scope: LimitChannelScope, at: Instant): List<LimitConfiguration>
     fun findActiveByLimitKind(tenantId: TenantId, kind: LimitKind, at: Instant): List<LimitConfiguration>

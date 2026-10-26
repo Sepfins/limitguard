@@ -6,6 +6,7 @@ import io.github.sepfins.limitguard.api.errors.ValidationException
 import io.github.sepfins.limitguard.api.queries.ListChannelGroupsQuery
 import io.github.sepfins.limitguard.api.queries.ListChannelsQuery
 import io.github.sepfins.limitguard.api.queries.ListFundingSourceProductsQuery
+import io.github.sepfins.limitguard.api.queries.ListLimitConfigurationsQuery
 import io.github.sepfins.limitguard.api.queries.ListOperationTypesQuery
 import io.github.sepfins.limitguard.api.queries.ListTenantsQuery
 import io.github.sepfins.limitguard.api.queries.GetTenantQuery
@@ -16,9 +17,11 @@ import io.github.sepfins.limitguard.api.results.ChannelGroupResult
 import io.github.sepfins.limitguard.api.results.ChannelResult
 import io.github.sepfins.limitguard.api.results.EntityIdentifierResult
 import io.github.sepfins.limitguard.api.results.FundingSourceProductResult
+import io.github.sepfins.limitguard.api.results.LimitConfigurationResult
 import io.github.sepfins.limitguard.api.results.OperationTypeResult
 import io.github.sepfins.limitguard.api.results.PageResult
 import io.github.sepfins.limitguard.api.results.TenantResult
+import io.github.sepfins.limitguard.domain.common.LimitConfigurationId
 import io.github.sepfins.limitguard.domain.common.TenantId
 import io.github.sepfins.limitguard.domain.identifier.EntityType
 import io.github.sepfins.limitguard.domain.identifier.IdentifierValue
@@ -29,6 +32,7 @@ import io.github.sepfins.limitguard.port.persistence.ChannelRepository
 import io.github.sepfins.limitguard.port.persistence.EntityIdentifierRepository
 import io.github.sepfins.limitguard.port.persistence.FundingSourceProductRepository
 import io.github.sepfins.limitguard.port.persistence.IdentifierSchemeRepository
+import io.github.sepfins.limitguard.port.persistence.LimitConfigurationRepository
 import io.github.sepfins.limitguard.port.persistence.OperationTypeRepository
 import io.github.sepfins.limitguard.port.persistence.TenantRepository
 import io.github.sepfins.limitguard.port.transactions.TransactionRunner
@@ -43,6 +47,7 @@ class DefaultTenantCatalogQueryService(
     private val channelGroupRepository: ChannelGroupRepository,
     private val channelGroupMemberRepository: ChannelGroupMemberRepository,
     private val operationTypeRepository: OperationTypeRepository,
+    private val limitConfigurationRepository: LimitConfigurationRepository,
     private val transactionRunner: TransactionRunner,
 ) : TenantCatalogQueryService {
     override fun getTenant(query: GetTenantQuery): TenantResult = mapValidation {
@@ -124,6 +129,23 @@ class DefaultTenantCatalogQueryService(
             val total = operationTypeRepository.count(tenantId, search, query.leaf)
             val operations = operationTypeRepository.findPage(tenantId, search, query.leaf, page.offset, page.size)
             operations.map { it.toResult() } to total
+        }
+
+    override fun listLimitConfigurations(
+        query: ListLimitConfigurationsQuery,
+    ): PageResult<LimitConfigurationResult> =
+        tenantPage(query.tenantId, query.page, query.size, query.search) { tenantId, search, page ->
+            val parentId = query.parentConfigurationId?.let { LimitConfigurationId.of(it) }
+            val total = limitConfigurationRepository.count(tenantId, search, query.active, parentId)
+            val configurations = limitConfigurationRepository.findPage(
+                tenantId = tenantId,
+                search = search,
+                active = query.active,
+                parentId = parentId,
+                offset = page.offset,
+                limit = page.size,
+            )
+            configurations.map { it.toResult() } to total
         }
 
     private fun <T> tenantPage(

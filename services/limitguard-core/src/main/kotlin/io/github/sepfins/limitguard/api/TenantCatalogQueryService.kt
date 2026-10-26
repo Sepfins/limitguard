@@ -3,6 +3,7 @@ package io.github.sepfins.limitguard.api
 import io.github.sepfins.limitguard.api.queries.ListChannelGroupsQuery
 import io.github.sepfins.limitguard.api.queries.ListChannelsQuery
 import io.github.sepfins.limitguard.api.queries.ListFundingSourceProductsQuery
+import io.github.sepfins.limitguard.api.queries.ListLimitConfigurationsQuery
 import io.github.sepfins.limitguard.api.queries.ListOperationTypesQuery
 import io.github.sepfins.limitguard.api.queries.ListTenantsQuery
 import io.github.sepfins.limitguard.api.queries.GetTenantQuery
@@ -11,6 +12,7 @@ import io.github.sepfins.limitguard.api.results.ChannelGroupResult
 import io.github.sepfins.limitguard.api.results.ChannelResult
 import io.github.sepfins.limitguard.api.results.EntityIdentifierResult
 import io.github.sepfins.limitguard.api.results.FundingSourceProductResult
+import io.github.sepfins.limitguard.api.results.LimitConfigurationResult
 import io.github.sepfins.limitguard.api.results.OperationTypeResult
 import io.github.sepfins.limitguard.api.results.PageResult
 import io.github.sepfins.limitguard.api.results.TenantResult
@@ -36,4 +38,7 @@ interface TenantCatalogQueryService {
      * each parent before its children, siblings by code.
      */
     fun listOperationTypes(query: ListOperationTypesQuery): PageResult<OperationTypeResult>
+
+    /** Includes disabled configurations and every effective window, ordered by code. */
+    fun listLimitConfigurations(query: ListLimitConfigurationsQuery): PageResult<LimitConfigurationResult>
 }

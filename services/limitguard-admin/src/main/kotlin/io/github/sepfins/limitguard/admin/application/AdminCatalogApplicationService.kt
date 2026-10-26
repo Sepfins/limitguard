@@ -8,17 +8,21 @@ import io.github.sepfins.limitguard.api.FundingSourceCategory
 import io.github.sepfins.limitguard.api.ProductNodeType
 import io.github.sepfins.limitguard.api.commands.AddChannelGroupMemberCommand
 import io.github.sepfins.limitguard.api.commands.CreateChannelGroupCommand
+import io.github.sepfins.limitguard.api.commands.CreateLimitConfigurationCommand
 import io.github.sepfins.limitguard.api.commands.RegisterChannelCommand
 import io.github.sepfins.limitguard.api.commands.RegisterFundingSourceProductCommand
 import io.github.sepfins.limitguard.api.commands.RegisterOperationTypeCommand
 import io.github.sepfins.limitguard.api.commands.RegisterTenantCommand
 import io.github.sepfins.limitguard.api.commands.SetChannelActiveCommand
+import io.github.sepfins.limitguard.api.commands.SetLimitConfigurationActiveCommand
+import io.github.sepfins.limitguard.api.commands.UpdateLimitConfigurationCommand
 import io.github.sepfins.limitguard.api.errors.NotFoundException
 import io.github.sepfins.limitguard.api.errors.ValidationException
 import io.github.sepfins.limitguard.api.queries.GetTenantQuery
 import io.github.sepfins.limitguard.api.queries.ListChannelGroupsQuery
 import io.github.sepfins.limitguard.api.queries.ListChannelsQuery
 import io.github.sepfins.limitguard.api.queries.ListFundingSourceProductsQuery
+import io.github.sepfins.limitguard.api.queries.ListLimitConfigurationsQuery
 import io.github.sepfins.limitguard.api.queries.ListOperationTypesQuery
 import io.github.sepfins.limitguard.api.queries.ListTenantsQuery
 import io.github.sepfins.limitguard.api.queries.MAX_CATALOG_PAGE_SIZE
@@ -27,6 +31,7 @@ import io.github.sepfins.limitguard.api.results.ChannelGroupMemberResult
 import io.github.sepfins.limitguard.api.results.ChannelGroupResult
 import io.github.sepfins.limitguard.api.results.ChannelResult
 import io.github.sepfins.limitguard.api.results.FundingSourceProductResult
+import io.github.sepfins.limitguard.api.results.LimitConfigurationResult
 import io.github.sepfins.limitguard.api.results.OperationTypeResult
 import io.github.sepfins.limitguard.api.results.PageResult
 import io.github.sepfins.limitguard.api.results.TenantResult
@@ -163,6 +168,38 @@ class AdminCatalogApplicationService(
         authorizer.requireTenantMutation(identity, command.tenantId)
         if (command.isGlobal) authorizer.requireTenantCreation(identity)
         return limitguard.tenantCatalogService.registerOperationType(command)
+    }
+
+    fun listLimitConfigurations(
+        identity: AdminIdentity,
+        query: ListLimitConfigurationsQuery,
+    ): PageResult<LimitConfigurationResult> {
+        authorizer.requireTenantRead(identity, query.tenantId)
+        return limitguard.tenantCatalogQueryService.listLimitConfigurations(query)
+    }
+
+    fun createLimitConfiguration(
+        identity: AdminIdentity,
+        command: CreateLimitConfigurationCommand,
+    ): LimitConfigurationResult {
+        authorizer.requireTenantMutation(identity, command.tenantId)
+        return limitguard.tenantCatalogService.createLimitConfiguration(command)
+    }
+
+    fun updateLimitConfiguration(
+        identity: AdminIdentity,
+        command: UpdateLimitConfigurationCommand,
+    ): LimitConfigurationResult {
+        authorizer.requireTenantMutation(identity, command.tenantId)
+        return limitguard.tenantCatalogService.updateLimitConfiguration(command)
+    }
+
+    fun setLimitConfigurationActive(
+        identity: AdminIdentity,
+        command: SetLimitConfigurationActiveCommand,
+    ): LimitConfigurationResult {
+        authorizer.requireTenantMutation(identity, command.tenantId)
+        return limitguard.tenantCatalogService.setLimitConfigurationActive(command)
     }
 
     private fun validatePage(page: Int, size: Int) {

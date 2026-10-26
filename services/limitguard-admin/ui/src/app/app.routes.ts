@@ -31,15 +31,17 @@ export const routes: Routes = [
             loadComponent: () =>
               import('./operations/operation-type-list-page').then((m) => m.OperationTypeListPage)
           },
-          ...[
-            { path: 'configurations', title: 'Limit configurations' },
-            { path: 'policies', title: 'Limit-change policies' }
-          ].map(({ path, title }) => ({
-            path,
-            data: { title },
+          {
+            path: 'configurations',
+            loadComponent: () =>
+              import('./configurations/limit-configuration-list-page').then((m) => m.LimitConfigurationListPage)
+          },
+          {
+            path: 'policies',
+            data: { title: 'Limit-change policies' },
             loadComponent: () =>
               import('./tenants/tenant-area-placeholder').then((m) => m.TenantAreaPlaceholder)
-          }))
+          }
         ]
       }
     ]

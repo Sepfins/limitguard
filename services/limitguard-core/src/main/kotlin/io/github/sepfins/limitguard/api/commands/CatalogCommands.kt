@@ -242,14 +242,17 @@ data class CreateLimitConfigurationCommand(
     val metadata: Map<String, Any?> = emptyMap(),
 )
 
-/** Updates descriptive/defaulting fields; scope, currency, and caps remain stable. */
+/**
+ * Updates descriptive/defaulting fields; scope, currency, and caps remain stable.
+ * A null metadata keeps the current metadata.
+ */
 data class UpdateLimitConfigurationCommand(
     val tenantId: UUID,
     val limitConfigurationId: UUID,
     val name: String,
     val description: String?,
     val defaultAmount: BigDecimal?,
-    val metadata: Map<String, Any?>,
+    val metadata: Map<String, Any?>? = null,
 )
 
 data class SetLimitConfigurationActiveCommand(

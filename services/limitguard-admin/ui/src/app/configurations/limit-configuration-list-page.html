@@ -1,0 +1,134 @@
+<section class="page-heading">
+  <div>
+    <h1>Limit configurations</h1>
+    <p class="page-summary">{{ configurations().totalElements }} {{ configurations().totalElements === 1 ? 'configuration' : 'configurations' }}</p>
+  </div>
+  @if (auth.canManageTenant(tenantId)) {
+    <button class="button primary" type="button" (click)="createDialog.open()">
+      <lucide-icon name="plus" [size]="17" />
+      Create configuration
+    </button>
+  }
+</section>
+
+<section class="data-section" aria-labelledby="configuration-table-title">
+  <div class="table-toolbar">
+    <h2 id="configuration-table-title">Configurations</h2>
+    <div class="toolbar-controls">
+      <div class="segmented" aria-label="Filter by active status">
+        <button type="button" [class.selected]="activeFilter() === 'all'" (click)="setActiveFilter('all')">All</button>
+        <button type="button" [class.selected]="activeFilter() === 'active'" (click)="setActiveFilter('active')">Active</button>
+        <button type="button" [class.selected]="activeFilter() === 'inactive'" (click)="setActiveFilter('inactive')">Inactive</button>
+      </div>
+      <label class="field">
+        <span class="sr-only">Filter by parent configuration</span>
+        <select [formControl]="parentFilter">
+          <option value="">Any parent</option>
+          @for (parent of catalog().configurations; track parent.id) {
+            <option [value]="parent.id">Children of {{ parent.code }}</option>
+          }
+        </select>
+      </label>
+      <label class="search-control">
+        <lucide-icon name="search" [size]="17" />
+        <span class="sr-only">Search limit configurations</span>
+        <input [formControl]="search" type="search" placeholder="Search code or name" maxlength="100" />
+      </label>
+    </div>
+  </div>
+
+  @if (loading()) {
+    <div class="state-block" aria-live="polite">
+      <span class="spinner"></span>
+      <strong>Loading limit configurations</strong>
+    </div>
+  } @else if (error()) {
+    <div class="state-block error-state" role="alert">
+      <strong>{{ error() }}</strong>
+      <button class="button secondary" type="button" (click)="load()">
+        <lucide-icon name="refresh-cw" [size]="16" />
+        Retry
+      </button>
+    </div>
+  } @else if (configurations().items.length === 0) {
+    <div class="state-block">
+      <app-guilloche class="state-rosette" variant="rosette" [seed]="tenantId" />
+      <strong>{{ search.value || parentFilter.value || activeFilter() !== 'all' ? 'No configurations match your filters' : 'No limit configurations created' }}</strong>
+    </div>
+  } @else {
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">Code and name</th>
+            <th scope="col">Id</th>
+            <th scope="col">Kind</th>
+            <th scope="col">Scope</th>
+            <th scope="col">Maximum assignable</th>
+            <th scope="col">Default</th>
+            <th scope="col">Priority</th>
+            <th scope="col">Usage</th>
+            <th scope="col">Status</th>
+            @if (auth.canManageTenant(tenantId)) {
+              <th scope="col"><span class="sr-only">Actions</span></th>
+            }
+          </tr>
+        </thead>
+        <tbody>
+          @for (configuration of configurations().items; track configuration.id) {
+            <tr>
+              <td data-label="Configuration">
+                <div class="code-cell">
+                  <code>{{ configuration.code }}</code>
+                  <strong>{{ configuration.name }}</strong>
+                </div>
+              </td>
+              <td data-label="Id"><app-copy-id [id]="configuration.id" /></td>
+              <td data-label="Kind">{{ kindLabel(configuration) }}</td>
+              <td data-label="Scope">{{ scopeSummary(configuration, catalog()) }}</td>
+              <td data-label="Maximum assignable">{{ amountLabel(configuration) }} {{ configuration.currency }}</td>
+              <td data-label="Default">{{ configuration.defaultAmount ?? '-' }}</td>
+              <td data-label="Priority">{{ configuration.priority }}</td>
+              <td data-label="Usage">{{ configuration.usageConsumptionMode === 'ISOLATED' ? 'Isolated' : 'Cascading' }}</td>
+              <td data-label="Status">
+                <span class="status" [class.active]="configuration.isActive" [class.inactive]="!configuration.isActive">
+                  {{ configuration.isActive ? 'Active' : 'Inactive' }}
+                </span>
+              </td>
+              @if (auth.canManageTenant(tenantId)) {
+                <td data-label="Actions">
+                  <button class="button secondary compact" type="button" (click)="editDialog.open(configuration)">Edit</button>
+                  <button class="button secondary compact" type="button" (click)="toggleActive(configuration)">
+                    {{ configuration.isActive ? 'Deactivate' : 'Reactivate' }}
+                  </button>
+                </td>
+              }
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+
+    <footer class="pagination">
+      <span>Page {{ configurations().page + 1 }} of {{ configurations().totalPages }}</span>
+      <div>
+        <button class="icon-button bordered" type="button" title="Previous page" aria-label="Previous page"
+          [disabled]="configurations().page === 0" (click)="load(configurations().page - 1)">
+          <lucide-icon name="chevron-left" [size]="18" />
+        </button>
+        <button class="icon-button bordered" type="button" title="Next page" aria-label="Next page"
+          [disabled]="configurations().page + 1 >= configurations().totalPages" (click)="load(configurations().page + 1)">
+          <lucide-icon name="chevron-right" [size]="18" />
+        </button>
+      </div>
+    </footer>
+  }
+</section>
+
+<app-create-limit-configuration-dialog
+  #createDialog
+  [tenantId]="tenantId"
+  [catalog]="catalog()"
+  (created)="created()"
+/>
+<app-edit-limit-configuration-dialog #editDialog [tenantId]="tenantId" (saved)="changed()" />

@@ -98,6 +98,70 @@ export interface CreateOperationTypeRequest {
   isGlobal: boolean;
 }
 
+export type LimitKind = 'PER_TRANSACTION' | 'PERIODIC';
+export type LimitPeriod = 'DAILY' | 'MONTHLY';
+export type LimitConfigurationFundingScope = 'ALL_FUNDING_SOURCES' | 'FUNDING_SOURCE_CATEGORY' | 'FUNDING_SOURCE_PRODUCT';
+export type LimitChannelScope = 'ALL_CHANNELS' | 'CHANNEL' | 'CHANNEL_GROUP';
+export type LimitUsageConsumptionMode = 'CASCADING' | 'ISOLATED';
+
+// Amounts are decimal strings; an unlimited maximum has no amount.
+export interface LimitConfiguration {
+  id: string;
+  parentConfigurationId: string | null;
+  code: string;
+  name: string;
+  description: string | null;
+  limitKind: LimitKind;
+  period: LimitPeriod | null;
+  currency: string;
+  fundingScope: LimitConfigurationFundingScope;
+  fundingSourceCategory: FundingSourceCategory | null;
+  fundingSourceProductId: string | null;
+  channelScope: LimitChannelScope;
+  channelId: string | null;
+  channelGroupId: string | null;
+  operationTypeId: string | null;
+  maxAssignableAmount: string | null;
+  maxAssignableUnlimited: boolean;
+  defaultAmount: string | null;
+  priority: number;
+  usageConsumptionMode: LimitUsageConsumptionMode;
+  isActive: boolean;
+  startsAt: string;
+  endsAt: string | null;
+  createdAt: string;
+}
+
+export interface CreateLimitConfigurationRequest {
+  code: string;
+  name: string;
+  description: string | null;
+  limitKind: LimitKind;
+  period: LimitPeriod | null;
+  currency: string;
+  maxAssignableAmount: string | null;
+  maxAssignableUnlimited: boolean;
+  defaultAmount: string | null;
+  parentConfigurationId: string | null;
+  fundingScope: LimitConfigurationFundingScope;
+  fundingSourceCategory: FundingSourceCategory | null;
+  fundingSourceProductId: string | null;
+  channelScope: LimitChannelScope;
+  channelId: string | null;
+  channelGroupId: string | null;
+  operationTypeId: string | null;
+  priority: number;
+  usageConsumptionMode: LimitUsageConsumptionMode;
+  startsAt: string | null;
+  endsAt: string | null;
+}
+
+export interface UpdateLimitConfigurationRequest {
+  name: string;
+  description: string | null;
+  defaultAmount: string | null;
+}
+
 export interface CodeNameRequest {
   code: string;
   name: string;

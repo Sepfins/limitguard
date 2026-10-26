@@ -6,13 +6,16 @@ import {
   ChannelGroup,
   CodeNameRequest,
   CreateFundingSourceProductRequest,
+  CreateLimitConfigurationRequest,
   CreateOperationTypeRequest,
   CreateTenantRequest,
   FundingSourceProduct,
+  LimitConfiguration,
   MeResponse,
   OperationType,
   PageResponse,
-  Tenant
+  Tenant,
+  UpdateLimitConfigurationRequest
 } from './admin-api.models';
 
 @Injectable({ providedIn: 'root' })
@@ -124,5 +127,52 @@ export class AdminApiService {
 
   registerOperationType(tenantId: string, request: CreateOperationTypeRequest): Observable<OperationType> {
     return this.http.post<OperationType>(`${this.baseUrl}/tenants/${tenantId}/operation-types`, request);
+  }
+
+  listLimitConfigurations(
+    tenantId: string,
+    search: string,
+    active: boolean | null,
+    parentConfigurationId: string | null,
+    page: number,
+    size = 25
+  ): Observable<PageResponse<LimitConfiguration>> {
+    let params = new HttpParams().set('page', page).set('size', size);
+    if (search.trim()) params = params.set('search', search.trim());
+    if (active !== null) params = params.set('active', active);
+    if (parentConfigurationId) params = params.set('parentConfigurationId', parentConfigurationId);
+    return this.http.get<PageResponse<LimitConfiguration>>(
+      `${this.baseUrl}/tenants/${tenantId}/limit-configurations`,
+      { params }
+    );
+  }
+
+  createLimitConfiguration(
+    tenantId: string,
+    request: CreateLimitConfigurationRequest
+  ): Observable<LimitConfiguration> {
+    return this.http.post<LimitConfiguration>(`${this.baseUrl}/tenants/${tenantId}/limit-configurations`, request);
+  }
+
+  updateLimitConfiguration(
+    tenantId: string,
+    configurationId: string,
+    request: UpdateLimitConfigurationRequest
+  ): Observable<LimitConfiguration> {
+    return this.http.put<LimitConfiguration>(
+      `${this.baseUrl}/tenants/${tenantId}/limit-configurations/${configurationId}`,
+      request
+    );
+  }
+
+  setLimitConfigurationActive(
+    tenantId: string,
+    configurationId: string,
+    isActive: boolean
+  ): Observable<LimitConfiguration> {
+    return this.http.put<LimitConfiguration>(
+      `${this.baseUrl}/tenants/${tenantId}/limit-configurations/${configurationId}/active`,
+      { isActive }
+    );
   }
 }

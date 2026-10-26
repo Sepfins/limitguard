@@ -903,7 +903,7 @@ class DefaultTenantCatalogService(
                 defaultAmount = command.defaultAmount?.let {
                     Money.of(it, configuration.currency)
                 },
-                metadata = Metadata(command.metadata),
+                metadata = command.metadata?.let { Metadata(it) } ?: configuration.metadata,
                 updatedAt = clockProvider.now(),
             )
             fundingEnvelopes.validateHierarchy(updated)

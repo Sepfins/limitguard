@@ -23,6 +23,7 @@ import io.github.sepfins.limitguard.domain.limit.LimitOperationScope
 import io.github.sepfins.limitguard.domain.limit.LimitPeriod
 import io.github.sepfins.limitguard.domain.limit.LimitPriority
 import io.github.sepfins.limitguard.infrastructure.jooq.JooqPersistenceContext
+import io.github.sepfins.limitguard.infrastructure.jooq.containsIgnoreCaseLiteral
 import io.github.sepfins.limitguard.infrastructure.jooq.jooqOperation
 import io.github.sepfins.limitguard.infrastructure.jooq.storedAmount
 import io.github.sepfins.limitguard.infrastructure.jooq.storedLimitAmount
@@ -67,6 +68,37 @@ class JooqLimitConfigurationRepository(
                 .orderBy(table.CODE, table.ID)
                 .fetch { it.toDomain() }
         }
+
+    override fun findPage(
+        tenantId: TenantId,
+        search: String?,
+        active: Boolean?,
+        parentId: LimitConfigurationId?,
+        offset: Int,
+        limit: Int,
+    ): List<LimitConfiguration> = jooqOperation("list limit configurations") {
+        selectConfigurations()
+            .where(pageFilter(tenantId, search, active, parentId))
+            .orderBy(table.CODE, table.ID)
+            .offset(offset)
+            .limit(limit)
+            .fetch { it.toDomain() }
+    }
+
+    override fun count(
+        tenantId: TenantId,
+        search: String?,
+        active: Boolean?,
+        parentId: LimitConfigurationId?,
+    ): Long = jooqOperation("count limit configurations") {
+        requireNotNull(
+            context.dsl()
+                .select(DSL.count())
+                .from(table)
+                .where(pageFilter(tenantId, search, active, parentId))
+                .fetchOne(0, Long::class.java),
+        )
+    }
 
     override fun findAllActive(tenantId: TenantId, at: Instant): List<LimitConfiguration> =
         findActive(tenantId, at, DSL.trueCondition(), "find active limit configurations")
@@ -249,6 +281,25 @@ class JooqLimitConfigurationRepository(
                 .returning(table.fields().toList())
                 .fetchOne()
         ) { "limit configuration not found: ${limitConfiguration.id.value}" }.toDomain()
+    }
+
+    private fun pageFilter(
+        tenantId: TenantId,
+        search: String?,
+        active: Boolean?,
+        parentId: LimitConfigurationId?,
+    ): Condition {
+        var condition: Condition = table.TENANT_ID.eq(tenantId.value)
+        if (search != null) {
+            condition = condition.and(table.CODE.containsIgnoreCaseLiteral(search).or(table.NAME.containsIgnoreCaseLiteral(search)))
+        }
+        if (active != null) {
+            condition = condition.and(table.IS_ACTIVE.eq(active))
+        }
+        if (parentId != null) {
+            condition = condition.and(table.PARENT_CONFIGURATION_ID.eq(parentId.value))
+        }
+        return condition
     }
 
     private fun findActive(
