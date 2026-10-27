@@ -80,30 +80,43 @@ invalidation so Customer Banking refetches authoritative state.
 
 ## Run
 
-From the repository root, with Java 25 and Docker available:
+The demo deploys with its own `compose.yaml`: PostgreSQL, the demo service, Keycloak, and
+LimitGuard Admin over the same database, all published on `127.0.0.1` only. With Java 25 and
+Docker available, build both JARs and start the stack from this directory:
 
 ```bash
-docker compose up -d --wait postgres
-cd services/demo-service
-SERVER_ADDRESS=127.0.0.1 ./gradlew bootRun
+./gradlew bootJar
+../limitguard-admin/gradlew -p ../limitguard-admin bootJar
+docker compose up -d --build --wait
 ```
 
 Open [Customer Banking](http://localhost:8081/limitguard/demo) and
 [Payment Lab](http://localhost:8081/limitguard/payments) in separate tabs. Authorize a payment
 in Payment Lab and keep Customer Banking on Activity to see it appear without reloading.
 Authorization reserves limit capacity, capture consumes it, release restores a hold, and
-reversal restores captured capacity. `./gradlew bootJar` builds one runnable JAR with both
-Angular applications and all migrations inside.
+reversal restores captured capacity. Each JAR holds its Angular application and all
+migrations; the images only run them, because building `limitguard-core` needs the jOOQ
+bindings generated on the host.
 
-The demo uses the `limitguard_demo` schema of the local `limitguard` database. Core
-migrations run first, then the demo's own. `LIMITGUARD_DEMO_DB_URL`, `POSTGRES_USER`,
-`POSTGRES_PASSWORD`, and `LIMITGUARD_DEMO_PORT` override the defaults. To return to the
-seeded scenario, stop the demo, drop the schema, and start it again:
+[LimitGuard Admin](http://localhost:8080/limitguard/admin) shows the Wrenfield tenant the
+demo seeded, including its limit-change policies. Sign in as `platform-admin` with the
+password `limitguard`. Keycloak listens on port `8280` so it can run next to the root
+stack's; Admin shares Keycloak's network namespace, so the browser and Admin reach the same
+`localhost:8280` issuer.
+
+The demo uses the `limitguard_demo` schema of the stack's `limitguard` database, reachable
+from the host on port `5433`. Core migrations run first, then the demo's own.
+`LIMITGUARD_DEMO_PORT`, `DEMO_POSTGRES_PORT`, `POSTGRES_USER`, and `POSTGRES_PASSWORD`
+override the defaults. To return to the seeded scenario, remove the stack with its volumes and
+start it again:
 
 ```bash
-docker compose exec -T postgres psql -U limitguard -d limitguard -c \
-  'DROP SCHEMA IF EXISTS limitguard_demo CASCADE;'
+docker compose down -v
+docker compose up -d --wait
 ```
+
+For development, `./gradlew bootRun` runs the demo against any PostgreSQL named by
+`LIMITGUARD_DEMO_DB_URL`.
 
 `./gradlew test` builds and tests both Angular applications and runs the backend tests,
 including a journey against a PostgreSQL Testcontainer. With the demo running,

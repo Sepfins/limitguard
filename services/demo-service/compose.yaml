@@ -1,0 +1,114 @@
+name: limitguard-demo
+
+services:
+  postgres:
+    image: postgres:18
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: limitguard
+      POSTGRES_USER: ${POSTGRES_USER:-limitguard}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-limitguard}
+      PGDATA: /var/lib/postgresql/18/docker
+    ports:
+      - "127.0.0.1:${DEMO_POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\"",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  demo:
+    build: .
+    image: limitguard-demo-service:local
+    restart: unless-stopped
+    environment:
+      LIMITGUARD_DEMO_DB_URL: jdbc:postgresql://postgres:5432/limitguard?currentSchema=limitguard_demo
+      POSTGRES_USER: ${POSTGRES_USER:-limitguard}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-limitguard}
+    ports:
+      - "127.0.0.1:${LIMITGUARD_DEMO_PORT:-8081}:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "bash",
+          "-c",
+          "exec 3<>/dev/tcp/127.0.0.1/8081 && printf 'GET /actuator/health/readiness HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q '\"UP\"' <&3",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 20s
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.7.0
+    restart: unless-stopped
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-limitguard}
+      KC_HTTP_PORT: 8280
+      KC_HEALTH_ENABLED: true
+      LIMITGUARD_ADMIN_CLIENT_SECRET: ${LIMITGUARD_ADMIN_CLIENT_SECRET:-limitguard-admin-local-secret}
+      LIMITGUARD_ADMIN_DEV_PASSWORD: ${LIMITGUARD_ADMIN_DEV_PASSWORD:-limitguard}
+    # Admin shares this network namespace, so its ports are published here.
+    ports:
+      - "127.0.0.1:8280:8280"
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - keycloak_data:/opt/keycloak/data
+      - ../../infra/keycloak:/opt/keycloak/data/import:ro
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q '200 OK' <&3",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 35s
+
+  admin:
+    build: ../limitguard-admin
+    image: limitguard-admin:local
+    restart: unless-stopped
+    # The browser and Admin both reach Keycloak at localhost:8280, so the token issuer matches.
+    network_mode: service:keycloak
+    environment:
+      LIMITGUARD_DB_URL: jdbc:postgresql://postgres:5432/limitguard?currentSchema=limitguard_demo
+      POSTGRES_USER: ${POSTGRES_USER:-limitguard}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-limitguard}
+      LIMITGUARD_OIDC_ISSUER: http://localhost:8280/realms/limitguard
+      LIMITGUARD_ADMIN_CLIENT_SECRET: ${LIMITGUARD_ADMIN_CLIENT_SECRET:-limitguard-admin-local-secret}
+    depends_on:
+      keycloak:
+        condition: service_healthy
+      demo:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "bash",
+          "-c",
+          "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /actuator/health/readiness HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q '\"UP\"' <&3",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 20s
+
+volumes:
+  postgres_data:
+  keycloak_data:

@@ -124,18 +124,22 @@ and no cache.
 
 The demo is a fictional household banking journey on port `8081`. Customer Banking shows
 accounts, activity, and limit settings; Payment Lab drives authorization, capture, release,
-and reversal and answers held limit changes as the account holder. On a clean checkout,
-generate the jOOQ bindings first (see below), then from the repository root:
+and reversal and answers held limit changes as the account holder. Its compose file deploys
+it with Keycloak and LimitGuard Admin over the same database. On a clean checkout, generate
+the jOOQ bindings first (see below), then:
 
 ```bash
-docker compose up -d --wait postgres
 cd services/demo-service
-./gradlew bootRun
+./gradlew bootJar
+../limitguard-admin/gradlew -p ../limitguard-admin bootJar
+docker compose up -d --build --wait
 ```
 
 Open [Customer Banking](http://localhost:8081/limitguard/demo) and
-[Payment Lab](http://localhost:8081/limitguard/payments) in separate tabs. The
-[demo README](services/demo-service/README.md) describes the scenario and a curl journey.
+[Payment Lab](http://localhost:8081/limitguard/payments) in separate tabs, and
+[LimitGuard Admin](http://localhost:8080/limitguard/admin) as `platform-admin` with the
+password `limitguard`. The [demo README](services/demo-service/README.md) describes the
+scenario and a curl journey.
 
 ## Running the tests
 
