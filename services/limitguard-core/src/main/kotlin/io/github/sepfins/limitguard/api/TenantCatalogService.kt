@@ -11,6 +11,7 @@ import io.github.sepfins.limitguard.api.commands.CreateLimitConfigurationCommand
 import io.github.sepfins.limitguard.api.commands.CreateMandateCommand
 import io.github.sepfins.limitguard.api.commands.CreatePartyProfileDelegationCommand
 import io.github.sepfins.limitguard.api.commands.DeactivateMandateCommand
+import io.github.sepfins.limitguard.api.commands.MoveOperationTypeCommand
 import io.github.sepfins.limitguard.api.commands.RegisterChannelCommand
 import io.github.sepfins.limitguard.api.commands.RegisterFundingSourceCommand
 import io.github.sepfins.limitguard.api.commands.RegisterFundingSourceProductCommand
@@ -63,6 +64,8 @@ interface TenantCatalogService {
     fun addChannelGroupMember(command: AddChannelGroupMemberCommand): ChannelGroupMemberResult
 
     fun registerOperationType(command: RegisterOperationTypeCommand): OperationTypeResult
+
+    fun moveOperationType(command: MoveOperationTypeCommand): OperationTypeResult
 
     fun registerPartyProfile(command: RegisterPartyProfileCommand): PartyProfileResult
 

@@ -142,6 +142,11 @@ data class CreateOperationTypeRequest(
     val isGlobal: Boolean = false,
 )
 
+/** A null parent moves the operation type to the top level. */
+data class MoveOperationTypeRequest(
+    val parentId: UUID?,
+)
+
 data class OperationTypeResponse(
     val id: UUID,
     val parentId: UUID?,

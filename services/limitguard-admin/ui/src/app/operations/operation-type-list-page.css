@@ -1,0 +1,104 @@
+/* Moving a type: a grip on each tenant row, branches as drop targets, and a strip for the top level. */
+.tree-cell {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.drag-handle,
+.drag-handle-space {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  margin: -2px 0 0 -6px;
+}
+
+.drag-handle {
+  display: grid;
+  place-items: center;
+  padding: 0;
+  color: var(--text-muted);
+  background: none;
+  border: 0;
+  border-radius: var(--radius);
+  cursor: grab;
+}
+
+.drag-handle:hover {
+  color: var(--ink);
+  background: var(--surface-hover);
+}
+
+.drag-handle:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.drag-handle:active {
+  cursor: grabbing;
+}
+
+.drag-handle.picked {
+  color: var(--surface);
+  background: var(--ink);
+}
+
+tr.is-moving .tree-cell > span,
+tr.is-moving td:not(:first-child) {
+  opacity: 0.45;
+}
+
+tr.drop-muted td {
+  opacity: 0.55;
+}
+
+tr.drop-target {
+  cursor: pointer;
+}
+
+tbody tr.drop-target:hover,
+tr.drop-over,
+tr.drop-target:focus-visible {
+  background: var(--ink-soft);
+}
+
+tr.drop-target:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: -2px;
+}
+
+.move-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  font-size: 13px;
+  background: var(--paper);
+  border-bottom: 1px solid var(--border);
+}
+
+.move-strip code {
+  color: var(--ink);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.move-strip.drop-ready {
+  cursor: pointer;
+}
+
+.move-strip.drop-ready:hover,
+.move-strip.drop-over,
+.move-strip:focus-visible {
+  background: var(--ink-soft);
+}
+
+.move-strip:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: -2px;
+}
+
+.move-alert {
+  margin: 12px 16px 0;
+}

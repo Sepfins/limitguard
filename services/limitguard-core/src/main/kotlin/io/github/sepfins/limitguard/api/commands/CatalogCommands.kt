@@ -87,6 +87,16 @@ data class RegisterOperationTypeCommand(
     val isGlobal: Boolean = false,
 )
 
+/**
+ * Moves a tenant's own operation type, with its subtree, beneath another non-leaf type, or to the
+ * top level when [parentId] is null. Every configuration's operation coverage follows the move.
+ */
+data class MoveOperationTypeCommand(
+    val tenantId: UUID,
+    val operationTypeId: UUID,
+    val parentId: UUID?,
+)
+
 /** Host-verified onboarding details are required on both new registration and canonical reuse. */
 data class RegisterPartyProfileCommand(
     val tenantId: UUID,

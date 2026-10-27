@@ -12,6 +12,7 @@ import io.github.sepfins.limitguard.api.commands.CreateLimitChangePolicyCommand
 import io.github.sepfins.limitguard.api.commands.CreateLimitConfigurationCommand
 import io.github.sepfins.limitguard.api.commands.RegisterChannelCommand
 import io.github.sepfins.limitguard.api.commands.RegisterFundingSourceProductCommand
+import io.github.sepfins.limitguard.api.commands.MoveOperationTypeCommand
 import io.github.sepfins.limitguard.api.commands.RegisterOperationTypeCommand
 import io.github.sepfins.limitguard.api.commands.RegisterTenantCommand
 import io.github.sepfins.limitguard.api.commands.SetChannelActiveCommand
@@ -171,6 +172,11 @@ class AdminCatalogApplicationService(
         authorizer.requireTenantMutation(identity, command.tenantId)
         if (command.isGlobal) authorizer.requireTenantCreation(identity)
         return limitguard.tenantCatalogService.registerOperationType(command)
+    }
+
+    fun moveOperationType(identity: AdminIdentity, command: MoveOperationTypeCommand): OperationTypeResult {
+        authorizer.requireTenantMutation(identity, command.tenantId)
+        return limitguard.tenantCatalogService.moveOperationType(command)
     }
 
     fun listLimitConfigurations(

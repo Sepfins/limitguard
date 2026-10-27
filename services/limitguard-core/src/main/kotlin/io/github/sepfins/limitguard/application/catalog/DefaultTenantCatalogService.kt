@@ -19,6 +19,7 @@ import io.github.sepfins.limitguard.api.commands.CreateLimitConfigurationCommand
 import io.github.sepfins.limitguard.api.commands.CreateMandateCommand
 import io.github.sepfins.limitguard.api.commands.CreatePartyProfileDelegationCommand
 import io.github.sepfins.limitguard.api.commands.DeactivateMandateCommand
+import io.github.sepfins.limitguard.api.commands.MoveOperationTypeCommand
 import io.github.sepfins.limitguard.api.commands.RegisterChannelCommand
 import io.github.sepfins.limitguard.api.commands.RegisterFundingSourceCommand
 import io.github.sepfins.limitguard.api.commands.RegisterFundingSourceProductCommand
@@ -381,6 +382,32 @@ class DefaultTenantCatalogService(
             affectedTenants.forEach { operationEnvelopes.validateOperationGrowth(it) }
 
             operationTypeRepository.insert(tenantId, operationType).toResult()
+        }
+    }
+
+    override fun moveOperationType(command: MoveOperationTypeCommand): OperationTypeResult = mapValidation {
+        val tenantId = TenantId.of(command.tenantId)
+        requireTenantExists(tenantId)
+        val operationId = OperationTypeId.of(command.operationTypeId)
+        val parentId = command.parentId?.let { OperationTypeId.of(it) }
+        return transactionRunner.inTransaction {
+            operationTypeRepository.lockCatalog()
+            val operation = operationTypeRepository.findById(tenantId, operationId)
+                ?: throw NotFoundException("Operation type not found: ${tenantId.value} / ${operationId.value}")
+            require(operation.scope != OperationTypeScope.Global) {
+                "Global operation types are shared by every tenant and cannot be moved"
+            }
+            if (parentId != null) {
+                val parentPath = OperationTypeAncestry(operationTypeRepository).resolve(tenantId, parentId)
+                require(!parentPath.first().isLeaf) { "Cannot move an operation type beneath a declared operation leaf" }
+                require(parentPath.none { it.id == operationId }) {
+                    "Cannot move an operation type beneath itself or one of its descendants"
+                }
+            }
+            val moved = operationTypeRepository.update(tenantId, operation.copy(parentId = parentId))
+            // Coverage follows the tree, so every configuration envelope is checked against the moved tree.
+            operationEnvelopes.validateOperationGrowth(tenantId)
+            moved.toResult()
         }
     }
 

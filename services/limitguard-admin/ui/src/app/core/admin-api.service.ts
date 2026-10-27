@@ -131,6 +131,13 @@ export class AdminApiService {
     return this.http.post<OperationType>(`${this.baseUrl}/tenants/${tenantId}/operation-types`, request);
   }
 
+  moveOperationType(tenantId: string, operationTypeId: string, parentId: string | null): Observable<OperationType> {
+    return this.http.put<OperationType>(
+      `${this.baseUrl}/tenants/${tenantId}/operation-types/${operationTypeId}/parent`,
+      { parentId }
+    );
+  }
+
   listLimitConfigurations(
     tenantId: string,
     search: string,

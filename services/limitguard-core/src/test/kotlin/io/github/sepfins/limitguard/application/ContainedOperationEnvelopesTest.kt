@@ -3,6 +3,7 @@ package io.github.sepfins.limitguard.application
 import io.github.sepfins.limitguard.api.LimitAmount
 import io.github.sepfins.limitguard.api.LimitKind
 import io.github.sepfins.limitguard.api.LimitPeriod
+import io.github.sepfins.limitguard.api.commands.MoveOperationTypeCommand
 import io.github.sepfins.limitguard.api.errors.ValidationException
 import io.github.sepfins.limitguard.api.errors.NotFoundException
 import io.github.sepfins.limitguard.support.FixedClockProvider
@@ -11,6 +12,7 @@ import io.github.sepfins.limitguard.support.PostgresFacade
 import io.github.sepfins.limitguard.support.execute
 import java.math.BigDecimal
 import java.time.Instant
+import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -156,6 +158,44 @@ class ContainedOperationEnvelopesTest {
             ))
         }
     }
+
+    @Test
+    fun `moving an operation keeps every configuration envelope contained`() {
+        val s = scenario()
+        val root = s.registerOperation("ROOT")
+        val transfer = s.registerOperation("TRANSFER", root.id)
+        val cash = s.registerOperation("CASH", root.id)
+        val instant = s.registerOperation("INSTANT", transfer.id, leaf = true)
+        val parent = s.configuration("PARENT", operationId = transfer.id)
+        s.configuration("CHILD", parent.id, operationId = instant.id)
+
+        val failure = assertFailsWith<ValidationException> { s.move(instant.id, cash.id) }
+
+        assertTrue(failure.message.orEmpty().contains("operation coverage"))
+        assertEquals(transfer.id, s.findOperations("INSTANT").single().parentId)
+        val sepa = s.registerOperation("SEPA", transfer.id)
+        assertEquals(sepa.id, s.move(instant.id, sepa.id).parentId)
+    }
+
+    @Test
+    fun `a move cannot land under a leaf or its own subtree and leaves global types alone`() {
+        val s = scenario()
+        val branch = s.registerOperation("BRANCH")
+        val child = s.registerOperation("CHILD", branch.id)
+        val leaf = s.registerOperation("LEAF", leaf = true)
+        val global = s.registerOperation("GLOBAL", global = true)
+
+        assertFailsWith<ValidationException> { s.move(child.id, leaf.id) }
+        assertFailsWith<ValidationException> { s.move(branch.id, child.id) }
+        assertFailsWith<ValidationException> { s.move(branch.id, branch.id) }
+        assertFailsWith<ValidationException> { s.move(global.id, branch.id) }
+        assertEquals(branch.id, s.findOperations("CHILD").single().parentId)
+        assertEquals(global.id, s.move(child.id, global.id).parentId)
+        assertNull(s.move(child.id, null).parentId)
+    }
+
+    private fun FundingEnvelopeScenario.move(operationId: UUID, parentId: UUID?) =
+        facade.tenantCatalogService.moveOperationType(MoveOperationTypeCommand(tenant, operationId, parentId))
 
     private fun scenario() =
         FundingEnvelopeScenario(PostgresFacade.create(FixedClockProvider(NOW), emptyList()), NOW)

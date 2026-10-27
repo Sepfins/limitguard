@@ -10,6 +10,7 @@ import org.springframework.http.MediaType
 import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf
 import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.post
+import org.springframework.test.web.servlet.put
 import org.springframework.test.web.servlet.request.RequestPostProcessor
 import java.util.UUID
 
@@ -89,6 +90,42 @@ class TenantOperationTypeJourneyTest : AdminApiIntegrationTest() {
         postOperation(tenantId, viewer(tenantId), """{"code":"SEPA","name":"SEPA"}""")
             .andExpect { status { isForbidden() } }
     }
+
+    @Test
+    fun `a tenant admin moves an operation type beneath a branch but never beneath a leaf`() {
+        val tenantId = createTenant("KBC Bank")
+        val cardsId = createdId(postOperation(tenantId, tenantAdmin(tenantId), """{"code":"CARDS","name":"Card operations"}"""))
+        val atmId = createdId(
+            postOperation(tenantId, tenantAdmin(tenantId), """{"code":"ATM","name":"Cash machine","isLeaf":true}"""),
+        )
+        val purchaseId = createdId(
+            postOperation(tenantId, tenantAdmin(tenantId), """{"code":"PURCHASE","name":"Card purchase","isLeaf":true}"""),
+        )
+
+        moveOperation(tenantId, purchaseId, tenantAdmin(tenantId), """{"parentId":"$cardsId"}""").andExpect {
+            status { isOk() }
+            jsonPath("$.parentId") { value(cardsId.toString()) }
+        }
+        mockMvc.get("/limitguard/admin/api/v1/tenants/$tenantId/operation-types") {
+            with(viewer(tenantId))
+        }.andExpect {
+            jsonPath("$.items[*].code") { value(contains("ATM", "CARDS", "PURCHASE")) }
+        }
+        moveOperation(tenantId, purchaseId, tenantAdmin(tenantId), """{"parentId":"$atmId"}""").andExpect {
+            status { isBadRequest() }
+            jsonPath("$.message") { value("Cannot move an operation type beneath a declared operation leaf") }
+        }
+        moveOperation(tenantId, purchaseId, viewer(tenantId), """{"parentId":null}""")
+            .andExpect { status { isForbidden() } }
+    }
+
+    private fun moveOperation(tenantId: UUID, operationId: UUID, login: RequestPostProcessor, body: String) =
+        mockMvc.put("/limitguard/admin/api/v1/tenants/$tenantId/operation-types/$operationId/parent") {
+            with(login)
+            with(csrf())
+            contentType = MediaType.APPLICATION_JSON
+            content = body
+        }
 
     private fun postOperation(tenantId: UUID, login: RequestPostProcessor, body: String) =
         mockMvc.post("/limitguard/admin/api/v1/tenants/$tenantId/operation-types") {

@@ -42,6 +42,29 @@
       <strong>{{ search.value ? 'No operation types match your search' : 'No operation types registered' }}</strong>
     </div>
   } @else {
+    @if (moving(); as moving) {
+      <div
+        class="move-strip"
+        aria-live="polite"
+        [class.drop-ready]="canDrop(null)"
+        [class.drop-over]="dropOver() === 'top'"
+        [attr.role]="canDrop(null) ? 'button' : null"
+        [attr.tabindex]="canDrop(null) ? 0 : null"
+        (click)="drop(null)"
+        (keydown.enter)="drop(null)"
+        (dragover)="dragOver($event, null)"
+        (dragleave)="dragLeave(null)"
+        (drop)="drop(null, $event)"
+      >
+        <span>
+          Moving <code>{{ moving.code }}</code>. Drop it on a branch{{ canDrop(null) ? ', or here for the top level' : '' }}.
+        </span>
+        <button class="link-button" type="button" (click)="$event.stopPropagation(); cancelMove()">Cancel</button>
+      </div>
+    }
+    @if (moveError()) {
+      <div class="inline-alert move-alert" role="alert">{{ moveError() }}</div>
+    }
     <div class="table-scroll">
       <table>
         <thead>
@@ -54,11 +77,48 @@
         </thead>
         <tbody>
           @for (operation of operations().items; track operation.id) {
-            <tr>
+            <tr
+              #row
+              [class.drop-target]="canDrop(operation)"
+              [class.drop-over]="dropOver() === operation.id"
+              [class.is-moving]="moving()?.id === operation.id"
+              [class.drop-muted]="moving() && !canDrop(operation) && moving()?.id !== operation.id"
+              [attr.tabindex]="canDrop(operation) ? 0 : null"
+              [attr.aria-label]="canDrop(operation) ? 'Move ' + moving()?.code + ' under ' + operation.code : null"
+              (click)="drop(operation)"
+              (keydown.enter)="drop(operation)"
+              (dragover)="dragOver($event, operation)"
+              (dragleave)="dragLeave(operation)"
+              (drop)="drop(operation, $event)"
+            >
               <td data-label="Operation type">
-                <div class="code-cell" [style.padding-left.px]="depth(operation) * 24">
-                  <code>{{ operation.code }}</code>
-                  <strong>{{ operation.name }}</strong>
+                <div class="code-cell tree-cell" [style.padding-left.px]="depth(operation) * 24">
+                  @if (canMove(operation)) {
+                    <!-- Not a <button>: Firefox will not start a drag from one. -->
+                    <span
+                      class="drag-handle"
+                      role="button"
+                      tabindex="0"
+                      draggable="true"
+                      [class.picked]="moving()?.id === operation.id"
+                      [attr.aria-pressed]="moving()?.id === operation.id"
+                      [attr.aria-label]="'Move ' + operation.code"
+                      title="Drag onto a branch, or click and then pick a branch"
+                      (click)="$event.stopPropagation(); pickUp(operation)"
+                      (keydown.enter)="$event.stopPropagation(); pickUp(operation)"
+                      (keydown.space)="$event.preventDefault(); pickUp(operation)"
+                      (dragstart)="dragStart($event, operation, row)"
+                      (dragend)="dragEnd()"
+                    >
+                      <lucide-icon name="grip-vertical" [size]="16" />
+                    </span>
+                  } @else if (auth.canManageTenant(tenantId)) {
+                    <span class="drag-handle-space" aria-hidden="true"></span>
+                  }
+                  <span>
+                    <code>{{ operation.code }}</code>
+                    <strong>{{ operation.name }}</strong>
+                  </span>
                 </div>
               </td>
               <td data-label="Id"><app-copy-id [id]="operation.id" /></td>
@@ -94,5 +154,6 @@
   #operationDialog
   [tenantId]="tenantId"
   [parentOptions]="parents()"
-  (created)="created()"
+  (created)="catalogChanged()"
 />
+

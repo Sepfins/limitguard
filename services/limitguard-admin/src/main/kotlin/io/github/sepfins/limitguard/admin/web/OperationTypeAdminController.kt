@@ -3,9 +3,11 @@ package io.github.sepfins.limitguard.admin.web
 import io.github.sepfins.limitguard.admin.application.AdminCatalogApplicationService
 import io.github.sepfins.limitguard.admin.security.AdminIdentityResolver
 import io.github.sepfins.limitguard.admin.web.dto.CreateOperationTypeRequest
+import io.github.sepfins.limitguard.admin.web.dto.MoveOperationTypeRequest
 import io.github.sepfins.limitguard.admin.web.dto.OperationTypeResponse
 import io.github.sepfins.limitguard.admin.web.dto.PageResponse
 import io.github.sepfins.limitguard.admin.web.dto.toAdminResponse
+import io.github.sepfins.limitguard.api.commands.MoveOperationTypeCommand
 import io.github.sepfins.limitguard.api.commands.RegisterOperationTypeCommand
 import io.github.sepfins.limitguard.api.queries.ListOperationTypesQuery
 import jakarta.validation.Valid
@@ -14,6 +16,7 @@ import org.springframework.security.core.Authentication
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
@@ -62,4 +65,16 @@ class OperationTypeAdminController(
             .created(URI.create("/limitguard/admin/api/v1/tenants/$tenantId/operation-types/${result.id}"))
             .body(result.toAdminResponse())
     }
+
+    @PutMapping("/{operationTypeId}/parent")
+    fun moveOperationType(
+        @PathVariable tenantId: UUID,
+        @PathVariable operationTypeId: UUID,
+        @RequestBody request: MoveOperationTypeRequest,
+        authentication: Authentication,
+    ): OperationTypeResponse =
+        applicationService.moveOperationType(
+            identityResolver.resolve(authentication),
+            MoveOperationTypeCommand(tenantId = tenantId, operationTypeId = operationTypeId, parentId = request.parentId),
+        ).toAdminResponse()
 }
