@@ -25,6 +25,7 @@ import org.testcontainers.junit.jupiter.Testcontainers
 import org.testcontainers.postgresql.PostgreSQLContainer
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.ObjectMapper
+import java.time.Instant
 import java.util.UUID
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
@@ -33,7 +34,7 @@ import kotlin.test.assertTrue
 
 @Tag("database")
 @Testcontainers
-@SpringBootTest(properties = ["limitguard.demo.cooling-off=1s", "limitguard.demo.due-pass-interval=1h"])
+@SpringBootTest(properties = ["limitguard.demo.due-pass-interval=1h"])
 @AutoConfigureMockMvc
 class DemoJourneyIntegrationTest @Autowired constructor(
     private val mockMvc: MockMvc,
@@ -331,9 +332,9 @@ class DemoJourneyIntegrationTest @Autowired constructor(
         )
         assertEquals("PENDING_EFFECTIVE_DATE", coolingOff["status"].asText())
         assertEquals("1500.00", coolingOff["limit"]["currentAmount"]["amount"].asText())
-        assertTrue(coolingOff["limit"]["pendingChange"]["effectiveAt"].isTextual)
-        Thread.sleep(1_500)
-        dueLimitChangeJob.applyDueChanges()
+        val startsAt = Instant.parse(coolingOff["limit"]["pendingChange"]["effectiveAt"].asText())
+        assertTrue(startsAt.isAfter(Instant.now().plusSeconds(60)))
+        dueLimitChangeJob.applyDueChanges(startsAt)
         val raisedCard = getJson("/limitguard/demo/api/v1/customer/limits").first { it["id"].asText() == cardLimitId }
         assertEquals("2000.00", raisedCard["currentAmount"]["amount"].asText())
         assertTrue(raisedCard["pendingChange"].isNull)

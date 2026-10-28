@@ -55,6 +55,22 @@ describe('policy rule blocks', () => {
     expect(actionsToJsonLogic(actionsFromJsonLogic(actions)!)).toEqual(actions);
   });
 
+  it('turns a delay the policy states itself into blocks and back unchanged', () => {
+    const actions = [
+      { type: 'SET_EFFECTIVE_AT', after: 'PT30M' },
+      { type: 'SET_EFFECTIVE_AT', after: 'PT8H' },
+      { type: 'SET_EFFECTIVE_AT', after: 'P2D' }
+    ];
+    const blocks = actionsFromJsonLogic(actions)!;
+    expect(blocks[0]).toEqual({ kind: 'delayFor', amount: '30', unit: 'minutes' });
+    expect(actionsToJsonLogic(blocks)).toEqual(actions);
+    expect(describePolicy('ALLOW', 'CARD_DAILY', { condition: emptyRule(), actions: [blocks[0]] }, (id) => id)).toBe(
+      'Allow changes to CARD_DAILY, then delay it by 30 minutes.'
+    );
+    expect(actionsFromJsonLogic([{ type: 'SET_EFFECTIVE_AT', after: 'PT1H30M' }])).toBeNull();
+    expect(() => actionsToJsonLogic([{ kind: 'delayFor', amount: '1.5', unit: 'hours' }])).toThrow('whole number');
+  });
+
   it('leaves anything the blocks cannot show to the JSON editor', () => {
     expect(conditionFromJsonLogic({ '>': [{ var: 'changeRequest.requestedAmount' }, 125] })).toBeNull();
     expect(conditionFromJsonLogic({ and: [{ or: [{ or: [youthCap] }] }] })).toBeNull();

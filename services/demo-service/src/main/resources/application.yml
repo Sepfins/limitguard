@@ -35,5 +35,4 @@ limitguard:
   demo:
     scenario-key: default-household
     event-heartbeat: 20s
-    cooling-off: 2m
     due-pass-interval: 15s

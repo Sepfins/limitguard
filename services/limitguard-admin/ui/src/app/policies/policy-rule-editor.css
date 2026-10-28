@@ -132,6 +132,10 @@ h3 {
   min-width: 0;
 }
 
+.pair .delay-amount {
+  width: 72px;
+}
+
 .chip {
   height: 30px;
   padding: 0 9px;

@@ -25,7 +25,13 @@ export interface ConditionGroup {
   conditions: Condition[];
 }
 
-export type RuleAction = { kind: 'delay'; factName: string } | { kind: 'cap'; amount: AmountSource };
+export type DelayUnit = 'minutes' | 'hours' | 'days';
+
+/** A delay the policy states itself, or one that waits for an instant the host sends as a fact. */
+export type RuleAction =
+  | { kind: 'delayFor'; amount: string; unit: DelayUnit }
+  | { kind: 'delay'; factName: string }
+  | { kind: 'cap'; amount: AmountSource };
 
 export const changeTypes: ChangeType[] = ['CREATE', 'UPDATE', 'DEACTIVATE', 'REACTIVATE', 'DELETE'];
 
@@ -69,11 +75,22 @@ function toJsonLogic(condition: Condition): unknown {
 }
 
 export function actionsToJsonLogic(actions: RuleAction[]): unknown[] {
-  return actions.map((action) =>
-    action.kind === 'delay'
-      ? { type: 'SET_EFFECTIVE_AT', instant: factVar(action.factName) }
-      : { type: 'CAP_REQUESTED_AMOUNT', amount: amountToJsonLogic(action.amount) }
-  );
+  return actions.map((action) => {
+    switch (action.kind) {
+      case 'delayFor':
+        return { type: 'SET_EFFECTIVE_AT', after: isoDuration(action.amount, action.unit) };
+      case 'delay':
+        return { type: 'SET_EFFECTIVE_AT', instant: factVar(action.factName) };
+      case 'cap':
+        return { type: 'CAP_REQUESTED_AMOUNT', amount: amountToJsonLogic(action.amount) };
+    }
+  });
+}
+
+function isoDuration(amount: string, unit: DelayUnit): string {
+  const count = amount.trim();
+  if (!/^[1-9][0-9]*$/.test(count)) throw new Error('Enter the delay as a whole number, such as 30.');
+  return unit === 'days' ? `P${count}D` : `PT${count}${unit === 'hours' ? 'H' : 'M'}`;
 }
 
 function amountToJsonLogic(source: AmountSource): unknown {
@@ -166,9 +183,16 @@ function describeCondition(condition: Condition, channelCode: (id: string) => st
 }
 
 function describeAction(action: RuleAction): string {
-  return action.kind === 'delay'
-    ? `delay it until host fact ${action.factName.trim() || '[name]'}`
-    : `cap the requested amount at ${describeAmount(action.amount)}`;
+  switch (action.kind) {
+    case 'delayFor': {
+      const count = action.amount.trim() || '[number]';
+      return `delay it by ${count} ${count === '1' ? action.unit.slice(0, -1) : action.unit}`;
+    }
+    case 'delay':
+      return `delay it until host fact ${action.factName.trim() || '[name]'}`;
+    case 'cap':
+      return `cap the requested amount at ${describeAmount(action.amount)}`;
+  }
 }
 
 function describeAmount(source: AmountSource): string {
@@ -235,6 +259,13 @@ export function actionsFromJsonLogic(json: unknown): RuleAction[] | null {
   const actions = json.map((action): RuleAction | null => {
     if (!isRecord(action)) return null;
     const keys = Object.keys(action).sort().join();
+    if (action['type'] === 'SET_EFFECTIVE_AT' && keys === 'after,type' && typeof action['after'] === 'string') {
+      const match = /^P(?:([1-9][0-9]*)D|T([1-9][0-9]*)([HM]))$/.exec(action['after']);
+      if (!match) return null;
+      return match[1]
+        ? { kind: 'delayFor', amount: match[1], unit: 'days' }
+        : { kind: 'delayFor', amount: match[2], unit: match[3] === 'H' ? 'hours' : 'minutes' };
+    }
     if (action['type'] === 'SET_EFFECTIVE_AT' && keys === 'instant,type') {
       const name = factName(action['instant']);
       return name === null ? null : { kind: 'delay', factName: name };

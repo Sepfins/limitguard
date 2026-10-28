@@ -11,6 +11,7 @@ import io.github.sepfins.limitguard.api.commands.CreateLimitChangePolicyCommand
 import io.github.sepfins.limitguard.api.commands.LimitChangeActorCommand
 import io.github.sepfins.limitguard.api.commands.LimitRuleChangeOperation
 import io.github.sepfins.limitguard.api.commands.RejectLimitRuleChangeCommand
+import io.github.sepfins.limitguard.api.errors.ValidationException
 import io.github.sepfins.limitguard.support.FixedClockProvider
 import io.github.sepfins.limitguard.support.OperationSubtreeScenario
 import io.github.sepfins.limitguard.support.PostgresFacade
@@ -19,6 +20,7 @@ import java.time.Instant
 import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 
 class SubmissionPolicyTest {
@@ -76,6 +78,30 @@ class SubmissionPolicyTest {
         assertEquals(due, request.effectiveAt)
         assertEquals(LimitRuleChangeStatus.PENDING_EFFECTIVE_DATE, s.approve(request.id).status)
         assertEquals(LimitAmount.Bounded(BigDecimal("250.5000")), s.details(request.id).request.requestedAmount)
+    }
+
+    @Test
+    fun `a policy can name its own delay instead of taking an instant from the host`() {
+        val s = scenario()
+        val configuration = s.configuration(s.operation("TRANSFER", leaf = true))
+        policy(s, "COOLING_OFF", LimitChangePolicyDecision.ALLOW, actions = listOf(
+            mapOf("type" to "SET_EFFECTIVE_AT", "after" to "PT30M"),
+        ))
+        for (invalid in listOf(
+            mapOf("type" to "SET_EFFECTIVE_AT", "after" to "PT0S"),
+            mapOf("type" to "SET_EFFECTIVE_AT", "after" to "thirty minutes"),
+            mapOf("type" to "SET_EFFECTIVE_AT", "after" to "PT30M", "instant" to NOW.toString()),
+            mapOf("type" to "SET_EFFECTIVE_AT"),
+        )) {
+            assertFailsWith<ValidationException> {
+                policy(s, "INVALID", LimitChangePolicyDecision.ALLOW, actions = listOf(invalid))
+            }
+        }
+
+        val request = s.request(configuration, setAmount("800"))
+
+        assertEquals(LimitRuleChangeStatus.PENDING_EFFECTIVE_DATE, request.status)
+        assertEquals(NOW.plusSeconds(30 * 60), request.effectiveAt)
     }
 
     @Test

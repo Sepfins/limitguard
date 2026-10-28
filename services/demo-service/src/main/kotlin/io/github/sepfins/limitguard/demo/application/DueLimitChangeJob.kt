@@ -6,6 +6,7 @@ import io.github.sepfins.limitguard.api.commands.ApplyDueLimitChangesCommand
 import io.github.sepfins.limitguard.demo.persistence.DemoBankRepository
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Service
+import java.time.Instant
 
 /**
  * The bank's due pass. LimitGuard schedules a delayed change but never runs jobs itself, so
@@ -19,10 +20,13 @@ class DueLimitChangeJob(
     private val eventStream: DemoEventStream,
 ) {
     @Scheduled(fixedDelayString = "\${limitguard.demo.due-pass-interval:15s}")
-    fun applyDueChanges() {
+    fun applyDueChanges() = applyDueChanges(null)
+
+    /** Applies what is due at [dueAt], or now; a test passes a later time instead of waiting. */
+    fun applyDueChanges(dueAt: Instant?) {
         val scenario = scenarioService.currentOrNull() ?: return
         val result = limitguard.limitChangeService.applyDueLimitChanges(
-            ApplyDueLimitChangesCommand(tenantId = requireNotNull(scenario.tenantId)),
+            ApplyDueLimitChangesCommand(tenantId = requireNotNull(scenario.tenantId), dueAt = dueAt),
             TrustedChangeActorContext.InternalSystem,
         )
         (result.appliedChangeRequestIds + result.failedChangeRequestIds).forEach { changeRequestId ->

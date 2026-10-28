@@ -38,7 +38,8 @@ const conditionMenu: { kind: BlockKind; label: string; example: string }[] = [
 ];
 
 const actionMenu: { action: () => RuleAction; label: string; example: string }[] = [
-  { action: () => ({ kind: 'delay', factName: '' }), label: 'Delay', example: 'until host fact coolingOffEndsAt' },
+  { action: () => ({ kind: 'delayFor', amount: '', unit: 'hours' }), label: 'Delay by', example: 'a waiting period this policy sets' },
+  { action: () => ({ kind: 'delay', factName: '' }), label: 'Delay until', example: 'a time your backend sends' },
   { action: () => ({ kind: 'cap', amount: { from: 'fixed', amount: '' } }), label: 'Cap amount', example: 'at 500' }
 ];
 
@@ -78,7 +79,18 @@ function parseJson(text: string): { value: unknown } | null {
               <div class="row">
                 <span class="key">{{ first ? '' : 'and' }}</span>
                 <div class="clause">
-                  @if (action.kind === 'delay') {
+                  @if (action.kind === 'delayFor') {
+                    <span>Delay it by</span>
+                    <span class="pair">
+                      <input class="delay-amount" aria-label="Delay length" inputmode="numeric" placeholder="30"
+                        [value]="action.amount" (input)="action.amount = val($event); refresh()" />
+                      <select aria-label="Delay unit" (change)="action.unit = $any(val($event)); refresh()">
+                        <option value="minutes" [selected]="action.unit === 'minutes'">minutes</option>
+                        <option value="hours" [selected]="action.unit === 'hours'">hours</option>
+                        <option value="days" [selected]="action.unit === 'days'">days</option>
+                      </select>
+                    </span>
+                  } @else if (action.kind === 'delay') {
                     <span>Delay it until host fact</span>
                     <input aria-label="Host fact with the effective time" placeholder="coolingOffEndsAt"
                       [value]="action.factName" (input)="action.factName = val($event); refresh()" />
@@ -132,7 +144,7 @@ function parseJson(text: string): { value: unknown } | null {
         <span>Actions (JSON array)</span>
         <textarea class="code-editor" rows="4" spellcheck="false" [value]="actionsText()"
           (input)="actionsText.set(val($event))"></textarea>
-        <small class="hint">SET_EFFECTIVE_AT with an instant, or CAP_REQUESTED_AMOUNT with an amount. A deny policy takes none.</small>
+        <small class="hint">SET_EFFECTIVE_AT with an after duration such as "PT30M" or an instant, or CAP_REQUESTED_AMOUNT with an amount. A deny policy takes none.</small>
       </label>
       <div class="footer">
         <span></span>

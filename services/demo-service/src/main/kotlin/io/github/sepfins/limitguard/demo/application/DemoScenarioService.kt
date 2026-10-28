@@ -426,7 +426,7 @@ class DemoScenarioService(
                 tenantId = tenantId,
                 code = "CARD_RAISE_COOLING_OFF",
                 name = "Card limit raises wait out a cooling-off period",
-                description = "A raised card limit starts at the cooling-off end the bank sends with the request.",
+                description = "A raised card limit starts two minutes after it is approved.",
                 phase = LimitChangePolicyPhase.AUTHORIZATION,
                 engine = LimitChangePolicyEngine.JSON_LOGIC,
                 decision = LimitChangePolicyDecision.ALLOW,
@@ -443,9 +443,8 @@ class DemoScenarioService(
                         ),
                     ),
                 ),
-                actionExpression = listOf(
-                    mapOf("type" to "SET_EFFECTIVE_AT", "instant" to mapOf("var" to "facts.coolingOffEndsAt")),
-                ),
+                // Short enough to watch in the demo; a bank would choose hours.
+                actionExpression = listOf(mapOf("type" to "SET_EFFECTIVE_AT", "after" to "PT2M")),
                 metadata = mapOf("journey" to "SELF_SERVICE"),
             ),
         )

@@ -4,6 +4,7 @@ import io.github.sepfins.limitguard.domain.change.LimitChangePolicy
 import io.github.sepfins.limitguard.domain.change.LimitChangePolicyDecision
 import io.github.sepfins.limitguard.domain.change.LimitChangePolicyEngine
 import io.github.sepfins.limitguard.domain.common.CurrencyCode
+import java.time.Duration
 import java.time.Instant
 
 internal class JsonLogicPolicyValidator {
@@ -40,10 +41,20 @@ internal class JsonLogicPolicyValidator {
             ?: throw IllegalArgumentException("$path.type must be a string")
         when (type) {
             SET_EFFECTIVE_AT -> {
-                requireOnlyFields(action, path, setOf("type", "instant"))
-                require(action.containsKey("instant")) { "$path.instant is required" }
-                validateStringOrExpression(action.getValue("instant"), "$path.instant", budget) { value ->
-                    require(runCatching { Instant.parse(value) }.isSuccess) { "$path.instant must be an ISO-8601 instant" }
+                requireOnlyFields(action, path, setOf("type", "instant", "after"))
+                // A policy either names the delay itself or takes the instant from the host's facts.
+                require(action.containsKey("instant") != action.containsKey("after")) {
+                    "$path needs exactly one of instant or after"
+                }
+                if (action.containsKey("after")) {
+                    validateStringOrExpression(action.getValue("after"), "$path.after", budget) { value ->
+                        val delay = runCatching { Duration.parse(value) }.getOrNull()
+                        require(delay != null && delay > Duration.ZERO) { "$path.after must be a positive ISO-8601 duration" }
+                    }
+                } else {
+                    validateStringOrExpression(action.getValue("instant"), "$path.instant", budget) { value ->
+                        require(runCatching { Instant.parse(value) }.isSuccess) { "$path.instant must be an ISO-8601 instant" }
+                    }
                 }
             }
             CAP_REQUESTED_AMOUNT -> {

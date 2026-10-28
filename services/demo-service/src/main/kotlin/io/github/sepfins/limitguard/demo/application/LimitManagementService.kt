@@ -13,7 +13,6 @@ import io.github.sepfins.limitguard.api.commands.RejectLimitRuleChangeCommand
 import io.github.sepfins.limitguard.api.commands.RequestLimitRuleChangeCommand
 import io.github.sepfins.limitguard.api.queries.GetLimitRuleQuery
 import io.github.sepfins.limitguard.api.results.LimitChangeRequestResult
-import io.github.sepfins.limitguard.demo.configuration.DemoProperties
 import io.github.sepfins.limitguard.demo.domain.DemoLimitSetting
 import io.github.sepfins.limitguard.demo.persistence.DemoBankRepository
 import io.github.sepfins.limitguard.demo.web.dto.LimitUpdateResponse
@@ -23,7 +22,6 @@ import io.github.sepfins.limitguard.demo.web.error.DemoPolicyDeniedException
 import io.github.sepfins.limitguard.demo.web.error.DemoValidationException
 import org.springframework.stereotype.Service
 import java.math.BigDecimal
-import java.time.Instant
 import java.util.UUID
 
 @Service
@@ -33,7 +31,6 @@ class LimitManagementService(
     private val customerBankingService: CustomerBankingService,
     private val repository: DemoBankRepository,
     private val eventStream: DemoEventStream,
-    private val properties: DemoProperties,
 ) {
     fun update(settingId: UUID, amountText: String, idempotencyKey: String): LimitUpdateResponse {
         val scenario = scenarioService.current()
@@ -75,8 +72,6 @@ class LimitManagementService(
                 policyContext = buildMap {
                     put("journey", "SELF_SERVICE")
                     put("currentExposure", currentExposure.toPlainString())
-                    // JSON Logic cannot do date arithmetic, so the bank supplies the instant a delay ends.
-                    put("coolingOffEndsAt", Instant.now().plus(properties.coolingOff).toString())
                 },
                 idempotencyKey = "demo-limit:$settingId:$idempotencyKey",
                 metadata = mapOf("journey" to "SELF_SERVICE"),

@@ -57,12 +57,11 @@ limits, and raised card limits:
 | 40 | `CARD_RAISE_COOLING_OFF` | card purchases | Allow a raise, but start it when the cooling-off period ends |
 | 100 | `ALLOW_DEMO_SELF_SERVICE` | every limit | Allow the rest |
 
-The demo sends `currentExposure` and `coolingOffEndsAt` as policy facts.
-JSON Logic has no date arithmetic, so the demo computes the cooling-off end itself from
-`limitguard.demo.cooling-off` (2 minutes; KBC uses four hours), and the policy's
-`SET_EFFECTIVE_AT` action moves the change's start to it. LimitGuard runs no jobs, so the demo
-calls `applyDueLimitChanges` every `limitguard.demo.due-pass-interval` (15 seconds) to apply
-changes whose time has come.
+The demo sends `currentExposure` as a policy fact. The cooling-off policy
+sets its own delay, `{"type": "SET_EFFECTIVE_AT", "after": "PT2M"}`, two minutes so the demo
+can show it; an administrator picks any duration in LimitGuard Admin. LimitGuard runs no jobs,
+so the demo calls `applyDueLimitChanges` every `limitguard.demo.due-pass-interval`
+(15 seconds) to apply changes whose time has come.
 
 A held or scheduled change shows on the Limits page, where Emma can withdraw it. Payment Lab
 plays Daniel's banking app and approves or rejects held changes through the integration API.
