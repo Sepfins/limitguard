@@ -29,10 +29,14 @@ import io.github.sepfins.limitguard.infrastructure.jooq.generated.enums.LimitRul
 import io.github.sepfins.limitguard.infrastructure.jooq.generated.tables.LimitConfiguration as GeneratedLimitConfigurationTable
 import io.github.sepfins.limitguard.infrastructure.jooq.generated.tables.LimitRule as GeneratedLimitRuleTable
 import io.github.sepfins.limitguard.infrastructure.jooq.generated.tables.LimitRuleChangeEvent as GeneratedLimitRuleChangeEventTable
+import io.github.sepfins.limitguard.infrastructure.jooq.generated.tables.LimitRuleChangeEventOutbox as GeneratedLimitRuleChangeEventOutboxTable
 import io.github.sepfins.limitguard.infrastructure.jooq.generated.tables.LimitRuleRevision as GeneratedLimitRuleRevisionTable
+import io.github.sepfins.limitguard.port.persistence.LimitChangeEventOutbox
 import io.github.sepfins.limitguard.port.persistence.LimitRuleChangeEventRepository
 import io.github.sepfins.limitguard.port.persistence.LimitRuleRevisionRepository
+import io.github.sepfins.limitguard.port.persistence.OutboxedLimitChangeEvent
 import org.jooq.Record
+import org.jooq.impl.DSL
 import java.time.Instant
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
@@ -194,6 +198,59 @@ class JooqLimitRuleRevisionRepository(
             metadata = get(table.METADATA).toMetadata(),
             createdAt = get(table.CREATED_AT)?.toInstant(),
         )
+    }
+}
+
+class JooqLimitChangeEventOutbox(
+    private val context: JooqPersistenceContext,
+) : LimitChangeEventOutbox {
+    private val table = GeneratedLimitRuleChangeEventOutboxTable.LIMIT_RULE_CHANGE_EVENT_OUTBOX
+
+    override fun enqueue(tenantId: TenantId, eventId: LimitRuleChangeEventId) {
+        jooqOperation("enqueue limit change event for relay") {
+            context.dsl()
+                .insertInto(table)
+                .set(table.TENANT_ID, tenantId.value)
+                .set(table.CHANGE_EVENT_ID, eventId.value)
+                .execute()
+        }
+    }
+
+    override fun lockOldest(limit: Int): List<OutboxedLimitChangeEvent> =
+        jooqOperation("lock oldest relayable limit change events") {
+            context.requireTransaction("relaying limit change events")
+            // Scoped to the schema, so hosts sharing one database do not block each other's relay.
+            val locked = context.dsl().fetchValue(
+                "select pg_try_advisory_xact_lock(hashtextextended(current_schema() || ?, 0))",
+                RELAY_LOCK_KEY,
+            )
+            if (locked != true) return@jooqOperation emptyList()
+            context.dsl()
+                .select(table.TENANT_ID, table.CHANGE_EVENT_ID)
+                .from(table)
+                .orderBy(table.ID)
+                .limit(limit)
+                .fetch {
+                    OutboxedLimitChangeEvent(
+                        tenantId = TenantId.of(requireNotNull(it.get(table.TENANT_ID))),
+                        eventId = LimitRuleChangeEventId.of(requireNotNull(it.get(table.CHANGE_EVENT_ID))),
+                    )
+                }
+        }
+
+    override fun delete(entries: List<OutboxedLimitChangeEvent>) {
+        jooqOperation("delete relayed limit change events") {
+            context.dsl()
+                .deleteFrom(table)
+                .where(DSL.row(table.TENANT_ID, table.CHANGE_EVENT_ID).`in`(
+                    entries.map { DSL.row(it.tenantId.value, it.eventId.value) },
+                ))
+                .execute()
+        }
+    }
+
+    private companion object {
+        const val RELAY_LOCK_KEY = "limitguard:limit-change-event-relay"
     }
 }
 

@@ -31,7 +31,10 @@ object PostgresFacade {
         clock: ClockProvider,
         engines: Collection<PolicyEngine> = listOf(JsonLogicPolicyEngine()),
         source: DataSource = database(),
-    ): Limitguard = JooqLimitguardFactory(source).create(clockProvider = clock, policyEngines = engines)
+        relayLimitChangeEvents: Boolean = false,
+    ): Limitguard = JooqLimitguardFactory(source).create(
+        clockProvider = clock, policyEngines = engines, relayLimitChangeEvents = relayLimitChangeEvents,
+    )
 }
 
 fun DataSource.execute(sql: String, vararg values: Any?): Int = connection.use { connection ->

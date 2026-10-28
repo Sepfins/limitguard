@@ -149,6 +149,14 @@ enum class LimitChangePolicyDecision {
     NO_OP,
 }
 
+enum class LimitChangePolicyEvaluationOutcome {
+    MATCHED,
+    NOT_MATCHED,
+    APPLIED,
+    DENIED,
+    ERROR,
+}
+
 enum class AuthorizationDecision {
     ALLOWED,
     DENIED,

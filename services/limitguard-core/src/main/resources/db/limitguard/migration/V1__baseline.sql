@@ -1491,6 +1491,22 @@ CREATE INDEX idx_limit_rule_change_event_party_actor
     ON limit_rule_change_event (tenant_id, actor_party_profile_id, created_at)
     WHERE actor_party_profile_id IS NOT NULL;
 
+-- Outbox of limit_rule_change_event rows still owed to the host's relay sink.
+--
+-- Written in the same transaction as the event when the host switches relaying
+-- on, and deleted once the sink accepts it. It holds pointers only; the event
+-- row stays the history. uuidv7 ids give the oldest-first relay order.
+CREATE TABLE limit_rule_change_event_outbox (
+    id UUID PRIMARY KEY DEFAULT uuidv7(),
+    tenant_id UUID NOT NULL REFERENCES tenant(id),
+    change_event_id UUID NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (tenant_id, change_event_id),
+    FOREIGN KEY (tenant_id, change_event_id)
+        REFERENCES limit_rule_change_event(tenant_id, id)
+        ON DELETE CASCADE
+);
+
 -- Immutable version history for the persisted limit_rule row, with exactly one
 -- revision each time a change is applied. Rejected, cancelled, pending, and
 -- policy-only steps belong in limit_rule_change_event.

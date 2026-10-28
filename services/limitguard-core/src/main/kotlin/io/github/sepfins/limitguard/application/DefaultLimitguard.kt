@@ -36,6 +36,7 @@ import io.github.sepfins.limitguard.port.persistence.FundingSourceRepository
 import io.github.sepfins.limitguard.port.persistence.IndividualRepository
 import io.github.sepfins.limitguard.port.persistence.IdentifierSchemeRepository
 import io.github.sepfins.limitguard.port.persistence.LegalEntityRepository
+import io.github.sepfins.limitguard.port.persistence.LimitChangeEventOutbox
 import io.github.sepfins.limitguard.port.persistence.LimitChangeRequestRepository
 import io.github.sepfins.limitguard.port.persistence.LimitChangePolicyEvaluationRepository
 import io.github.sepfins.limitguard.port.persistence.LimitChangePolicyRepository
@@ -83,6 +84,7 @@ class DefaultLimitguard(
     limitChangePolicyEvaluationRepository: LimitChangePolicyEvaluationRepository,
     limitChangeRequestRepository: LimitChangeRequestRepository,
     limitChangeEventRepository: LimitRuleChangeEventRepository,
+    limitChangeEventOutbox: LimitChangeEventOutbox,
     limitRuleRepository: LimitRuleRepository,
     limitRuleRevisionRepository: LimitRuleRevisionRepository,
     authorizationDecisionRepository: AuthorizationDecisionRepository,
@@ -94,6 +96,7 @@ class DefaultLimitguard(
     idGenerator: IdGenerator,
     clockProvider: ClockProvider,
     transactionRunner: TransactionRunner,
+    relayLimitChangeEvents: Boolean = false,
 ) : Limitguard {
     override val tenantCatalogService: TenantCatalogService = DefaultTenantCatalogService(
         tenantRepository = tenantRepository,
@@ -143,7 +146,9 @@ class DefaultLimitguard(
         partyProfileDelegationRepository = partyProfileDelegationRepository,
         channelRepository = channelRepository,
         changeRequestRepository = limitChangeRequestRepository,
-        changeEventRepository = limitChangeEventRepository,
+        storedChangeEventRepository = limitChangeEventRepository,
+        changeEventOutbox = limitChangeEventOutbox,
+        relayChangeEvents = relayLimitChangeEvents,
         limitRuleRepository = limitRuleRepository,
         limitRuleRevisionRepository = limitRuleRevisionRepository,
         limitConfigurationRepository = limitConfigurationRepository,

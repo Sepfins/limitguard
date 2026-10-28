@@ -75,12 +75,7 @@ internal fun LimitRuleChangeRequest.toResult(): LimitChangeRequestResult =
         limitRuleId = limitRuleId?.value,
         changeType = ApiLimitRuleChangeType.valueOf(changeType.name),
         status = ApiLimitRuleChangeStatus.valueOf(status.name),
-        requestedBy = when (val actor = requestedBy) {
-            ChangeActor.System -> LimitChangeActorResult(LimitChangeActorType.SYSTEM)
-            is ChangeActor.PartyProfileActor -> LimitChangeActorResult(
-                LimitChangeActorType.PARTY_PROFILE, partyProfileId = actor.partyProfileId.value,
-            )
-        },
+        requestedBy = requestedBy.toResult(),
         requesterPartyProfileId = requesterPartyProfileId?.value,
         requestChannelId = requestActorContext.requestChannelId?.value,
         authorityDelegationId = authorityDelegationId?.value,
@@ -101,3 +96,11 @@ internal fun LimitRuleChangeRequest.toResult(): LimitChangeRequestResult =
         },
         updatedAt = updatedAt ?: createdAt,
     )
+
+internal fun ChangeActor.toResult(): LimitChangeActorResult =
+    when (this) {
+        ChangeActor.System -> LimitChangeActorResult(LimitChangeActorType.SYSTEM)
+        is ChangeActor.PartyProfileActor -> LimitChangeActorResult(
+            LimitChangeActorType.PARTY_PROFILE, partyProfileId = partyProfileId.value,
+        )
+    }

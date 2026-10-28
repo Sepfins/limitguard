@@ -16,6 +16,7 @@ import io.github.sepfins.limitguard.infrastructure.jooq.repository.JooqFundingSo
 import io.github.sepfins.limitguard.infrastructure.jooq.repository.JooqIdentifierSchemeRepository
 import io.github.sepfins.limitguard.infrastructure.jooq.repository.JooqIndividualRepository
 import io.github.sepfins.limitguard.infrastructure.jooq.repository.JooqLegalEntityRepository
+import io.github.sepfins.limitguard.infrastructure.jooq.repository.JooqLimitChangeEventOutbox
 import io.github.sepfins.limitguard.infrastructure.jooq.repository.JooqLimitChangePolicyEvaluationRepository
 import io.github.sepfins.limitguard.infrastructure.jooq.repository.JooqLimitChangePolicyRepository
 import io.github.sepfins.limitguard.infrastructure.jooq.repository.JooqLimitChangeRequestRepository
@@ -48,6 +49,8 @@ class JooqLimitguardFactory(
         idGenerator: IdGenerator = SystemIdGenerator(),
         clockProvider: ClockProvider = SystemClockProvider(),
         policyEngines: Collection<PolicyEngine> = listOf(JsonLogicPolicyEngine()),
+        /** Queues every limit-change event for [io.github.sepfins.limitguard.api.LimitChangeService.relayLimitChangeEvents]. */
+        relayLimitChangeEvents: Boolean = false,
     ): Limitguard {
         val context = JooqPersistenceContext(dataSource)
 
@@ -76,6 +79,7 @@ class JooqLimitguardFactory(
             limitChangePolicyEvaluationRepository = JooqLimitChangePolicyEvaluationRepository(context),
             limitChangeRequestRepository = JooqLimitChangeRequestRepository(context),
             limitChangeEventRepository = JooqLimitRuleChangeEventRepository(context),
+            limitChangeEventOutbox = JooqLimitChangeEventOutbox(context),
             limitRuleRepository = JooqLimitRuleRepository(context),
             limitRuleRevisionRepository = JooqLimitRuleRevisionRepository(context),
             authorizationDecisionRepository = JooqAuthorizationDecisionRepository(context),
@@ -87,6 +91,7 @@ class JooqLimitguardFactory(
             idGenerator = idGenerator,
             clockProvider = clockProvider,
             transactionRunner = JooqTransactionRunner(context),
+            relayLimitChangeEvents = relayLimitChangeEvents,
         )
     }
 }

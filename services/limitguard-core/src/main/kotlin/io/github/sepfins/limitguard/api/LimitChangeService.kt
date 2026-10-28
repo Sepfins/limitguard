@@ -4,6 +4,7 @@ import io.github.sepfins.limitguard.api.commands.ApplyDueLimitChangesCommand
 import io.github.sepfins.limitguard.api.commands.ApproveLimitRuleChangeCommand
 import io.github.sepfins.limitguard.api.commands.CancelLimitRuleChangeCommand
 import io.github.sepfins.limitguard.api.commands.RejectLimitRuleChangeCommand
+import io.github.sepfins.limitguard.api.commands.RelayLimitChangeEventsCommand
 import io.github.sepfins.limitguard.api.commands.RequestLimitRuleChangeCommand
 import io.github.sepfins.limitguard.api.results.ApplyDueChangesResult
 import io.github.sepfins.limitguard.api.results.LimitChangeRequestResult
@@ -38,4 +39,14 @@ interface LimitChangeService {
         command: ApplyDueLimitChangesCommand,
         trustedActorContext: TrustedChangeActorContext.InternalSystem,
     ): ApplyDueChangesResult
+
+    /**
+     * Hands the oldest queued events to the command's sink in one transaction and dequeues
+     * them when it returns. A throwing sink leaves them queued. Returns the number relayed;
+     * zero while another relay runs.
+     */
+    fun relayLimitChangeEvents(
+        command: RelayLimitChangeEventsCommand,
+        trustedActorContext: TrustedChangeActorContext.InternalSystem,
+    ): Int
 }

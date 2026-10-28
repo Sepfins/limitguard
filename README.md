@@ -103,10 +103,12 @@ language. Host facts reach a policy as `policyContext` on the request, which is 
 sends the customer's current exposure.
 
 The clock is the `ClockProvider` port, read once per command, so a test fixes time by
-passing its own. The library opens its own database transaction per command, so a host's
-Spring transaction does not enclose a library call. Queries render no schema name, so that
-the tables can live in a schema of the host's choosing. There is no Spring autoconfiguration
-and no cache.
+passing its own. A host that builds the facade with `relayLimitChangeEvents = true` gets
+every limit-change event queued in an outbox and hands batches to a sink of its choosing,
+such as a Kafka producer, at least once and in order. The library opens its own database
+transaction per command, so a host's Spring transaction does not enclose a library call.
+Queries render no schema name, so that the tables can live in a schema of the host's choosing.
+There is no Spring autoconfiguration and no cache.
 
 ## What is not there yet
 

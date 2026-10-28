@@ -6,12 +6,14 @@ import io.github.sepfins.limitguard.api.commands.ApplyDueLimitChangesCommand
 import io.github.sepfins.limitguard.api.commands.ApproveLimitRuleChangeCommand
 import io.github.sepfins.limitguard.api.commands.CancelLimitRuleChangeCommand
 import io.github.sepfins.limitguard.api.commands.RejectLimitRuleChangeCommand
+import io.github.sepfins.limitguard.api.commands.RelayLimitChangeEventsCommand
 import io.github.sepfins.limitguard.api.commands.RequestLimitRuleChangeCommand
 import io.github.sepfins.limitguard.api.results.ApplyDueChangesResult
 import io.github.sepfins.limitguard.api.results.LimitChangeRequestResult
 import io.github.sepfins.limitguard.internal.json.JsonSnapshots
 
 import io.github.sepfins.limitguard.port.ids.IdGenerator
+import io.github.sepfins.limitguard.port.persistence.LimitChangeEventOutbox
 import io.github.sepfins.limitguard.port.persistence.LimitChangePolicyEvaluationRepository
 import io.github.sepfins.limitguard.port.persistence.LimitChangePolicyRepository
 import io.github.sepfins.limitguard.port.persistence.LimitChangeRequestRepository
@@ -30,7 +32,9 @@ import io.github.sepfins.limitguard.port.transactions.TransactionRunner
 
 internal class DefaultLimitChangeService(
     changeRequestRepository: LimitChangeRequestRepository,
-    changeEventRepository: LimitRuleChangeEventRepository,
+    storedChangeEventRepository: LimitRuleChangeEventRepository,
+    changeEventOutbox: LimitChangeEventOutbox,
+    relayChangeEvents: Boolean,
     limitRuleRepository: LimitRuleRepository,
     limitRuleRevisionRepository: LimitRuleRevisionRepository,
     limitConfigurationRepository: LimitConfigurationRepository,
@@ -46,6 +50,12 @@ internal class DefaultLimitChangeService(
     clockProvider: ClockProvider,
     transactionRunner: TransactionRunner,
 ) : LimitChangeService {
+    // Only workflows that record events see the relaying repository; switching it off stops enqueueing.
+    private val changeEventRepository = if (relayChangeEvents) {
+        RelayingLimitRuleChangeEventRepository(storedChangeEventRepository, changeEventOutbox)
+    } else {
+        storedChangeEventRepository
+    }
     private val events = LimitChangeEventFactory(idGenerator)
     private val mandates = LimitRuleMandateValidator(mandateRepository)
     private val candidates = LimitRuleCandidateFactory()
@@ -127,6 +137,13 @@ internal class DefaultLimitChangeService(
         clockProvider = clockProvider,
         transactionRunner = transactionRunner,
     )
+    private val relayWorkflow = RelayLimitChangeEventsWorkflow(
+        outbox = changeEventOutbox,
+        changeEventRepository = storedChangeEventRepository,
+        changeRequestRepository = changeRequestRepository,
+        limitRuleRevisionRepository = limitRuleRevisionRepository,
+        transactionRunner = transactionRunner,
+    )
 
     override fun requestLimitRuleChange(
         command: RequestLimitRuleChangeCommand,
@@ -166,4 +183,10 @@ internal class DefaultLimitChangeService(
         trustedActorContext: TrustedChangeActorContext.InternalSystem,
     ): ApplyDueChangesResult =
         applyDueWorkflow.execute(command)
+
+    override fun relayLimitChangeEvents(
+        command: RelayLimitChangeEventsCommand,
+        trustedActorContext: TrustedChangeActorContext.InternalSystem,
+    ): Int =
+        relayWorkflow.execute(command)
 }

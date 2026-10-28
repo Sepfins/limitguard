@@ -2,6 +2,7 @@ package io.github.sepfins.limitguard.api.commands
 
 import io.github.sepfins.limitguard.api.LimitAmount
 import io.github.sepfins.limitguard.api.LimitChangeActorType
+import io.github.sepfins.limitguard.api.LimitChangeEventSink
 import java.time.Instant
 import java.util.UUID
 
@@ -75,5 +76,11 @@ data class CancelLimitRuleChangeCommand(
 data class ApplyDueLimitChangesCommand(
     val tenantId: UUID,
     val dueAt: Instant? = null,
+    val limit: Int = 100,
+)
+
+/** Relays the oldest queued limit-change events of every tenant to [sink]. */
+data class RelayLimitChangeEventsCommand(
+    val sink: LimitChangeEventSink,
     val limit: Int = 100,
 )
