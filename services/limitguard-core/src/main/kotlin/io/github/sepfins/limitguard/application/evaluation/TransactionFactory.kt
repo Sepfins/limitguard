@@ -14,6 +14,7 @@ import io.github.sepfins.limitguard.domain.transaction.PaymentTransaction
 import io.github.sepfins.limitguard.domain.transaction.TransactionStatus
 import io.github.sepfins.limitguard.port.ids.IdGenerator
 import java.time.Instant
+import java.time.temporal.ChronoUnit
 
 internal class TransactionFactory(
     private val idGenerator: IdGenerator,
@@ -33,7 +34,8 @@ internal class TransactionFactory(
             authorizedAmount = Money.positive(command.amount, currency),
             capturedAmount = Money.zero(currency),
             status = TransactionStatus.AUTHORIZED,
-            expiresAt = command.expiresAt,
+            // Stored as TIMESTAMPTZ with microsecond precision; truncate so an exact retry replays.
+            expiresAt = command.expiresAt?.truncatedTo(ChronoUnit.MICROS),
             metadata = Metadata(command.metadata),
             createdAt = now,
         )

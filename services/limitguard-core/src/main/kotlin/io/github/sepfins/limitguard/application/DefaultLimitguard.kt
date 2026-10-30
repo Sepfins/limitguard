@@ -6,16 +6,17 @@ import io.github.sepfins.limitguard.api.LimitInquiryService
 import io.github.sepfins.limitguard.api.Limitguard
 import io.github.sepfins.limitguard.api.TenantCatalogService
 import io.github.sepfins.limitguard.api.TenantCatalogQueryService
+import io.github.sepfins.limitguard.application.applicability.LimitApplicabilityResolver
+import io.github.sepfins.limitguard.application.applicability.LimitRuleMatcher
+import io.github.sepfins.limitguard.application.applicability.MandateResolver
+import io.github.sepfins.limitguard.application.applicability.OperationReferenceResolver
 import io.github.sepfins.limitguard.application.catalog.DefaultTenantCatalogService
 import io.github.sepfins.limitguard.application.catalog.DefaultTenantCatalogQueryService
 import io.github.sepfins.limitguard.application.change.DefaultLimitChangeService
 import io.github.sepfins.limitguard.application.evaluation.AuthorizationEvaluator
 import io.github.sepfins.limitguard.application.evaluation.AuthorizationDecisionRecorder
-import io.github.sepfins.limitguard.application.evaluation.AuthorizationReferenceResolver
 import io.github.sepfins.limitguard.application.evaluation.DefaultLimitEvaluationService
 import io.github.sepfins.limitguard.application.evaluation.ExpireDueAuthorizationsWorkflow
-import io.github.sepfins.limitguard.application.evaluation.LimitRuleMatcher
-import io.github.sepfins.limitguard.application.evaluation.MandateResolver
 import io.github.sepfins.limitguard.application.evaluation.TransactionFactory
 import io.github.sepfins.limitguard.application.inquiry.DefaultLimitInquiryService
 import io.github.sepfins.limitguard.application.transaction.TransactionRecorder
@@ -161,6 +162,27 @@ class DefaultLimitguard(
         transactionRunner = transactionRunner,
     )
 
+    private val usageWindowCalculator = UsageWindowCalculator()
+    private val limitApplicabilityResolver = LimitApplicabilityResolver(
+        referenceResolver = OperationReferenceResolver(
+            tenantRepository = tenantRepository,
+            channelRepository = channelRepository,
+            operationTypeRepository = operationTypeRepository,
+            partyProfileRepository = partyProfileRepository,
+            fundingSourceRepository = fundingSourceRepository,
+            fundingSourceProductRepository = fundingSourceProductRepository,
+        ),
+        fundingSourceOwnerRepository = fundingSourceOwnerRepository,
+        mandateResolver = MandateResolver(
+            mandateRepository = mandateRepository,
+            fundingSourceGroupMemberRepository = fundingSourceGroupMemberRepository,
+        ),
+        limitRuleMatcher = LimitRuleMatcher(
+            limitRuleRepository = limitRuleRepository,
+            channelGroupMemberRepository = channelGroupMemberRepository,
+            limitConfigurationRepository = limitConfigurationRepository,
+        ),
+    )
     private val transactionRecorder = TransactionRecorder(
         transactionRepository = transactionRepository,
         transactionEventRepository = transactionEventRepository,
@@ -180,31 +202,14 @@ class DefaultLimitguard(
         ),
         transactionRepository = transactionRepository,
         transactionEventRepository = transactionEventRepository,
-        fundingSourceOwnerRepository = fundingSourceOwnerRepository,
-        authorizationReferenceResolver = AuthorizationReferenceResolver(
-            tenantRepository = tenantRepository,
-            channelRepository = channelRepository,
-            operationTypeRepository = operationTypeRepository,
-            partyProfileRepository = partyProfileRepository,
-            fundingSourceRepository = fundingSourceRepository,
-            fundingSourceProductRepository = fundingSourceProductRepository,
-        ),
         transactionFactory = TransactionFactory(idGenerator),
-        mandateResolver = MandateResolver(
-            mandateRepository = mandateRepository,
-            fundingSourceGroupMemberRepository = fundingSourceGroupMemberRepository,
-        ),
-        limitRuleMatcher = LimitRuleMatcher(
-            limitRuleRepository = limitRuleRepository,
-            channelGroupMemberRepository = channelGroupMemberRepository,
-            limitConfigurationRepository = limitConfigurationRepository,
-        ),
+        limitApplicabilityResolver = limitApplicabilityResolver,
         authorizationEvaluator = AuthorizationEvaluator(
             UsageReservationService(
                 idGenerator = idGenerator,
                 usageBucketRepository = usageBucketRepository,
                 usageEventRepository = usageEventRepository,
-                usageWindowCalculator = UsageWindowCalculator(),
+                usageWindowCalculator = usageWindowCalculator,
             ),
         ),
         usageMutationService = usageMutationService,
@@ -224,13 +229,9 @@ class DefaultLimitguard(
     override val limitInquiryService: LimitInquiryService = DefaultLimitInquiryService(
         tenantRepository = tenantRepository,
         channelRepository = channelRepository,
-        channelGroupMemberRepository = channelGroupMemberRepository,
         operationTypeRepository = operationTypeRepository,
         fundingSourceProductRepository = fundingSourceProductRepository,
         fundingSourceRepository = fundingSourceRepository,
-        fundingSourceOwnerRepository = fundingSourceOwnerRepository,
-        fundingSourceGroupMemberRepository = fundingSourceGroupMemberRepository,
-        mandateRepository = mandateRepository,
         limitConfigurationRepository = limitConfigurationRepository,
         partyProfileRepository = partyProfileRepository,
         limitChangeRequestRepository = limitChangeRequestRepository,
@@ -241,6 +242,8 @@ class DefaultLimitguard(
         transactionEventRepository = transactionEventRepository,
         authorizationDecisionRepository = authorizationDecisionRepository,
         usageBucketRepository = usageBucketRepository,
+        limitApplicabilityResolver = limitApplicabilityResolver,
+        usageWindowCalculator = usageWindowCalculator,
         clockProvider = clockProvider,
         transactionRunner = transactionRunner,
     )

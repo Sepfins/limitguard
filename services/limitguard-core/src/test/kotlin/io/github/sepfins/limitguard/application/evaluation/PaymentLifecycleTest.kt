@@ -197,7 +197,8 @@ class PaymentLifecycleTest {
         val operation = s.operation("TRANSFER")
         val rule = s.grant(operation, amount = "100")
         val metadata = mapOf("nested" to mapOf("amounts" to listOf(1L, BigDecimal("0.12345678901234567890"))))
-        val allowed = s.command(operation, "75", key = "auth-1").copy(metadata = metadata, expiresAt = NOW.plusSeconds(60))
+        // Sub-microsecond digits are lost in the database and must not break the replay.
+        val allowed = s.command(operation, "75", key = "auth-1").copy(metadata = metadata, expiresAt = NOW.plusSeconds(60).plusNanos(789))
         val denied = s.command(operation, "100.01", key = "auth-2")
 
         val first = s.facade.limitEvaluationService.authorizeTransaction(allowed)

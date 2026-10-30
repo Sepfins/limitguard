@@ -7,7 +7,7 @@ import io.github.sepfins.limitguard.domain.common.TransactionEventId
 import io.github.sepfins.limitguard.domain.common.UsageBucketId
 import io.github.sepfins.limitguard.domain.common.UsageEventId
 import io.github.sepfins.limitguard.domain.common.UsageWindow
-import io.github.sepfins.limitguard.application.evaluation.ApplicableLimitRule
+import io.github.sepfins.limitguard.application.applicability.ApplicableLimitRule
 import io.github.sepfins.limitguard.domain.limit.LimitKind
 import io.github.sepfins.limitguard.domain.limit.LimitRule
 import io.github.sepfins.limitguard.domain.limit.LimitViolation

@@ -1,4 +1,4 @@
-package io.github.sepfins.limitguard.application.evaluation
+package io.github.sepfins.limitguard.application.applicability
 
 import io.github.sepfins.limitguard.api.errors.ConflictException
 import io.github.sepfins.limitguard.api.errors.NotFoundException
@@ -10,7 +10,6 @@ import io.github.sepfins.limitguard.domain.funding.FundingSource
 import io.github.sepfins.limitguard.domain.funding.FundingSourceProduct
 import io.github.sepfins.limitguard.domain.operation.OperationType
 import io.github.sepfins.limitguard.domain.tenant.Tenant
-import io.github.sepfins.limitguard.domain.transaction.PaymentTransaction
 import io.github.sepfins.limitguard.port.persistence.ChannelRepository
 import io.github.sepfins.limitguard.port.persistence.FundingSourceProductRepository
 import io.github.sepfins.limitguard.port.persistence.FundingSourceRepository
@@ -18,7 +17,7 @@ import io.github.sepfins.limitguard.port.persistence.OperationTypeRepository
 import io.github.sepfins.limitguard.port.persistence.PartyProfileRepository
 import io.github.sepfins.limitguard.port.persistence.TenantRepository
 
-internal class AuthorizationReferenceResolver(
+internal class OperationReferenceResolver(
     private val tenantRepository: TenantRepository,
     private val channelRepository: ChannelRepository,
     private val operationTypeRepository: OperationTypeRepository,
@@ -28,10 +27,7 @@ internal class AuthorizationReferenceResolver(
 ) {
     private val operationTypeAncestry = OperationTypeAncestry(operationTypeRepository)
 
-    fun resolve(transaction: PaymentTransaction): ResolvedAuthorizationReferences =
-        resolve(transaction.toLimitEvaluationContext())
-
-    fun resolve(context: LimitEvaluationContext): ResolvedAuthorizationReferences {
+    fun resolve(context: LimitEvaluationContext): ResolvedOperationReferences {
         val tenant = tenantRepository.findById(context.tenantId)
             ?: throw NotFoundException("Tenant not found: ${context.tenantId.value}")
         val channel = channelRepository.findById(context.tenantId, context.channelId)
@@ -49,7 +45,7 @@ internal class AuthorizationReferenceResolver(
                 "Funding source not found: ${context.tenantId.value} / ${context.fundingSourceId.value}",
             )
 
-        return ResolvedAuthorizationReferences(
+        return ResolvedOperationReferences(
             tenant = tenant,
             channel = channel,
             fundingSource = fundingSource,
@@ -87,33 +83,33 @@ internal class AuthorizationReferenceResolver(
     }
 }
 
-internal data class ResolvedAuthorizationReferences(
+internal data class ResolvedOperationReferences(
     val tenant: Tenant,
     val channel: Channel,
     val fundingSource: FundingSource,
     val operationTypePath: List<OperationType>,
     val fundingSourceProductPath: List<FundingSourceProduct>,
 ) {
-    fun unavailableReferenceViolations(): List<Pair<String, String>> = buildList {
+    fun unavailableReferences(): List<ApplicabilityReason> = buildList {
         if (!channel.isActive) {
-            add(
-                "CHANNEL_INACTIVE" to
-                    "Channel ${channel.id.value} is inactive and cannot authorize new transactions",
-            )
+            add(ApplicabilityReason(
+                code = "CHANNEL_INACTIVE",
+                message = "Channel ${channel.id.value} is inactive and cannot authorize new transactions",
+            ))
         }
         if (!fundingSource.isActive) {
-            add(
-                "FUNDING_SOURCE_INACTIVE" to
-                    "Funding source ${fundingSource.id.value} is inactive and cannot authorize new transactions",
-            )
+            add(ApplicabilityReason(
+                code = "FUNDING_SOURCE_INACTIVE",
+                message = "Funding source ${fundingSource.id.value} is inactive and cannot authorize new transactions",
+            ))
         }
         fundingSourceProductPath
             .filterNot { it.isActive }
             .forEach { product ->
-                add(
-                    "FUNDING_SOURCE_PRODUCT_INACTIVE" to
-                        "Funding source product ${product.id.value} is inactive and disables its descendants",
-                )
+                add(ApplicabilityReason(
+                    code = "FUNDING_SOURCE_PRODUCT_INACTIVE",
+                    message = "Funding source product ${product.id.value} is inactive and disables its descendants",
+                ))
             }
     }
 }

@@ -72,7 +72,7 @@ import io.github.sepfins.limitguard.domain.limit.LimitOperationScope
 import io.github.sepfins.limitguard.domain.limit.LimitPeriod
 import io.github.sepfins.limitguard.domain.limit.LimitPriority
 import io.github.sepfins.limitguard.domain.limit.LimitRule
-import io.github.sepfins.limitguard.application.evaluation.ApplicableLimitRule
+import io.github.sepfins.limitguard.application.applicability.ApplicableLimitRule
 import io.github.sepfins.limitguard.domain.limit.LimitUsageConsumptionMode
 import io.github.sepfins.limitguard.domain.mandate.MandateScope
 import io.github.sepfins.limitguard.domain.operation.OperationType

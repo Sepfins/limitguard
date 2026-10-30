@@ -13,6 +13,8 @@ import io.github.sepfins.limitguard.api.errors.ValidationException
 import io.github.sepfins.limitguard.api.results.AuthorizationResult
 import io.github.sepfins.limitguard.api.results.ExpireDueAuthorizationsResult
 import io.github.sepfins.limitguard.api.results.UsageMutationResult
+import io.github.sepfins.limitguard.application.applicability.LimitApplicabilityResolver
+import io.github.sepfins.limitguard.application.applicability.toLimitEvaluationContext
 import io.github.sepfins.limitguard.application.transaction.TransactionIdempotency
 import io.github.sepfins.limitguard.application.transaction.TransactionMutationKind
 import io.github.sepfins.limitguard.application.transaction.TransactionRecorder
@@ -24,7 +26,6 @@ import io.github.sepfins.limitguard.domain.transaction.PaymentTransaction
 import io.github.sepfins.limitguard.domain.transaction.TransactionEvent
 import io.github.sepfins.limitguard.domain.transaction.TransactionEventReason
 import io.github.sepfins.limitguard.internal.json.JsonValueEquality
-import io.github.sepfins.limitguard.port.persistence.FundingSourceOwnerRepository
 import io.github.sepfins.limitguard.port.persistence.TransactionEventRepository
 import io.github.sepfins.limitguard.port.persistence.TransactionRepository
 import io.github.sepfins.limitguard.port.time.ClockProvider
@@ -35,11 +36,8 @@ internal class DefaultLimitEvaluationService(
     private val authorizationDecisionRecorder: AuthorizationDecisionRecorder,
     private val transactionRepository: TransactionRepository,
     private val transactionEventRepository: TransactionEventRepository,
-    private val fundingSourceOwnerRepository: FundingSourceOwnerRepository,
-    private val authorizationReferenceResolver: AuthorizationReferenceResolver,
     private val transactionFactory: TransactionFactory,
-    private val mandateResolver: MandateResolver,
-    private val limitRuleMatcher: LimitRuleMatcher,
+    private val limitApplicabilityResolver: LimitApplicabilityResolver,
     private val authorizationEvaluator: AuthorizationEvaluator,
     private val usageMutationService: UsageMutationService,
     private val transactionRecorder: TransactionRecorder,
@@ -60,58 +58,14 @@ internal class DefaultLimitEvaluationService(
 
             requireFutureAuthorizationExpiry(requestedTransaction, now)
 
-            val references = authorizationReferenceResolver.resolve(requestedTransaction)
-            val unavailableReferences = references.unavailableReferenceViolations()
-            if (unavailableReferences.isNotEmpty()) {
-                return@inTransaction authorizationDecisionRecorder.record(
-                    requestedTransaction = requestedTransaction,
-                    decision = AuthorizationEvaluator.deniedForUnavailableReferences(
-                        attemptedAmount = requestedTransaction.authorizedAmount,
-                        unavailableReferences = unavailableReferences,
-                    ),
-                    authorities = emptyList(),
-                    idempotencyKey = idempotencyKey,
-                    recordedAt = now,
-                )
-            }
-
-            val fundingSourceOwners = fundingSourceOwnerRepository.findByFundingSource(
-                requestedTransaction.tenantId,
-                requestedTransaction.fundingSourceId,
-            )
-            if (fundingSourceOwners.isEmpty()) {
-                throw NotFoundException(
-                    "Funding source has no owner: ${requestedTransaction.tenantId.value} / " +
-                        requestedTransaction.fundingSourceId.value,
-                )
-            }
-
-            val authorities = mandateResolver.resolve(
-                tenantId = requestedTransaction.tenantId,
-                actingPartyProfileId = requestedTransaction.actingPartyProfileId,
-                fundingSourceId = requestedTransaction.fundingSourceId,
-                owners = fundingSourceOwners,
+            val applicability = limitApplicabilityResolver.resolve(
+                context = requestedTransaction.toLimitEvaluationContext(),
+                currency = requestedTransaction.authorizedAmount.currency,
                 at = now,
-            )
-            if (authorities.isEmpty()) {
-                return@inTransaction authorizationDecisionRecorder.record(
-                    requestedTransaction = requestedTransaction,
-                    decision = AuthorizationEvaluator.actorNotAuthorized(requestedTransaction.authorizedAmount),
-                    authorities = emptyList(),
-                    idempotencyKey = idempotencyKey,
-                    recordedAt = now,
-                )
-            }
-
-            val matchingRules = limitRuleMatcher.findMatches(
-                transaction = requestedTransaction,
-                authorities = authorities,
-                references = references,
             )
             val evaluation = authorizationEvaluator.evaluate(
                 transaction = requestedTransaction,
-                matchedRules = matchingRules,
-                noMatchingRuleBehavior = references.tenant.noMatchingRuleBehavior,
+                applicability = applicability,
                 now = now,
             )
 
@@ -119,7 +73,7 @@ internal class DefaultLimitEvaluationService(
                 return@inTransaction authorizationDecisionRecorder.record(
                     requestedTransaction = requestedTransaction,
                     decision = evaluation.decision,
-                    authorities = authorities,
+                    authorities = applicability.authorities,
                     idempotencyKey = idempotencyKey,
                     recordedAt = now,
                 )
@@ -127,7 +81,7 @@ internal class DefaultLimitEvaluationService(
 
             val recorded = transactionRecorder.recordAuthorization(
                 transaction = requestedTransaction,
-                authorities = authorities,
+                authorities = applicability.authorities,
                 recordedAt = now,
             )
             authorizationEvaluator.reserve(
@@ -139,7 +93,7 @@ internal class DefaultLimitEvaluationService(
             authorizationDecisionRecorder.record(
                 requestedTransaction = requestedTransaction,
                 decision = evaluation.decision,
-                authorities = authorities,
+                authorities = applicability.authorities,
                 paymentTransaction = recorded.transaction,
                 transactionEventId = recorded.event.id,
                 idempotencyKey = idempotencyKey,

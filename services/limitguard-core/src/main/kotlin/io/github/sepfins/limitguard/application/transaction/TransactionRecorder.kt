@@ -1,6 +1,6 @@
 package io.github.sepfins.limitguard.application.transaction
 
-import io.github.sepfins.limitguard.application.evaluation.ResolvedFundingAuthority
+import io.github.sepfins.limitguard.application.applicability.ResolvedFundingAuthority
 import io.github.sepfins.limitguard.domain.common.IdempotencyKey
 import io.github.sepfins.limitguard.domain.common.Metadata
 import io.github.sepfins.limitguard.domain.common.Money

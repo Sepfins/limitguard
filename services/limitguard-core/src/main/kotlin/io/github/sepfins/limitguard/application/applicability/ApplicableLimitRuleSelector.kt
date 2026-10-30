@@ -1,9 +1,9 @@
-package io.github.sepfins.limitguard.application.evaluation
+package io.github.sepfins.limitguard.application.applicability
 
 import io.github.sepfins.limitguard.domain.limit.LimitKind
 import io.github.sepfins.limitguard.domain.limit.LimitUsageConsumptionMode
 
-/** Selects the exact rule cascade enforced by transaction authorization. */
+/** Selects the limit cascade: ascending priority tiers per owner, ending with the first isolated tier. */
 internal object ApplicableLimitRuleSelector {
     fun select(matchedRules: List<ApplicableLimitRule>): List<ApplicableLimitRule> {
         val selectedPeriodicRuleIds = matchedRules

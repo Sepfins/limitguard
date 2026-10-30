@@ -1,7 +1,6 @@
-package io.github.sepfins.limitguard.application.evaluation
+package io.github.sepfins.limitguard.application.applicability
 
 import io.github.sepfins.limitguard.domain.limit.appliesToFundingSource
-import io.github.sepfins.limitguard.domain.transaction.PaymentTransaction
 import io.github.sepfins.limitguard.port.persistence.ChannelGroupMemberRepository
 import io.github.sepfins.limitguard.port.persistence.LimitConfigurationRepository
 import io.github.sepfins.limitguard.port.persistence.LimitRuleRepository
@@ -13,19 +12,9 @@ internal class LimitRuleMatcher(
     private val limitConfigurationRepository: LimitConfigurationRepository,
 ) {
     fun findMatches(
-        transaction: PaymentTransaction,
-        authorities: List<ResolvedFundingAuthority>,
-        references: ResolvedAuthorizationReferences,
-    ): List<ApplicableLimitRule> = findMatches(
-        context = transaction.toLimitEvaluationContext(),
-        authorities = authorities,
-        references = references,
-    )
-
-    fun findMatches(
         context: LimitEvaluationContext,
         authorities: List<ResolvedFundingAuthority>,
-        references: ResolvedAuthorizationReferences,
+        references: ResolvedOperationReferences,
     ): List<ApplicableLimitRule> {
         val rules = authorities
             .flatMap { authority ->

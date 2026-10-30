@@ -1,4 +1,4 @@
-package io.github.sepfins.limitguard.application.evaluation
+package io.github.sepfins.limitguard.application.applicability
 
 import io.github.sepfins.limitguard.domain.common.MandateId
 import io.github.sepfins.limitguard.domain.common.PartyProfileId

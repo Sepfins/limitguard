@@ -1,6 +1,7 @@
 package io.github.sepfins.limitguard.application.evaluation
 
 import io.github.sepfins.limitguard.api.results.AuthorizationResult
+import io.github.sepfins.limitguard.application.applicability.ResolvedFundingAuthority
 import io.github.sepfins.limitguard.application.transaction.TransactionIdempotency
 import io.github.sepfins.limitguard.domain.common.AuthorizationDecisionId
 import io.github.sepfins.limitguard.domain.common.IdempotencyKey

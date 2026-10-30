@@ -3,36 +3,29 @@ package io.github.sepfins.limitguard.application.inquiry
 import io.github.sepfins.limitguard.api.LimitKind as ApiLimitKind
 import io.github.sepfins.limitguard.api.LimitPeriod as ApiLimitPeriod
 import io.github.sepfins.limitguard.api.OperationCapacityStatus
-import io.github.sepfins.limitguard.api.errors.NotFoundException
 import io.github.sepfins.limitguard.api.results.ApplicableLimitUsageResult
 import io.github.sepfins.limitguard.api.results.OperationCapacityReasonResult
 import io.github.sepfins.limitguard.api.results.OperationCapacityResult
-import io.github.sepfins.limitguard.application.cap
 import io.github.sepfins.limitguard.application.boundedMoney
-import io.github.sepfins.limitguard.application.evaluation.ApplicableLimitRule
-import io.github.sepfins.limitguard.application.evaluation.ApplicableLimitRuleSelector
+import io.github.sepfins.limitguard.application.applicability.ApplicabilityReason
+import io.github.sepfins.limitguard.application.applicability.ApplicableLimitRule
+import io.github.sepfins.limitguard.application.applicability.LimitApplicability
+import io.github.sepfins.limitguard.application.applicability.LimitApplicabilityResolver
+import io.github.sepfins.limitguard.application.applicability.LimitEvaluationContext
 import io.github.sepfins.limitguard.application.isBounded
 import io.github.sepfins.limitguard.application.toApi
-import io.github.sepfins.limitguard.application.evaluation.AuthorizationReferenceResolver
-import io.github.sepfins.limitguard.application.evaluation.LimitEvaluationContext
-import io.github.sepfins.limitguard.application.evaluation.LimitRuleMatcher
-import io.github.sepfins.limitguard.application.evaluation.MandateResolver
 import io.github.sepfins.limitguard.application.usage.UsageWindowCalculator
 import io.github.sepfins.limitguard.domain.common.CurrencyCode
 import io.github.sepfins.limitguard.domain.common.Money
 import io.github.sepfins.limitguard.domain.limit.LimitKind
-import io.github.sepfins.limitguard.domain.tenant.NoMatchingRuleBehavior
-import io.github.sepfins.limitguard.port.persistence.FundingSourceOwnerRepository
 import io.github.sepfins.limitguard.port.persistence.UsageBucketRepository
 import java.math.BigDecimal
 import java.time.Instant
 import java.util.UUID
 
+/** Maps Limit Applicability to the advisory operation capacity and reads the cascade's buckets. */
 internal class OperationCapacityReader(
-    private val authorizationReferenceResolver: AuthorizationReferenceResolver,
-    private val fundingSourceOwnerRepository: FundingSourceOwnerRepository,
-    private val mandateResolver: MandateResolver,
-    private val limitRuleMatcher: LimitRuleMatcher,
+    private val limitApplicabilityResolver: LimitApplicabilityResolver,
     private val usageBucketRepository: UsageBucketRepository,
     private val usageWindowCalculator: UsageWindowCalculator,
 ) {
@@ -40,93 +33,40 @@ internal class OperationCapacityReader(
         context: LimitEvaluationContext,
         currency: CurrencyCode,
         at: Instant,
+    ): OperationCapacityResult =
+        when (val applicability = limitApplicabilityResolver.resolve(context, currency, at)) {
+            is LimitApplicability.Denied -> result(
+                context = context,
+                currency = currency,
+                at = at,
+                status = OperationCapacityStatus.UNAVAILABLE,
+                applicableLimits = applicability.cascade.map { it.toUsageResult(context, at) },
+                reasons = applicability.reasons.map { it.toResult() },
+            )
+            is LimitApplicability.NotApplicable -> result(
+                context = context,
+                currency = currency,
+                at = at,
+                status = OperationCapacityStatus.NOT_APPLICABLE,
+            )
+            is LimitApplicability.Unrestricted -> result(
+                context = context,
+                currency = currency,
+                at = at,
+                status = OperationCapacityStatus.UNLIMITED,
+            )
+            is LimitApplicability.Applicable -> capacity(context, currency, at, applicability.cascade)
+        }
+
+    private fun capacity(
+        context: LimitEvaluationContext,
+        currency: CurrencyCode,
+        at: Instant,
+        selectedRules: List<ApplicableLimitRule>,
     ): OperationCapacityResult {
-        val references = authorizationReferenceResolver.resolve(context)
-        val unavailableReferences = references.unavailableReferenceViolations()
-        if (unavailableReferences.isNotEmpty()) {
-            return result(
-                context = context,
-                currency = currency,
-                at = at,
-                status = OperationCapacityStatus.UNAVAILABLE,
-                reasons = unavailableReferences.map { (code, message) ->
-                    OperationCapacityReasonResult(code = code, message = message)
-                },
-            )
-        }
-
-        val owners = fundingSourceOwnerRepository.findByFundingSource(
-            tenantId = context.tenantId,
-            fundingSource = context.fundingSourceId,
-        )
-        if (owners.isEmpty()) {
-            throw NotFoundException(
-                "Funding source has no owner: ${context.tenantId.value} / ${context.fundingSourceId.value}",
-            )
-        }
-
-        val authorities = mandateResolver.resolve(
-            tenantId = context.tenantId,
-            actingPartyProfileId = context.actingPartyProfileId,
-            fundingSourceId = context.fundingSourceId,
-            owners = owners,
-            at = at,
-        )
-        if (authorities.isEmpty()) {
-            return result(
-                context = context,
-                currency = currency,
-                at = at,
-                status = OperationCapacityStatus.UNAVAILABLE,
-                reasons = listOf(
-                    OperationCapacityReasonResult(
-                        code = "ACTOR_NOT_AUTHORIZED",
-                        message = "Acting party neither owns the funding source nor has an applicable mandate",
-                    ),
-                ),
-            )
-        }
-
-        val matchingRules = limitRuleMatcher.findMatches(
-            context = context,
-            authorities = authorities,
-            references = references,
-        )
-        if (matchingRules.isEmpty()) {
-            return noMatchingRuleResult(
-                context = context,
-                currency = currency,
-                at = at,
-                behavior = references.tenant.noMatchingRuleBehavior,
-            )
-        }
-
-        val selectedRules = ApplicableLimitRuleSelector.select(matchingRules)
         val applicableLimits = selectedRules.map { it.toUsageResult(context, at) }
         // Unlimited rules are reported as applicable but never cap capacity.
         val boundedLimits = applicableLimits.filter { it.availableAmount != null }
-        val currencyMismatches = selectedRules
-            .map { it.rule }
-            .filter { it.isBounded && it.amount.currency != currency }
-            .map { rule ->
-                OperationCapacityReasonResult(
-                    code = "LIMIT_CURRENCY_MISMATCH",
-                    message = "Cannot calculate ${currency.value} capacity against " +
-                        "${rule.cap.currency.value} limit rule without currency conversion",
-                    limitRuleId = rule.id.value,
-                )
-            }
-
-        if (currencyMismatches.isNotEmpty()) {
-            return result(
-                context = context,
-                currency = currency,
-                at = at,
-                status = OperationCapacityStatus.UNAVAILABLE,
-                applicableLimits = applicableLimits,
-                reasons = currencyMismatches,
-            )
-        }
         if (boundedLimits.isEmpty()) {
             return result(
                 context = context,
@@ -195,40 +135,8 @@ internal class OperationCapacityReader(
         )
     }
 
-    private fun noMatchingRuleResult(
-        context: LimitEvaluationContext,
-        currency: CurrencyCode,
-        at: Instant,
-        behavior: NoMatchingRuleBehavior,
-    ): OperationCapacityResult =
-        when (behavior) {
-            NoMatchingRuleBehavior.ALLOW -> result(
-                context = context,
-                currency = currency,
-                at = at,
-                status = OperationCapacityStatus.UNLIMITED,
-            )
-
-            NoMatchingRuleBehavior.DENY -> result(
-                context = context,
-                currency = currency,
-                at = at,
-                status = OperationCapacityStatus.UNAVAILABLE,
-                reasons = listOf(
-                    OperationCapacityReasonResult(
-                        code = "NO_MATCHING_LIMIT_RULE",
-                        message = "No active limit rule applies to this operation",
-                    ),
-                ),
-            )
-
-            NoMatchingRuleBehavior.NOT_APPLICABLE -> result(
-                context = context,
-                currency = currency,
-                at = at,
-                status = OperationCapacityStatus.NOT_APPLICABLE,
-            )
-        }
+    private fun ApplicabilityReason.toResult(): OperationCapacityReasonResult =
+        OperationCapacityReasonResult(code = code, message = message, limitRuleId = limitRuleId?.value)
 
     private fun result(
         context: LimitEvaluationContext,

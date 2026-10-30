@@ -40,15 +40,13 @@ import io.github.sepfins.limitguard.api.results.PaymentTransactionResult
 import io.github.sepfins.limitguard.api.results.TenantResult
 import io.github.sepfins.limitguard.api.results.TransactionHistoryEventResult
 import io.github.sepfins.limitguard.api.results.TransactionHistoryResult
+import io.github.sepfins.limitguard.application.applicability.LimitApplicabilityResolver
+import io.github.sepfins.limitguard.application.applicability.LimitEvaluationContext
 import io.github.sepfins.limitguard.application.cap
 import io.github.sepfins.limitguard.application.catalog.toResult
 import io.github.sepfins.limitguard.application.isBounded
 import io.github.sepfins.limitguard.application.toApi
 import io.github.sepfins.limitguard.application.change.toResult
-import io.github.sepfins.limitguard.application.evaluation.AuthorizationReferenceResolver
-import io.github.sepfins.limitguard.application.evaluation.LimitEvaluationContext
-import io.github.sepfins.limitguard.application.evaluation.LimitRuleMatcher
-import io.github.sepfins.limitguard.application.evaluation.MandateResolver
 import io.github.sepfins.limitguard.application.usage.UsageWindowCalculator
 import io.github.sepfins.limitguard.domain.change.ChangeActor
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeEvent
@@ -77,10 +75,7 @@ import io.github.sepfins.limitguard.domain.transaction.AuthorizationDecisionReco
 import io.github.sepfins.limitguard.domain.transaction.PaymentTransaction
 import io.github.sepfins.limitguard.domain.transaction.TransactionEvent
 import io.github.sepfins.limitguard.port.persistence.AuthorizationDecisionRepository
-import io.github.sepfins.limitguard.port.persistence.ChannelGroupMemberRepository
 import io.github.sepfins.limitguard.port.persistence.ChannelRepository
-import io.github.sepfins.limitguard.port.persistence.FundingSourceGroupMemberRepository
-import io.github.sepfins.limitguard.port.persistence.FundingSourceOwnerRepository
 import io.github.sepfins.limitguard.port.persistence.FundingSourceProductRepository
 import io.github.sepfins.limitguard.port.persistence.FundingSourceRepository
 import io.github.sepfins.limitguard.port.persistence.LimitChangeRequestRepository
@@ -88,7 +83,6 @@ import io.github.sepfins.limitguard.port.persistence.LimitConfigurationRepositor
 import io.github.sepfins.limitguard.port.persistence.LimitRuleChangeEventRepository
 import io.github.sepfins.limitguard.port.persistence.LimitRuleRepository
 import io.github.sepfins.limitguard.port.persistence.LimitRuleRevisionRepository
-import io.github.sepfins.limitguard.port.persistence.MandateRepository
 import io.github.sepfins.limitguard.port.persistence.OperationTypeRepository
 import io.github.sepfins.limitguard.port.persistence.PartyProfileRepository
 import io.github.sepfins.limitguard.port.persistence.TenantRepository
@@ -98,16 +92,12 @@ import io.github.sepfins.limitguard.port.persistence.UsageBucketRepository
 import io.github.sepfins.limitguard.port.time.ClockProvider
 import io.github.sepfins.limitguard.port.transactions.TransactionRunner
 
-class DefaultLimitInquiryService(
+internal class DefaultLimitInquiryService(
     private val tenantRepository: TenantRepository,
     private val channelRepository: ChannelRepository,
-    channelGroupMemberRepository: ChannelGroupMemberRepository,
     private val operationTypeRepository: OperationTypeRepository,
     private val fundingSourceProductRepository: FundingSourceProductRepository,
     private val fundingSourceRepository: FundingSourceRepository,
-    fundingSourceOwnerRepository: FundingSourceOwnerRepository,
-    fundingSourceGroupMemberRepository: FundingSourceGroupMemberRepository,
-    mandateRepository: MandateRepository,
     private val limitConfigurationRepository: LimitConfigurationRepository,
     private val partyProfileRepository: PartyProfileRepository,
     private val limitChangeRequestRepository: LimitChangeRequestRepository,
@@ -118,29 +108,13 @@ class DefaultLimitInquiryService(
     private val transactionEventRepository: TransactionEventRepository,
     private val authorizationDecisionRepository: AuthorizationDecisionRepository,
     private val usageBucketRepository: UsageBucketRepository,
+    limitApplicabilityResolver: LimitApplicabilityResolver,
+    private val usageWindowCalculator: UsageWindowCalculator,
     private val clockProvider: ClockProvider,
     private val transactionRunner: TransactionRunner,
 ) : LimitInquiryService {
-    private val usageWindowCalculator = UsageWindowCalculator()
     private val operationCapacityReader = OperationCapacityReader(
-        authorizationReferenceResolver = AuthorizationReferenceResolver(
-            tenantRepository = tenantRepository,
-            channelRepository = channelRepository,
-            operationTypeRepository = operationTypeRepository,
-            partyProfileRepository = partyProfileRepository,
-            fundingSourceRepository = fundingSourceRepository,
-            fundingSourceProductRepository = fundingSourceProductRepository,
-        ),
-        fundingSourceOwnerRepository = fundingSourceOwnerRepository,
-        mandateResolver = MandateResolver(
-            mandateRepository = mandateRepository,
-            fundingSourceGroupMemberRepository = fundingSourceGroupMemberRepository,
-        ),
-        limitRuleMatcher = LimitRuleMatcher(
-            limitRuleRepository = limitRuleRepository,
-            channelGroupMemberRepository = channelGroupMemberRepository,
-            limitConfigurationRepository = limitConfigurationRepository,
-        ),
+        limitApplicabilityResolver = limitApplicabilityResolver,
         usageBucketRepository = usageBucketRepository,
         usageWindowCalculator = usageWindowCalculator,
     )

@@ -1,5 +1,8 @@
 package io.github.sepfins.limitguard.application.evaluation
 
+import io.github.sepfins.limitguard.application.applicability.ApplicabilityReason
+import io.github.sepfins.limitguard.application.applicability.ApplicableLimitRule
+import io.github.sepfins.limitguard.application.applicability.LimitApplicability
 import io.github.sepfins.limitguard.application.cap
 import io.github.sepfins.limitguard.application.isBounded
 import io.github.sepfins.limitguard.application.usage.UsageReservationPlan
@@ -12,7 +15,6 @@ import io.github.sepfins.limitguard.domain.limit.LimitViolation
 import io.github.sepfins.limitguard.domain.limit.MatchedLimitRule
 import io.github.sepfins.limitguard.domain.transaction.PaymentTransaction
 import io.github.sepfins.limitguard.domain.transaction.AuthorizationDecisionOutcome
-import io.github.sepfins.limitguard.domain.tenant.NoMatchingRuleBehavior
 import io.github.sepfins.limitguard.domain.usage.UsageMutation
 import java.time.Instant
 
@@ -47,63 +49,49 @@ internal data class AuthorizationEvaluation(
 )
 
 /**
- * Owns the complete authorization decision. Persistence of an allowed
- * transaction and its prepared usage reservation remains orchestration work.
+ * Turns Limit Applicability into the authorization decision: amount checks against the
+ * cascade and a prepared usage reservation. Persisting the allowed transaction and the
+ * reservation remains orchestration work.
  */
 internal class AuthorizationEvaluator(
     private val usageReservationService: UsageReservationService,
 ) {
     fun evaluate(
         transaction: PaymentTransaction,
-        matchedRules: List<ApplicableLimitRule>,
-        noMatchingRuleBehavior: NoMatchingRuleBehavior,
+        applicability: LimitApplicability,
+        now: Instant,
+    ): AuthorizationEvaluation =
+        when (applicability) {
+            is LimitApplicability.Denied -> denied(
+                rules = applicability.cascade,
+                violations = applicability.reasons.map { it.toViolation(transaction.authorizedAmount) },
+            )
+            is LimitApplicability.NotApplicable -> AuthorizationEvaluation(
+                decision = LimitDecision(
+                    outcome = AuthorizationDecisionOutcome.NOT_APPLICABLE,
+                    matchedRules = emptyList(),
+                    violations = emptyList(),
+                ),
+                reservationPlan = null,
+            )
+            is LimitApplicability.Unrestricted -> evaluateCascade(transaction, emptyList(), now)
+            is LimitApplicability.Applicable -> evaluateCascade(transaction, applicability.cascade, now)
+        }
+
+    private fun evaluateCascade(
+        transaction: PaymentTransaction,
+        cascade: List<ApplicableLimitRule>,
         now: Instant,
     ): AuthorizationEvaluation {
-        if (matchedRules.isEmpty()) {
-            when (noMatchingRuleBehavior) {
-                NoMatchingRuleBehavior.ALLOW -> Unit
-                NoMatchingRuleBehavior.DENY -> return denied(
-                    rules = emptyList(),
-                    violations = listOf(
-                        LimitViolation(
-                            code = "NO_MATCHING_LIMIT_RULE",
-                            message = "No active limit rule applies to this authorization",
-                            limitRuleId = null,
-                            limitAmount = null,
-                            attemptedAmount = transaction.authorizedAmount,
-                            remainingAmount = null,
-                        ),
-                    ),
-                )
-                NoMatchingRuleBehavior.NOT_APPLICABLE -> return AuthorizationEvaluation(
-                    decision = LimitDecision(
-                        outcome = AuthorizationDecisionOutcome.NOT_APPLICABLE,
-                        matchedRules = emptyList(),
-                        violations = emptyList(),
-                    ),
-                    reservationPlan = null,
-                )
-            }
-        }
-
-        val evaluatedRules = ApplicableLimitRuleSelector.select(matchedRules)
         // Unlimited rules are reported as matched but never deny and reserve no usage.
-        val boundedRules = evaluatedRules.filter { it.rule.isBounded }
-        val currencyViolations = boundedRules
-            .filter { it.rule.amount.currency != transaction.authorizedAmount.currency }
-            .map { it.rule.currencyMismatchViolation(transaction.authorizedAmount) }
-
-        if (currencyViolations.isNotEmpty()) {
-            return denied(evaluatedRules, currencyViolations)
-        }
-
+        val boundedRules = cascade.filter { it.rule.isBounded }
         val perTransactionViolations = boundedRules
             .filter { it.configuration.limitKind == LimitKind.PerTransaction }
             .filter { transaction.authorizedAmount > it.rule.cap }
             .map { it.rule.perTransactionViolation(transaction.authorizedAmount) }
 
         if (perTransactionViolations.isNotEmpty()) {
-            return denied(evaluatedRules, perTransactionViolations)
+            return denied(cascade, perTransactionViolations)
         }
 
         val reservationPlan = usageReservationService.planAuthorizationReservation(
@@ -112,7 +100,7 @@ internal class AuthorizationEvaluator(
                 .filter { it.configuration.limitKind is LimitKind.Periodic },
             now = now,
         )
-        val decision = decision(evaluatedRules, reservationPlan.violations)
+        val decision = decision(cascade, reservationPlan.violations)
 
         return AuthorizationEvaluation(
             decision = decision,
@@ -157,6 +145,18 @@ internal class AuthorizationEvaluator(
             violations = violations,
         )
 
+    private fun ApplicabilityReason.toViolation(attemptedAmount: Money): LimitViolation =
+        LimitViolation(
+            code = code,
+            message = message,
+            limitRuleId = limitRuleId,
+            // AuthorizationResult has one currency field for attempted and limit amounts,
+            // so a mismatched rule's amount is not reported as the limit amount.
+            limitAmount = null,
+            attemptedAmount = attemptedAmount,
+            remainingAmount = null,
+        )
+
     private fun LimitRule.perTransactionViolation(attemptedAmount: Money): LimitViolation =
         LimitViolation(
             code = "PER_TRANSACTION_LIMIT_EXCEEDED",
@@ -164,19 +164,6 @@ internal class AuthorizationEvaluator(
                 "exceeds per-transaction limit ${cap.amount} ${cap.currency.value}",
             limitRuleId = id,
             limitAmount = cap,
-            attemptedAmount = attemptedAmount,
-            remainingAmount = null,
-        )
-
-    private fun LimitRule.currencyMismatchViolation(attemptedAmount: Money): LimitViolation =
-        LimitViolation(
-            code = "LIMIT_CURRENCY_MISMATCH",
-            message = "Cannot evaluate ${attemptedAmount.currency.value} transaction against " +
-                "${amount.currency.value} limit rule without currency conversion",
-            limitRuleId = id,
-            // AuthorizationResult currently has one currency field for both
-            // attempted and limit amounts, so do not mislabel this amount.
-            limitAmount = null,
             attemptedAmount = attemptedAmount,
             remainingAmount = null,
         )
@@ -189,41 +176,4 @@ internal class AuthorizationEvaluator(
             amount = rule.amount,
             priority = configuration.priority,
         )
-
-    companion object {
-        fun actorNotAuthorized(attemptedAmount: Money): LimitDecision =
-            LimitDecision(
-                outcome = AuthorizationDecisionOutcome.DENIED,
-                matchedRules = emptyList(),
-                violations = listOf(
-                    LimitViolation(
-                        code = "ACTOR_NOT_AUTHORIZED",
-                        message = "Acting party neither owns the funding source nor has an applicable mandate",
-                        limitRuleId = null,
-                        limitAmount = null,
-                        attemptedAmount = attemptedAmount,
-                        remainingAmount = null,
-                    ),
-                ),
-            )
-
-        fun deniedForUnavailableReferences(
-            attemptedAmount: Money,
-            unavailableReferences: List<Pair<String, String>>,
-        ): LimitDecision =
-            LimitDecision(
-                outcome = AuthorizationDecisionOutcome.DENIED,
-                matchedRules = emptyList(),
-                violations = unavailableReferences.map { (code, message) ->
-                    LimitViolation(
-                        code = code,
-                        message = message,
-                        limitRuleId = null,
-                        limitAmount = null,
-                        attemptedAmount = attemptedAmount,
-                        remainingAmount = null,
-                    )
-                },
-            )
-    }
 }
