@@ -83,7 +83,8 @@ class SubmissionPolicyTest {
     @Test
     fun `a policy can name its own delay instead of taking an instant from the host`() {
         val s = scenario()
-        val configuration = s.configuration(s.operation("TRANSFER", leaf = true))
+        val transfer = s.operation("TRANSFER", leaf = true)
+        val configuration = s.configuration(transfer)
         policy(s, "COOLING_OFF", LimitChangePolicyDecision.ALLOW, actions = listOf(
             mapOf("type" to "SET_EFFECTIVE_AT", "after" to "PT30M"),
         ))
@@ -102,6 +103,17 @@ class SubmissionPolicyTest {
 
         assertEquals(LimitRuleChangeStatus.PENDING_EFFECTIVE_DATE, request.status)
         assertEquals(NOW.plusSeconds(30 * 60), request.effectiveAt)
+
+        // The delay is a floor: a host time inside it is pushed out, a later one stands.
+        val soon = s.facade.limitChangeService.requestLimitRuleChange(
+            s.changeCommand(s.configuration(transfer), setAmount("800")).copy(effectiveAt = NOW.plusSeconds(5 * 60)),
+        )
+        assertEquals(NOW.plusSeconds(30 * 60), soon.effectiveAt)
+        val nextWeek = NOW.plusSeconds(7 * 24 * 3600)
+        val later = s.facade.limitChangeService.requestLimitRuleChange(
+            s.changeCommand(s.configuration(transfer), setAmount("800")).copy(effectiveAt = nextWeek),
+        )
+        assertEquals(nextWeek, later.effectiveAt)
     }
 
     @Test

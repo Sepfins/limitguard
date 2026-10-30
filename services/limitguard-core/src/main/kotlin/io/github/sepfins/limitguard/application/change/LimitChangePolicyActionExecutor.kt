@@ -31,10 +31,13 @@ internal class LimitChangePolicyActionExecutor {
     ): SingleActionExecution {
         require(action.effectiveAt > at) { "SET_EFFECTIVE_AT must schedule the request in the future" }
 
+        // A policy delay is a floor: it postpones a change but never pulls one the host
+        // scheduled later back to the policy's time.
         val before = request.effectiveAt
-        val changed = before != action.effectiveAt
+        val effectiveAt = maxOf(action.effectiveAt, before ?: action.effectiveAt)
+        val changed = before != effectiveAt
         val after = if (changed) {
-            request.copy(effectiveAt = action.effectiveAt, updatedAt = at)
+            request.copy(effectiveAt = effectiveAt, updatedAt = at)
         } else {
             request
         }
@@ -43,7 +46,7 @@ internal class LimitChangePolicyActionExecutor {
             result = mapOf(
                 "type" to "SET_EFFECTIVE_AT",
                 "before" to before?.toString(),
-                "after" to action.effectiveAt.toString(),
+                "after" to effectiveAt.toString(),
                 "changed" to changed,
             ),
         )

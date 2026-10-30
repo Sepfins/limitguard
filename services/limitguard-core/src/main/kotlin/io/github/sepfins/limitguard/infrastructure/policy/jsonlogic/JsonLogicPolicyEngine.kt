@@ -27,7 +27,8 @@ import java.time.Instant
  *
  * Supported actions are `SET_EFFECTIVE_AT` with either an `instant` or an `after` ISO-8601
  * duration counted from evaluation, and `CAP_REQUESTED_AMOUNT` with an `amount` and optional
- * `currency`. Action values may be literals or JSON Logic expressions evaluated against the same input.
+ * `currency`. `SET_EFFECTIVE_AT` only postpones: a request the host scheduled later keeps its time.
+ * Action values may be literals or JSON Logic expressions evaluated against the same input.
  */
 class JsonLogicPolicyEngine : PolicyEngine {
     private val jsonLogic = ExactDecimalJsonLogicOperations.installInto(JsonLogic())
