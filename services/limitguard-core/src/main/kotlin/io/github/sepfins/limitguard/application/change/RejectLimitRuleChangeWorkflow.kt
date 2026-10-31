@@ -3,23 +3,18 @@ package io.github.sepfins.limitguard.application.change
 import io.github.sepfins.limitguard.api.commands.RejectLimitRuleChangeCommand
 import io.github.sepfins.limitguard.api.TrustedChangeActorContext
 import io.github.sepfins.limitguard.api.errors.ConflictException
-import io.github.sepfins.limitguard.api.errors.NotFoundException
 import io.github.sepfins.limitguard.api.errors.ValidationException
 import io.github.sepfins.limitguard.api.results.LimitChangeRequestResult
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeStatus
 import io.github.sepfins.limitguard.domain.common.LimitChangeRequestId
 import io.github.sepfins.limitguard.domain.common.Metadata
 import io.github.sepfins.limitguard.domain.common.TenantId
-import io.github.sepfins.limitguard.port.persistence.LimitChangeRequestRepository
-import io.github.sepfins.limitguard.port.persistence.LimitRuleChangeEventRepository
 import io.github.sepfins.limitguard.port.time.ClockProvider
 import io.github.sepfins.limitguard.port.transactions.TransactionRunner
 
 internal class RejectLimitRuleChangeWorkflow(
     private val eligibility: LimitChangeEligibilityValidator,
-    private val changeEventFactory: LimitChangeEventFactory,
-    private val changeRequestRepository: LimitChangeRequestRepository,
-    private val changeEventRepository: LimitRuleChangeEventRepository,
+    private val transitions: LimitChangeTransitionRecorder,
     private val locks: LimitChangeLocks,
     private val clockProvider: ClockProvider,
     private val transactionRunner: TransactionRunner,
@@ -39,21 +34,7 @@ internal class RejectLimitRuleChangeWorkflow(
             }
             eligibility.validateActionActor(tenantId, actor)
 
-            val persistedRejected = changeRequestRepository.update(
-                tenantId,
-                request.reject(command.decisionReason, now),
-            )
-            changeEventRepository.insert(
-                tenantId,
-                changeEventFactory.rejected(
-                    before = request,
-                    after = persistedRejected,
-                    now = now,
-                    actor = actor,
-                    eventPayload = Metadata(command.metadata),
-                ),
-            )
-            persistedRejected.toResult()
+            transitions.reject(request, command.decisionReason, actor, now, Metadata(command.metadata)).toResult()
         }
     }
 

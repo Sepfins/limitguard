@@ -27,7 +27,7 @@ internal class RequestLimitRuleChangeWorkflow(
     private val mandateValidator: LimitRuleMandateValidator,
     private val eligibility: LimitChangeEligibilityValidator,
     private val changeRequestFactory: LimitChangeRequestFactory,
-    private val changeEventFactory: LimitChangeEventFactory,
+    private val transitions: LimitChangeTransitionRecorder,
     private val policyRunner: LimitChangePolicyRunner,
     private val applicationWorkflow: LimitChangeApplicationWorkflow,
     private val changeRequestRepository: LimitChangeRequestRepository,
@@ -68,7 +68,9 @@ internal class RequestLimitRuleChangeWorkflow(
 
             // The pending-target index makes a concurrent request for the same target wait, then conflict.
             val requested = try {
-                transactionRunner.inSavepoint { changeRequestRepository.insert(tenantId, request) }
+                transactionRunner.inSavepoint {
+                    transitions.request(request, LimitChangeCreationIntent.capture(command), now)
+                }
             } catch (exception: LimitguardException) {
                 if (exception !is ConflictException && exception !is IdempotencyConflictException) throw exception
                 replay(command, tenantId)?.let { return@inTransaction it }
@@ -78,11 +80,6 @@ internal class RequestLimitRuleChangeWorkflow(
             if (locked.rule == null && locks.currentRule(tenantId, target) != null) {
                 throw ConflictException("limit rule for the target was created concurrently; retry")
             }
-            changeEventRepository.insert(tenantId, changeEventFactory.requested(
-                requested,
-                now,
-                originalIntent = LimitChangeCreationIntent.capture(command),
-            ))
 
             val authorization = policyRunner.authorize(
                 request = requested,
@@ -93,24 +90,13 @@ internal class RequestLimitRuleChangeWorkflow(
                 is LimitChangeAuthorization.Failed -> {
                     val reason = authorization.evaluation.message
                         ?: "Policy ${authorization.policy.code.value} evaluation failed"
-                    val failed = changeRequestRepository.update(
-                        tenantId,
-                        policyRequest.fail(reason, now),
-                    )
-                    changeEventRepository.insert(
-                        tenantId,
-                        changeEventFactory.failed(
-                            before = policyRequest,
-                            after = failed,
-                            now = now,
-                            failureReason = reason,
-                            policyId = authorization.policy.id,
-                            eventPayload = Metadata(
-                                mapOf("evaluationId" to authorization.evaluation.id.value.toString())
-                            ),
-                        ),
-                    )
-                    return@inTransaction failed.toResult()
+                    return@inTransaction transitions.fail(
+                        request = policyRequest,
+                        reason = reason,
+                        at = now,
+                        payload = Metadata(mapOf("evaluationId" to authorization.evaluation.id.value.toString())),
+                        policyId = authorization.policy.id,
+                    ).toResult()
                 }
                 is LimitChangeAuthorization.ManualApprovalRequired -> {
                     if (policyRequest != requested) applicationWorkflow.validate(policyRequest, locked, now)
@@ -125,28 +111,20 @@ internal class RequestLimitRuleChangeWorkflow(
                     val reason = authorization.policy.denialMessage
                         ?: authorization.evaluation.message
                         ?: "Denied by policy ${authorization.policy.code.value}"
-                    val rejected = changeRequestRepository.update(
-                        tenantId,
-                        policyRequest.reject(reason, now),
-                    )
-                    changeEventRepository.insert(
-                        tenantId,
-                        changeEventFactory.rejected(
-                            before = policyRequest,
-                            after = rejected,
-                            now = now,
-                            actor = ChangeActor.System,
-                            eventPayload = Metadata(
-                                mapOf(
-                                    "policyCode" to authorization.policy.code.value,
-                                    "denialCode" to authorization.policy.denialCode,
-                                    "evaluationId" to authorization.evaluation.id.value.toString(),
-                                )
-                            ),
-                            policyId = authorization.policy.id,
+                    return@inTransaction transitions.reject(
+                        request = policyRequest,
+                        reason = reason,
+                        actor = ChangeActor.System,
+                        at = now,
+                        payload = Metadata(
+                            mapOf(
+                                "policyCode" to authorization.policy.code.value,
+                                "denialCode" to authorization.policy.denialCode,
+                                "evaluationId" to authorization.evaluation.id.value.toString(),
+                            )
                         ),
-                    )
-                    return@inTransaction rejected.toResult()
+                        policyId = authorization.policy.id,
+                    ).toResult()
                 }
                 is LimitChangeAuthorization.Allowed -> {
                     applicationWorkflow.approveAndApply(

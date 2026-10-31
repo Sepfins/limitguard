@@ -50,13 +50,16 @@ internal class DefaultLimitChangeService(
     clockProvider: ClockProvider,
     transactionRunner: TransactionRunner,
 ) : LimitChangeService {
-    // Only workflows that record events see the relaying repository; switching it off stops enqueueing.
-    private val changeEventRepository = if (relayChangeEvents) {
-        RelayingLimitRuleChangeEventRepository(storedChangeEventRepository, changeEventOutbox)
-    } else {
-        storedChangeEventRepository
-    }
-    private val events = LimitChangeEventFactory(idGenerator)
+    // Only the recorder sees the relaying repository; switching it off stops enqueueing.
+    private val transitions = LimitChangeTransitionRecorder(
+        requests = changeRequestRepository,
+        events = if (relayChangeEvents) {
+            RelayingLimitRuleChangeEventRepository(storedChangeEventRepository, changeEventOutbox)
+        } else {
+            storedChangeEventRepository
+        },
+        idGenerator = idGenerator,
+    )
     private val mandates = LimitRuleMandateValidator(mandateRepository)
     private val candidates = LimitRuleCandidateFactory()
     private val locks = LimitChangeLocks(limitConfigurationRepository, changeRequestRepository, limitRuleRepository)
@@ -68,11 +71,9 @@ internal class DefaultLimitChangeService(
         mandates = mandateRepository,
     )
     private val application = LimitChangeApplicationWorkflow(
-        changeRequestRepository = changeRequestRepository,
-        changeEventRepository = changeEventRepository,
+        transitions = transitions,
         limitRuleRepository = limitRuleRepository,
         limitRuleRevisionRepository = limitRuleRevisionRepository,
-        changeEventFactory = events,
         candidateFactory = candidates,
         mandateValidator = mandates,
         eligibility = eligibility,
@@ -85,18 +86,17 @@ internal class DefaultLimitChangeService(
         mandateValidator = mandates,
         eligibility = eligibility,
         changeRequestFactory = LimitChangeRequestFactory(),
-        changeEventFactory = events,
+        transitions = transitions,
         policyRunner = LimitChangePolicyRunner(
             policyRepository = policyRepository,
             evaluationRepository = policyEvaluationRepository,
-            changeEventRepository = changeEventRepository,
+            transitions = transitions,
             engineRegistry = PolicyEngineRegistry(policyEngines),
-            changeEventFactory = events,
             idGenerator = idGenerator,
         ),
         applicationWorkflow = application,
         changeRequestRepository = changeRequestRepository,
-        changeEventRepository = changeEventRepository,
+        changeEventRepository = storedChangeEventRepository,
         locks = locks,
         idGenerator = idGenerator,
         clockProvider = clockProvider,
@@ -111,18 +111,14 @@ internal class DefaultLimitChangeService(
     )
     private val rejectWorkflow = RejectLimitRuleChangeWorkflow(
         eligibility = eligibility,
-        changeEventFactory = events,
-        changeRequestRepository = changeRequestRepository,
-        changeEventRepository = changeEventRepository,
+        transitions = transitions,
         locks = locks,
         clockProvider = clockProvider,
         transactionRunner = transactionRunner,
     )
     private val cancelWorkflow = CancelLimitRuleChangeWorkflow(
         eligibility = eligibility,
-        changeEventFactory = events,
-        changeRequestRepository = changeRequestRepository,
-        changeEventRepository = changeEventRepository,
+        transitions = transitions,
         locks = locks,
         clockProvider = clockProvider,
         transactionRunner = transactionRunner,
@@ -130,9 +126,8 @@ internal class DefaultLimitChangeService(
     private val applyDueWorkflow = ApplyDueLimitChangesWorkflow(
         eligibility = eligibility,
         applicationWorkflow = application,
-        changeEventFactory = events,
+        transitions = transitions,
         changeRequestRepository = changeRequestRepository,
-        changeEventRepository = changeEventRepository,
         locks = locks,
         clockProvider = clockProvider,
         transactionRunner = transactionRunner,

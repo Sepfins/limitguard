@@ -10,7 +10,6 @@ import io.github.sepfins.limitguard.domain.change.LimitRuleChangeRequest
 import io.github.sepfins.limitguard.domain.common.LimitChangeRequestId
 import io.github.sepfins.limitguard.domain.common.TenantId
 import io.github.sepfins.limitguard.port.persistence.LimitChangeRequestRepository
-import io.github.sepfins.limitguard.port.persistence.LimitRuleChangeEventRepository
 import io.github.sepfins.limitguard.port.time.ClockProvider
 import io.github.sepfins.limitguard.port.transactions.TransactionRunner
 import java.time.Instant
@@ -18,9 +17,8 @@ import java.time.Instant
 internal class ApplyDueLimitChangesWorkflow(
     private val eligibility: LimitChangeEligibilityValidator,
     private val applicationWorkflow: LimitChangeApplicationWorkflow,
-    private val changeEventFactory: LimitChangeEventFactory,
+    private val transitions: LimitChangeTransitionRecorder,
     private val changeRequestRepository: LimitChangeRequestRepository,
-    private val changeEventRepository: LimitRuleChangeEventRepository,
     private val locks: LimitChangeLocks,
     private val clockProvider: ClockProvider,
     private val transactionRunner: TransactionRunner,
@@ -92,20 +90,7 @@ internal class ApplyDueLimitChangesWorkflow(
         dueAt: Instant,
         reason: String?,
     ) {
-        val failureReason = reason ?: "scheduled limit change application failed"
-        val persistedFailed = changeRequestRepository.update(
-            request.tenantId,
-            request.fail(failureReason, dueAt),
-        )
-        changeEventRepository.insert(
-            request.tenantId,
-            changeEventFactory.failed(
-                before = request,
-                after = persistedFailed,
-                now = dueAt,
-                failureReason = failureReason,
-            ),
-        )
+        transitions.fail(request, reason ?: "scheduled limit change application failed", dueAt)
     }
 
     private inline fun <T> mapValidation(block: () -> T): T =

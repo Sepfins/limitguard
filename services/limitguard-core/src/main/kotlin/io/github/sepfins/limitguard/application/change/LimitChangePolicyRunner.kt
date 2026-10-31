@@ -17,16 +17,14 @@ import io.github.sepfins.limitguard.internal.json.JsonSnapshots
 import io.github.sepfins.limitguard.port.ids.IdGenerator
 import io.github.sepfins.limitguard.port.persistence.LimitChangePolicyEvaluationRepository
 import io.github.sepfins.limitguard.port.persistence.LimitChangePolicyRepository
-import io.github.sepfins.limitguard.port.persistence.LimitRuleChangeEventRepository
 import java.time.Instant
 import java.util.Collections
 
 internal class LimitChangePolicyRunner(
     private val policyRepository: LimitChangePolicyRepository,
     private val evaluationRepository: LimitChangePolicyEvaluationRepository,
-    private val changeEventRepository: LimitRuleChangeEventRepository,
+    private val transitions: LimitChangeTransitionRecorder,
     private val engineRegistry: PolicyEngineRegistry,
-    private val changeEventFactory: LimitChangeEventFactory,
     private val idGenerator: IdGenerator,
     private val actionExecutor: LimitChangePolicyActionExecutor = LimitChangePolicyActionExecutor(),
 ) {
@@ -71,10 +69,7 @@ internal class LimitChangePolicyRunner(
                     evaluatedAt = at,
                 ),
             )
-            changeEventRepository.insert(
-                request.tenantId,
-                changeEventFactory.policyEvaluated(beforeActions, currentRequest, evaluation, at),
-            )
+            transitions.recordPolicyEvaluation(beforeActions, currentRequest, evaluation, at)
 
             if (evaluation.outcome == LimitChangePolicyEvaluationOutcome.ERROR) {
                 return LimitChangeAuthorization.Failed(policy, evaluation, currentRequest)

@@ -14,18 +14,14 @@ import io.github.sepfins.limitguard.domain.common.Metadata
 import io.github.sepfins.limitguard.domain.common.LimitRuleRevisionId
 import io.github.sepfins.limitguard.domain.limit.LimitRule
 import io.github.sepfins.limitguard.port.ids.IdGenerator
-import io.github.sepfins.limitguard.port.persistence.LimitChangeRequestRepository
-import io.github.sepfins.limitguard.port.persistence.LimitRuleChangeEventRepository
 import io.github.sepfins.limitguard.port.persistence.LimitRuleRepository
 import io.github.sepfins.limitguard.port.persistence.LimitRuleRevisionRepository
 import java.time.Instant
 
 internal class LimitChangeApplicationWorkflow(
-    private val changeRequestRepository: LimitChangeRequestRepository,
-    private val changeEventRepository: LimitRuleChangeEventRepository,
+    private val transitions: LimitChangeTransitionRecorder,
     private val limitRuleRepository: LimitRuleRepository,
     private val limitRuleRevisionRepository: LimitRuleRevisionRepository,
-    private val changeEventFactory: LimitChangeEventFactory,
     private val candidateFactory: LimitRuleCandidateFactory,
     private val mandateValidator: LimitRuleMandateValidator,
     private val eligibility: LimitChangeEligibilityValidator,
@@ -50,17 +46,10 @@ internal class LimitChangeApplicationWorkflow(
         policyId: LimitChangePolicyId? = null,
     ): LimitRuleChangeRequest {
         validate(request, target, at)
-        val approved = changeRequestRepository.update(request.tenantId, request.approve(reason, at))
-        changeEventRepository.insert(request.tenantId, changeEventFactory.approved(
-            before = request, after = approved, now = at, actor = actor,
-            eventPayload = eventPayload, policyId = policyId,
-        ))
-
+        val approved = transitions.approve(request, reason, actor, at, eventPayload, policyId)
         val effectiveAt = approved.effectiveAt
         if (effectiveAt != null && effectiveAt > at) {
-            val scheduled = changeRequestRepository.update(request.tenantId, approved.schedule(effectiveAt, at))
-            changeEventRepository.insert(request.tenantId, changeEventFactory.scheduled(approved, scheduled, at, actor))
-            return scheduled
+            return transitions.schedule(approved, effectiveAt, actor, at)
         }
         return applyInCurrentTransaction(approved, target, actor, at)
     }
@@ -107,13 +96,7 @@ internal class LimitChangeApplicationWorkflow(
             ),
         )
 
-        val applied = request.markApplied(persistedRule.id, applicationTime)
-        val persistedApplied = changeRequestRepository.update(request.tenantId, applied)
-        changeEventRepository.insert(
-            request.tenantId,
-            changeEventFactory.applied(request, persistedApplied, applicationTime, actor),
-        )
-        return persistedApplied
+        return transitions.apply(request, persistedRule.id, actor, applicationTime)
     }
 
     private fun LimitRuleChangeType.toRevisionEventType(): LimitRuleRevisionEventType =
