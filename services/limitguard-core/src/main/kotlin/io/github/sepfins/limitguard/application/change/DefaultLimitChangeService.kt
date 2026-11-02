@@ -60,7 +60,6 @@ internal class DefaultLimitChangeService(
         },
         idGenerator = idGenerator,
     )
-    private val mandates = LimitRuleMandateValidator(mandateRepository)
     private val candidates = LimitRuleCandidateFactory()
     private val locks = LimitChangeLocks(limitConfigurationRepository, changeRequestRepository, limitRuleRepository)
     private val eligibility = LimitChangeEligibilityValidator(
@@ -75,15 +74,14 @@ internal class DefaultLimitChangeService(
         limitRuleRepository = limitRuleRepository,
         limitRuleRevisionRepository = limitRuleRevisionRepository,
         candidateFactory = candidates,
-        mandateValidator = mandates,
         eligibility = eligibility,
         idGenerator = idGenerator,
+        transactionRunner = transactionRunner,
     )
     private val requestWorkflow = RequestLimitRuleChangeWorkflow(
         commandValidator = ChangeCommandValidator(),
         referenceResolver = ChangeReferenceResolver(limitRuleRevisionRepository),
         candidateFactory = candidates,
-        mandateValidator = mandates,
         eligibility = eligibility,
         changeRequestFactory = LimitChangeRequestFactory(),
         transitions = transitions,
@@ -126,7 +124,6 @@ internal class DefaultLimitChangeService(
     private val applyDueWorkflow = ApplyDueLimitChangesWorkflow(
         eligibility = eligibility,
         applicationWorkflow = application,
-        transitions = transitions,
         changeRequestRepository = changeRequestRepository,
         locks = locks,
         clockProvider = clockProvider,

@@ -273,15 +273,8 @@ class JooqLimitChangeRequestRepository(
     private fun LimitRuleChangeRequest.requestChannelId(): java.util.UUID? = requestActorContext.requestChannelId?.value
 
     private companion object {
-        val PENDING_STATUSES = listOf(
-            GeneratedLimitRuleChangeStatus.REQUESTED,
-            GeneratedLimitRuleChangeStatus.APPROVED,
-            GeneratedLimitRuleChangeStatus.PENDING_EFFECTIVE_DATE,
-        )
-        val DUE_STATUSES = listOf(
-            GeneratedLimitRuleChangeStatus.APPROVED,
-            GeneratedLimitRuleChangeStatus.PENDING_EFFECTIVE_DATE,
-        )
+        val PENDING_STATUSES = LimitRuleChangeStatus.OPEN.map { GeneratedLimitRuleChangeStatus.valueOf(it.name) }
+        val DUE_STATUSES = LimitRuleChangeStatus.AWAITING_APPLICATION.map { GeneratedLimitRuleChangeStatus.valueOf(it.name) }
     }
 }
 

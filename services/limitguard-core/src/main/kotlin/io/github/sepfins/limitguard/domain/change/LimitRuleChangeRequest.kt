@@ -66,6 +66,19 @@ data class LimitRuleChangeRequest(
             mandateScope = targetMandateId?.let(MandateScope::MandateSpecific) ?: MandateScope.AllOwnerMandates,
         )
 
+    val isAwaitingApproval: Boolean
+        get() = status.isAwaitingApproval
+
+    /** The deadline is exclusive: the request is elapsed from the instant it expires. */
+    fun isElapsedAt(at: Instant): Boolean = expiresAt != null && expiresAt <= at
+
+    /** An approved change whose application time has come. */
+    fun isDueAt(at: Instant): Boolean =
+        status.isAwaitingApplication && (effectiveAt == null || effectiveAt <= at)
+
+    /** When the change applies if it is adopted at [now]: its effective time while that is ahead, else now. */
+    fun applicationTimeFrom(now: Instant): Instant = effectiveAt?.takeIf { it > now } ?: now
+
     fun approve(
         reason: String?,
         at: Instant,
@@ -92,7 +105,6 @@ data class LimitRuleChangeRequest(
         at: Instant
     ): LimitRuleChangeRequest {
         return transitionTo(LimitRuleChangeStatus.REJECTED).copy(
-            status = LimitRuleChangeStatus.REJECTED,
             decidedAt = at,
             decisionReason = reason,
             updatedAt = at,
@@ -157,6 +169,9 @@ data class LimitRuleChangeRequest(
         nextStatus in allowedTransitions.getValue(status)
 
     companion object {
+        /** The failure reason recorded for an Elapsed Change Request, and the conflict refusing its approval. */
+        const val DEADLINE_ELAPSED = "limit change request deadline elapsed"
+
         private val allowedTransitions: Map<LimitRuleChangeStatus, Set<LimitRuleChangeStatus>> =
             mapOf(
                 LimitRuleChangeStatus.REQUESTED to setOf(

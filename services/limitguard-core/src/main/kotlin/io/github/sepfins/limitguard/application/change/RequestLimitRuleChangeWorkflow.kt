@@ -24,7 +24,6 @@ internal class RequestLimitRuleChangeWorkflow(
     private val commandValidator: ChangeCommandValidator,
     private val referenceResolver: ChangeReferenceResolver,
     private val candidateFactory: LimitRuleCandidateFactory,
-    private val mandateValidator: LimitRuleMandateValidator,
     private val eligibility: LimitChangeEligibilityValidator,
     private val changeRequestFactory: LimitChangeRequestFactory,
     private val transitions: LimitChangeTransitionRecorder,
@@ -61,10 +60,9 @@ internal class RequestLimitRuleChangeWorkflow(
                 facts = facts,
                 now = now,
             )
-            val applicationTime = command.effectiveAt?.takeIf { it > now } ?: now
+            val applicationTime = request.applicationTimeFrom(now)
             val candidate = candidateFactory.candidate(request, locked, { LimitRuleId.of(idGenerator.newId()) }, applicationTime)
-            eligibility.validateSubmission(command, candidate, now)
-            mandateValidator.validate(candidate, applicationTime)
+            eligibility.validateSubmission(command, candidate, now, applicationTime)
 
             // The pending-target index makes a concurrent request for the same target wait, then conflict.
             val requested = try {
@@ -99,7 +97,7 @@ internal class RequestLimitRuleChangeWorkflow(
                     ).toResult()
                 }
                 is LimitChangeAuthorization.ManualApprovalRequired -> {
-                    if (policyRequest != requested) applicationWorkflow.validate(policyRequest, locked, now)
+                    if (policyRequest != requested) applicationWorkflow.recheck(policyRequest, locked, now)
                     return@inTransaction transitions.keepPending(requested, policyRequest).toResult()
                 }
                 is LimitChangeAuthorization.Denied -> {
@@ -122,7 +120,7 @@ internal class RequestLimitRuleChangeWorkflow(
                     ).toResult()
                 }
                 is LimitChangeAuthorization.Allowed -> {
-                    applicationWorkflow.approveAndApply(
+                    applicationWorkflow.approve(
                         request = policyRequest,
                         target = locked,
                         actor = ChangeActor.System,
@@ -134,6 +132,7 @@ internal class RequestLimitRuleChangeWorkflow(
                             "evaluationId" to authorization.evaluation.id.value.toString(),
                         )),
                         policyId = authorization.policy.id,
+                        alreadyValidated = policyRequest == requested,
                     ).toResult()
                 }
             }

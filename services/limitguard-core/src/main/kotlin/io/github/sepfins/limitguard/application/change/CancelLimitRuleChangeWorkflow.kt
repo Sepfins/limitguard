@@ -5,7 +5,6 @@ import io.github.sepfins.limitguard.api.TrustedChangeActorContext
 import io.github.sepfins.limitguard.api.errors.ConflictException
 import io.github.sepfins.limitguard.api.errors.ValidationException
 import io.github.sepfins.limitguard.api.results.LimitChangeRequestResult
-import io.github.sepfins.limitguard.domain.change.LimitRuleChangeStatus
 import io.github.sepfins.limitguard.domain.common.LimitChangeRequestId
 import io.github.sepfins.limitguard.domain.common.Metadata
 import io.github.sepfins.limitguard.domain.common.TenantId
@@ -31,7 +30,7 @@ internal class CancelLimitRuleChangeWorkflow(
 
         transactionRunner.inTransaction {
             val request = locks.acquireRequest(tenantId, changeRequestId).request
-            if (request.status !in CANCELLABLE_STATUSES) {
+            if (!request.status.isOpen) {
                 throw ConflictException("limit change request cannot be cancelled: ${request.id.value}")
             }
             eligibility.validateActionActor(tenantId, actor)
@@ -49,12 +48,4 @@ internal class CancelLimitRuleChangeWorkflow(
                 cause = exception,
             )
         }
-
-    private companion object {
-        val CANCELLABLE_STATUSES = setOf(
-            LimitRuleChangeStatus.REQUESTED,
-            LimitRuleChangeStatus.APPROVED,
-            LimitRuleChangeStatus.PENDING_EFFECTIVE_DATE,
-        )
-    }
 }

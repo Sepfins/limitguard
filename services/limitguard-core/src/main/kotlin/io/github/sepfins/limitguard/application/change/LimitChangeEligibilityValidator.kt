@@ -47,7 +47,7 @@ internal class LimitChangeEligibilityValidator(
         }
     }
 
-    fun validateSubmission(command: RequestLimitRuleChangeCommand, candidate: LimitRule, at: Instant) {
+    fun validateSubmission(command: RequestLimitRuleChangeCommand, candidate: LimitRule, at: Instant, applicationTime: Instant) {
         val actor = command.toChangeActor()
         val requester = command.toRequesterPartyProfileId(actor)
         requireProfiles(candidate.tenantId, listOfNotNull(actor.partyProfileId(), candidate.ownerPartyProfileId, requester))
@@ -60,10 +60,10 @@ internal class LimitChangeEligibilityValidator(
                 ?: throw NotFoundException("request channel not found: ${id.value}")
             if (!channel.isActive) throw ConflictException("request channel is not active: ${id.value}")
         }
-        validateRuleReferences(candidate, at)
+        validateRuleReferences(candidate, applicationTime)
     }
 
-    fun validateApprovedIntent(request: LimitRuleChangeRequest, candidate: LimitRule, at: Instant) {
+    fun validateApprovedIntent(request: LimitRuleChangeRequest, candidate: LimitRule, at: Instant, applicationTime: Instant) {
         requireProfiles(
             request.tenantId,
             listOfNotNull(request.targetOwnerPartyProfileId, request.requesterPartyProfileId, request.requestedBy.partyProfileId()),
@@ -76,7 +76,7 @@ internal class LimitChangeEligibilityValidator(
         if (candidate.tenantId != request.tenantId || candidate.ownerPartyProfileId != request.targetOwnerPartyProfileId) {
             throw ConflictException("approved rule does not belong to the request's tenant and owner")
         }
-        validateRuleReferences(candidate, at)
+        validateRuleReferences(candidate, applicationTime)
     }
 
     private fun validateRepresentation(
@@ -125,18 +125,20 @@ internal class LimitChangeEligibilityValidator(
         }
     }
 
-    /** A narrowed rule's mandate and its delegation must hold from [at]. */
-    private fun validateRuleReferences(rule: LimitRule, at: Instant) {
+    /** A narrowed rule's mandate and its delegation must hold from [applicationTime]. */
+    private fun validateRuleReferences(rule: LimitRule, applicationTime: Instant) {
         val scope = rule.mandateScope as? MandateScope.MandateSpecific ?: return
         val mandate = mandates.findById(rule.tenantId, scope.mandateId)
             ?: throw NotFoundException("mandate not found: ${scope.mandateId.value}")
         if (mandate.ownerPartyProfileId != rule.ownerPartyProfileId) {
             throw ConflictException("mandate does not belong to target owner: ${mandate.id.value}")
         }
-        if (rule.isActive && !mandate.isActive) throw ConflictException("mandate is deactivated: ${mandate.id.value}")
+        if (rule.isActive && !mandate.isApplicableAt(applicationTime)) {
+            throw ConflictException("mandate is not applicable at rule application time: ${mandate.id.value}")
+        }
         mandate.authorityDelegationId?.let { id ->
             requireDelegation(rule.tenantId, id, mandate.ownerPartyProfileId, mandate.assigneePartyProfileId,
-                if (rule.isActive) at else null)
+                if (rule.isActive) applicationTime else null)
         }
     }
 }
