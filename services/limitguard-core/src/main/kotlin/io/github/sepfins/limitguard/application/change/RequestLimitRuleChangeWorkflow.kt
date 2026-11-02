@@ -100,12 +100,7 @@ internal class RequestLimitRuleChangeWorkflow(
                 }
                 is LimitChangeAuthorization.ManualApprovalRequired -> {
                     if (policyRequest != requested) applicationWorkflow.validate(policyRequest, locked, now)
-                    val pending = if (policyRequest == requested) {
-                        requested
-                    } else {
-                        changeRequestRepository.update(tenantId, policyRequest)
-                    }
-                    return@inTransaction pending.toResult()
+                    return@inTransaction transitions.keepPending(requested, policyRequest).toResult()
                 }
                 is LimitChangeAuthorization.Denied -> {
                     val reason = authorization.policy.denialMessage

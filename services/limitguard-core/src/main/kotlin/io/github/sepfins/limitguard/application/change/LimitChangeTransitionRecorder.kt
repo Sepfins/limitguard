@@ -96,7 +96,13 @@ internal class LimitChangeTransitionRecorder(
             policyId = policyId,
         )
 
-    /** Records a policy run; its actions may have amended [after], which a later transition saves. */
+    /** Saves policy amendments to a request that stays pending; its policy evaluation event already records them. */
+    fun keepPending(request: LimitRuleChangeRequest, amended: LimitRuleChangeRequest): LimitRuleChangeRequest {
+        require(amended.status == request.status) { "a policy amendment cannot change the request status" }
+        return if (amended == request) request else requests.update(request.tenantId, amended)
+    }
+
+    /** Records a policy run; its actions may have amended [after], which a later transition or [keepPending] saves. */
     fun recordPolicyEvaluation(
         before: LimitRuleChangeRequest,
         after: LimitRuleChangeRequest,
