@@ -4,13 +4,11 @@ import io.github.sepfins.limitguard.application.applicability.ApplicabilityReaso
 import io.github.sepfins.limitguard.application.applicability.ApplicableLimitRule
 import io.github.sepfins.limitguard.application.applicability.LimitApplicability
 import io.github.sepfins.limitguard.application.cap
-import io.github.sepfins.limitguard.application.isBounded
-import io.github.sepfins.limitguard.application.usage.UsageReservationPlan
-import io.github.sepfins.limitguard.application.usage.UsageReservationService
+import io.github.sepfins.limitguard.application.usage.AvailableLimitCapacity
+import io.github.sepfins.limitguard.application.usage.AvailableLimitCapacityResolver
+import io.github.sepfins.limitguard.application.usage.HeldLimitCapacity
 import io.github.sepfins.limitguard.domain.common.Money
 import io.github.sepfins.limitguard.domain.common.TransactionEventId
-import io.github.sepfins.limitguard.domain.limit.LimitKind
-import io.github.sepfins.limitguard.domain.limit.LimitRule
 import io.github.sepfins.limitguard.domain.limit.LimitViolation
 import io.github.sepfins.limitguard.domain.limit.MatchedLimitRule
 import io.github.sepfins.limitguard.domain.transaction.PaymentTransaction
@@ -45,16 +43,18 @@ internal data class LimitDecision(
 
 internal data class AuthorizationEvaluation(
     val decision: LimitDecision,
-    val reservationPlan: UsageReservationPlan?,
+    val amount: Money,
+    /** The held capacity an allowed decision reserves against; null when nothing may be reserved. */
+    val held: HeldLimitCapacity?,
 )
 
 /**
- * Turns Limit Applicability into the authorization decision: amount checks against the
- * cascade and a prepared usage reservation. Persisting the allowed transaction and the
- * reservation remains orchestration work.
+ * Turns Limit Applicability into the authorization decision: every rule of the cascade is
+ * checked against its Available Limit Capacity, held so that the reservation can follow.
+ * Persisting the allowed transaction and the reservation remains orchestration work.
  */
 internal class AuthorizationEvaluator(
-    private val usageReservationService: UsageReservationService,
+    private val capacityResolver: AvailableLimitCapacityResolver,
 ) {
     fun evaluate(
         transaction: PaymentTransaction,
@@ -62,9 +62,10 @@ internal class AuthorizationEvaluator(
         now: Instant,
     ): AuthorizationEvaluation =
         when (applicability) {
-            is LimitApplicability.Denied -> denied(
-                rules = applicability.cascade,
-                violations = applicability.reasons.map { it.toViolation(transaction.authorizedAmount) },
+            is LimitApplicability.Denied -> AuthorizationEvaluation(
+                decision = decision(applicability.cascade, applicability.reasons.map { it.toViolation(transaction.authorizedAmount) }),
+                amount = transaction.authorizedAmount,
+                held = null,
             )
             is LimitApplicability.NotApplicable -> AuthorizationEvaluation(
                 decision = LimitDecision(
@@ -72,7 +73,8 @@ internal class AuthorizationEvaluator(
                     matchedRules = emptyList(),
                     violations = emptyList(),
                 ),
-                reservationPlan = null,
+                amount = transaction.authorizedAmount,
+                held = null,
             )
             is LimitApplicability.Unrestricted -> evaluateCascade(transaction, emptyList(), now)
             is LimitApplicability.Applicable -> evaluateCascade(transaction, applicability.cascade, now)
@@ -83,28 +85,21 @@ internal class AuthorizationEvaluator(
         cascade: List<ApplicableLimitRule>,
         now: Instant,
     ): AuthorizationEvaluation {
-        // Unlimited rules are reported as matched but never deny and reserve no usage.
-        val boundedRules = cascade.filter { it.rule.isBounded }
-        val perTransactionViolations = boundedRules
-            .filter { it.configuration.limitKind == LimitKind.PerTransaction }
-            .filter { transaction.authorizedAmount > it.rule.cap }
-            .map { it.rule.perTransactionViolation(transaction.authorizedAmount) }
-
-        if (perTransactionViolations.isNotEmpty()) {
-            return denied(cascade, perTransactionViolations)
-        }
-
-        val reservationPlan = usageReservationService.planAuthorizationReservation(
-            transaction = transaction,
-            periodicRules = boundedRules
-                .filter { it.configuration.limitKind is LimitKind.Periodic },
-            now = now,
+        val held = capacityResolver.hold(
+            tenantId = transaction.tenantId,
+            assigneePartyProfileId = transaction.actingPartyProfileId,
+            at = now,
+            cascade = cascade,
         )
-        val decision = decision(cascade, reservationPlan.violations)
+        val violations = held.capacities
+            .filterNot { it.admits(transaction.authorizedAmount) }
+            .map { it.toViolation(transaction.authorizedAmount) }
+        val decision = decision(cascade, violations)
 
         return AuthorizationEvaluation(
             decision = decision,
-            reservationPlan = reservationPlan.takeIf { decision.allowed },
+            amount = transaction.authorizedAmount,
+            held = held.takeIf { decision.allowed },
         )
     }
 
@@ -116,20 +111,11 @@ internal class AuthorizationEvaluator(
         require(evaluation.decision.allowed) {
             "Cannot reserve usage for a denied authorization evaluation"
         }
-        val reservationPlan = checkNotNull(evaluation.reservationPlan) {
-            "Allowed authorization evaluation has no reservation plan"
+        val held = checkNotNull(evaluation.held) {
+            "Allowed authorization evaluation holds no capacity"
         }
-        return usageReservationService.reserve(reservationPlan, transactionEventId, now)
+        return capacityResolver.reserve(held, evaluation.amount, transactionEventId, now)
     }
-
-    private fun denied(
-        rules: List<ApplicableLimitRule>,
-        violations: List<LimitViolation>,
-    ): AuthorizationEvaluation =
-        AuthorizationEvaluation(
-            decision = decision(rules, violations),
-            reservationPlan = null,
-        )
 
     private fun decision(
         rules: List<ApplicableLimitRule>,
@@ -157,16 +143,28 @@ internal class AuthorizationEvaluator(
             remainingAmount = null,
         )
 
-    private fun LimitRule.perTransactionViolation(attemptedAmount: Money): LimitViolation =
-        LimitViolation(
-            code = "PER_TRANSACTION_LIMIT_EXCEEDED",
-            message = "Attempted amount ${attemptedAmount.amount} ${attemptedAmount.currency.value} " +
-                "exceeds per-transaction limit ${cap.amount} ${cap.currency.value}",
-            limitRuleId = id,
-            limitAmount = cap,
-            attemptedAmount = attemptedAmount,
-            remainingAmount = null,
-        )
+    private fun AvailableLimitCapacity.toViolation(attemptedAmount: Money): LimitViolation =
+        if (isPeriodic) {
+            LimitViolation(
+                code = "PERIODIC_LIMIT_EXCEEDED",
+                message = "Attempted amount ${attemptedAmount.amount} ${attemptedAmount.currency.value} " +
+                    "would exceed periodic limit ${rule.cap.amount} ${rule.cap.currency.value}",
+                limitRuleId = rule.id,
+                limitAmount = rule.cap,
+                attemptedAmount = attemptedAmount,
+                remainingAmount = remaining,
+            )
+        } else {
+            LimitViolation(
+                code = "PER_TRANSACTION_LIMIT_EXCEEDED",
+                message = "Attempted amount ${attemptedAmount.amount} ${attemptedAmount.currency.value} " +
+                    "exceeds per-transaction limit ${rule.cap.amount} ${rule.cap.currency.value}",
+                limitRuleId = rule.id,
+                limitAmount = rule.cap,
+                attemptedAmount = attemptedAmount,
+                remainingAmount = null,
+            )
+        }
 
     private fun ApplicableLimitRule.toMatchedRule(): MatchedLimitRule =
         MatchedLimitRule(

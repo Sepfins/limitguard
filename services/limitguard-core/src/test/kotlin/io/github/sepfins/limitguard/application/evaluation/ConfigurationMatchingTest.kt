@@ -5,6 +5,7 @@ import io.github.sepfins.limitguard.api.LimitAmount
 import io.github.sepfins.limitguard.api.OperationCapacityStatus
 import io.github.sepfins.limitguard.api.commands.CaptureTransactionCommand
 import io.github.sepfins.limitguard.api.commands.CreateMandateCommand
+import io.github.sepfins.limitguard.api.commands.LimitRuleChangeOperation
 import io.github.sepfins.limitguard.api.commands.SetLimitConfigurationActiveCommand
 import io.github.sepfins.limitguard.support.FixedClockProvider
 import io.github.sepfins.limitguard.support.OperationSubtreeScenario
@@ -74,7 +75,7 @@ class ConfigurationMatchingTest {
     }
 
     @Test
-    fun `an unlimited rule is reported by authorization and capacity but never denies or reserves`() {
+    fun `an unlimited rule is reported by authorization and capacity but never denies`() {
         val s = scenario()
         val transfer = s.operation("TRANSFER", leaf = true)
         val unlimitedConfiguration = s.configuration(transfer, priority = 10, maximum = LimitAmount.Unlimited)
@@ -84,10 +85,6 @@ class ConfigurationMatchingTest {
 
         assertEquals(AuthorizationDecision.ALLOWED, authorization.decision)
         assertEquals(listOf(LimitAmount.Unlimited), authorization.matchedRules.map { it.amount })
-        val capture = s.facade.limitEvaluationService.captureTransaction(CaptureTransactionCommand(
-            s.tenant, assertNotNull(authorization.paymentTransactionId),
-        ))
-        assertEquals(emptyList(), capture.usageEvents)
         val onlyUnlimited = s.capacity(transfer)
         assertEquals(OperationCapacityStatus.AVAILABLE, onlyUnlimited.status)
         assertNull(onlyUnlimited.effectiveAvailableAmount)
@@ -105,6 +102,52 @@ class ConfigurationMatchingTest {
         assertEquals(listOf(unlimited, bounded), capacity.applicableLimits.map { it.limitRuleId })
         assertEquals(BigDecimal("300.0000"), capacity.effectiveAvailableAmount)
         assertEquals(listOf(bounded), capacity.limitingRuleIds)
+    }
+
+    @Test
+    fun `a cap set on an unlimited periodic rule counts what the window already spent`() {
+        val s = scenario()
+        val transfer = s.operation("TRANSFER", leaf = true)
+        val configuration = s.configuration(transfer, maximum = LimitAmount.Unlimited)
+        val rule = s.rule(configuration, LimitAmount.Unlimited)
+        fun setAmount(amount: LimitAmount, expectedVersion: Int) = s.approve(s.request(
+            configuration, LimitRuleChangeOperation.SetAmount(amount), expectedVersion,
+        ).id)
+
+        val spent = s.authorize(transfer, "9000")
+        s.facade.limitEvaluationService.captureTransaction(CaptureTransactionCommand(
+            s.tenant, assertNotNull(spent.paymentTransactionId),
+        ))
+        s.authorize(transfer, "500")
+
+        setAmount(bounded("10000"), expectedVersion = 1)
+        val capped = s.usage(rule)
+        assertEquals(BigDecimal("9000.0000"), capped.consumedAmount)
+        assertEquals(BigDecimal("500.0000"), capped.reservedAmount)
+        assertEquals(BigDecimal("500.0000"), capped.remainingAmount)
+        assertEquals(AuthorizationDecision.DENIED, s.authorize(transfer, "501").decision)
+
+        setAmount(LimitAmount.Unlimited, expectedVersion = 2)
+        s.authorize(transfer, "4000")
+        setAmount(bounded("15000"), expectedVersion = 3)
+        assertEquals(BigDecimal("1500.0000"), s.usage(rule).remainingAmount)
+    }
+
+    @Test
+    fun `an unlimited rule counts no usage for a payment in another currency`() {
+        val s = scenario()
+        val transfer = s.operation("TRANSFER", leaf = true)
+        s.rule(s.configuration(transfer, maximum = LimitAmount.Unlimited), LimitAmount.Unlimited)
+
+        val authorization = s.facade.limitEvaluationService.authorizeTransaction(
+            s.command(transfer, "100").copy(currency = "USD"),
+        )
+
+        assertEquals(AuthorizationDecision.ALLOWED, authorization.decision)
+        val capture = s.facade.limitEvaluationService.captureTransaction(CaptureTransactionCommand(
+            s.tenant, assertNotNull(authorization.paymentTransactionId),
+        ))
+        assertEquals(emptyList(), capture.usageEvents)
     }
 
     private fun bounded(amount: String) = LimitAmount.Bounded(BigDecimal(amount))

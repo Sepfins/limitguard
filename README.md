@@ -39,8 +39,9 @@ operation, loads the owner's active rules for them, and checks them in priority 
 library does not convert currencies: the host passes the amount in the currency of the rules
 that apply, and a bounded rule in any other currency denies the payment. Periodic usage is
 counted per acting party profile in daily or monthly buckets: an authorization reserves, a
-capture consumes, and a release or reversal restores. When no rule matches, the tenant
-chooses to allow, deny, or leave the decision to the host.
+capture consumes, and a release or reversal restores. An unlimited periodic rule counts usage
+too, so a cap set on it later sees what the window already spent. When no rule matches, the
+tenant chooses to allow, deny, or leave the decision to the host.
 
 Rules change only through change requests that set an amount, deactivate, reactivate, or
 delete a rule. Tenant policies can allow, deny, or require approval, and an approver

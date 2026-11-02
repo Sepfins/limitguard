@@ -70,6 +70,7 @@ class OperationCapacityTest {
         assertEquals(OperationCapacityStatus.EXHAUSTED, result.status)
         assertEquals(BigDecimal("0.0000"), result.effectiveAvailableAmount)
         assertEquals(listOf(rule), result.limitingRuleIds)
+        assertEquals(OperationCapacityStatus.EXHAUSTED, result.applicableLimits.single().status)
     }
 
     private companion object {

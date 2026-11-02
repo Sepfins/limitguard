@@ -9,12 +9,6 @@ import io.github.sepfins.limitguard.domain.common.UsageWindow
 import io.github.sepfins.limitguard.domain.usage.LimitUsageBucket
 
 interface UsageBucketRepository {
-    fun findByLimitRuleInWindow(
-        tenantId: TenantId,
-        limitRuleId: LimitRuleId,
-        window: UsageWindow,
-    ): List<LimitUsageBucket>
-
     fun findByLimitRuleAndAssigneeInWindow(
         tenantId: TenantId,
         limitRuleId: LimitRuleId,
@@ -26,8 +20,6 @@ interface UsageBucketRepository {
     fun findById(tenantId: TenantId, id: UsageBucketId): LimitUsageBucket?
 
     fun findByIds(tenantId: TenantId, ids: Set<UsageBucketId>): List<LimitUsageBucket>
-
-    fun findByIdForUpdate(tenantId: TenantId, id: UsageBucketId): LimitUsageBucket?
 
     /**
      * Locks the logical bucket key for the surrounding transaction, including

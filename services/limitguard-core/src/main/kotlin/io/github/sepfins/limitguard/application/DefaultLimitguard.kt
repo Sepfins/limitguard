@@ -20,8 +20,8 @@ import io.github.sepfins.limitguard.application.evaluation.ExpireDueAuthorizatio
 import io.github.sepfins.limitguard.application.evaluation.TransactionFactory
 import io.github.sepfins.limitguard.application.inquiry.DefaultLimitInquiryService
 import io.github.sepfins.limitguard.application.transaction.TransactionRecorder
+import io.github.sepfins.limitguard.application.usage.AvailableLimitCapacityResolver
 import io.github.sepfins.limitguard.application.usage.UsageMutationService
-import io.github.sepfins.limitguard.application.usage.UsageReservationService
 import io.github.sepfins.limitguard.application.usage.UsageWindowCalculator
 import io.github.sepfins.limitguard.port.ids.IdGenerator
 import io.github.sepfins.limitguard.port.persistence.AuthorizationDecisionRepository
@@ -162,7 +162,12 @@ class DefaultLimitguard(
         transactionRunner = transactionRunner,
     )
 
-    private val usageWindowCalculator = UsageWindowCalculator()
+    private val availableLimitCapacityResolver = AvailableLimitCapacityResolver(
+        idGenerator = idGenerator,
+        usageBucketRepository = usageBucketRepository,
+        usageEventRepository = usageEventRepository,
+        usageWindowCalculator = UsageWindowCalculator(),
+    )
     private val limitApplicabilityResolver = LimitApplicabilityResolver(
         referenceResolver = OperationReferenceResolver(
             tenantRepository = tenantRepository,
@@ -204,14 +209,7 @@ class DefaultLimitguard(
         transactionEventRepository = transactionEventRepository,
         transactionFactory = TransactionFactory(idGenerator),
         limitApplicabilityResolver = limitApplicabilityResolver,
-        authorizationEvaluator = AuthorizationEvaluator(
-            UsageReservationService(
-                idGenerator = idGenerator,
-                usageBucketRepository = usageBucketRepository,
-                usageEventRepository = usageEventRepository,
-                usageWindowCalculator = usageWindowCalculator,
-            ),
-        ),
+        authorizationEvaluator = AuthorizationEvaluator(availableLimitCapacityResolver),
         usageMutationService = usageMutationService,
         transactionRecorder = transactionRecorder,
         expireDueAuthorizationsWorkflow = ExpireDueAuthorizationsWorkflow(
@@ -241,9 +239,8 @@ class DefaultLimitguard(
         transactionRepository = transactionRepository,
         transactionEventRepository = transactionEventRepository,
         authorizationDecisionRepository = authorizationDecisionRepository,
-        usageBucketRepository = usageBucketRepository,
         limitApplicabilityResolver = limitApplicabilityResolver,
-        usageWindowCalculator = usageWindowCalculator,
+        capacityResolver = availableLimitCapacityResolver,
         clockProvider = clockProvider,
         transactionRunner = transactionRunner,
     )

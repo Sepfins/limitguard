@@ -40,6 +40,7 @@ import io.github.sepfins.limitguard.api.results.PaymentTransactionResult
 import io.github.sepfins.limitguard.api.results.TenantResult
 import io.github.sepfins.limitguard.api.results.TransactionHistoryEventResult
 import io.github.sepfins.limitguard.api.results.TransactionHistoryResult
+import io.github.sepfins.limitguard.application.applicability.ApplicableLimitRule
 import io.github.sepfins.limitguard.application.applicability.LimitApplicabilityResolver
 import io.github.sepfins.limitguard.application.applicability.LimitEvaluationContext
 import io.github.sepfins.limitguard.application.cap
@@ -47,7 +48,7 @@ import io.github.sepfins.limitguard.application.catalog.toResult
 import io.github.sepfins.limitguard.application.isBounded
 import io.github.sepfins.limitguard.application.toApi
 import io.github.sepfins.limitguard.application.change.toResult
-import io.github.sepfins.limitguard.application.usage.UsageWindowCalculator
+import io.github.sepfins.limitguard.application.usage.AvailableLimitCapacityResolver
 import io.github.sepfins.limitguard.domain.change.ChangeActor
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeEvent
 import io.github.sepfins.limitguard.domain.change.LimitRuleRevision
@@ -59,7 +60,6 @@ import io.github.sepfins.limitguard.domain.common.FundingSourceId
 import io.github.sepfins.limitguard.domain.common.LimitChangeRequestId
 import io.github.sepfins.limitguard.domain.common.LimitConfigurationId
 import io.github.sepfins.limitguard.domain.common.LimitRuleId
-import io.github.sepfins.limitguard.domain.common.Money
 import io.github.sepfins.limitguard.domain.common.OperationTypeId
 import io.github.sepfins.limitguard.domain.common.PartyProfileId
 import io.github.sepfins.limitguard.domain.common.PaymentTransactionId
@@ -88,7 +88,6 @@ import io.github.sepfins.limitguard.port.persistence.PartyProfileRepository
 import io.github.sepfins.limitguard.port.persistence.TenantRepository
 import io.github.sepfins.limitguard.port.persistence.TransactionEventRepository
 import io.github.sepfins.limitguard.port.persistence.TransactionRepository
-import io.github.sepfins.limitguard.port.persistence.UsageBucketRepository
 import io.github.sepfins.limitguard.port.time.ClockProvider
 import io.github.sepfins.limitguard.port.transactions.TransactionRunner
 
@@ -107,16 +106,14 @@ internal class DefaultLimitInquiryService(
     private val transactionRepository: TransactionRepository,
     private val transactionEventRepository: TransactionEventRepository,
     private val authorizationDecisionRepository: AuthorizationDecisionRepository,
-    private val usageBucketRepository: UsageBucketRepository,
     limitApplicabilityResolver: LimitApplicabilityResolver,
-    private val usageWindowCalculator: UsageWindowCalculator,
+    private val capacityResolver: AvailableLimitCapacityResolver,
     private val clockProvider: ClockProvider,
     private val transactionRunner: TransactionRunner,
 ) : LimitInquiryService {
     private val operationCapacityReader = OperationCapacityReader(
         limitApplicabilityResolver = limitApplicabilityResolver,
-        usageBucketRepository = usageBucketRepository,
-        usageWindowCalculator = usageWindowCalculator,
+        capacityResolver = capacityResolver,
     )
 
     override fun getLimitChange(query: GetLimitChangeQuery): LimitChangeDetailsResult = mapValidation {
@@ -189,32 +186,27 @@ internal class DefaultLimitInquiryService(
                 ?: throw NotFoundException("limit configuration not found: ${rule.configurationId.value}")
             val periodicKind = configuration.limitKind as? LimitKind.Periodic
                 ?: throw ValidationException("current usage is only available for periodic limit rules")
-            if (!rule.isBounded) throw ValidationException("current usage is not tracked for unlimited limit rules")
-            val window = usageWindowCalculator.calculateWindow(calculatedAt, periodicKind.period)
-            val bucket = usageBucketRepository.findByLimitRuleAndAssigneeInWindow(
-                tenantId = tenantId,
-                limitRuleId = ruleId,
-                assigneeId = assigneeId,
-                currency = rule.amount.currency,
-                window = window,
-            )
-            val zero = Money.zero(rule.amount.currency)
+            if (!rule.isBounded) throw ValidationException("current usage is only available for bounded limit rules")
+            val capacity = capacityResolver
+                .read(tenantId, assigneeId, calculatedAt, listOf(ApplicableLimitRule(rule, configuration)))
+                .single()
+            val window = checkNotNull(capacity.window)
 
             CurrentUsageResult(
                 tenantId = tenantId.value,
                 limitRuleId = ruleId.value,
                 assigneePartyProfileId = assigneeId.value,
-                usageBucketId = bucket?.id?.value,
+                usageBucketId = capacity.bucket?.id?.value,
                 period = ApiLimitPeriod.valueOf(periodicKind.period.name),
                 periodStartsAt = window.periodStartsAt,
                 periodEndsAt = window.periodEndsAt,
                 limitAmount = rule.cap.amount,
-                reservedAmount = bucket?.reservedAmount?.amount ?: zero.amount,
-                consumedAmount = bucket?.consumedAmount?.amount ?: zero.amount,
-                remainingAmount = bucket?.remaining(rule.cap)?.amount ?: rule.cap.amount,
+                reservedAmount = checkNotNull(capacity.reserved).amount,
+                consumedAmount = checkNotNull(capacity.consumed).amount,
+                remainingAmount = checkNotNull(capacity.remaining).amount,
                 currency = rule.amount.currency.value,
                 calculatedAt = calculatedAt,
-                updatedAt = bucket?.updatedAt,
+                updatedAt = capacity.bucket?.updatedAt,
             )
         }
     }

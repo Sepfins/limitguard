@@ -6,28 +6,24 @@ import io.github.sepfins.limitguard.api.OperationCapacityStatus
 import io.github.sepfins.limitguard.api.results.ApplicableLimitUsageResult
 import io.github.sepfins.limitguard.api.results.OperationCapacityReasonResult
 import io.github.sepfins.limitguard.api.results.OperationCapacityResult
-import io.github.sepfins.limitguard.application.boundedMoney
 import io.github.sepfins.limitguard.application.applicability.ApplicabilityReason
 import io.github.sepfins.limitguard.application.applicability.ApplicableLimitRule
 import io.github.sepfins.limitguard.application.applicability.LimitApplicability
 import io.github.sepfins.limitguard.application.applicability.LimitApplicabilityResolver
 import io.github.sepfins.limitguard.application.applicability.LimitEvaluationContext
-import io.github.sepfins.limitguard.application.isBounded
 import io.github.sepfins.limitguard.application.toApi
-import io.github.sepfins.limitguard.application.usage.UsageWindowCalculator
+import io.github.sepfins.limitguard.application.usage.AvailableLimitCapacity
+import io.github.sepfins.limitguard.application.usage.AvailableLimitCapacityResolver
 import io.github.sepfins.limitguard.domain.common.CurrencyCode
-import io.github.sepfins.limitguard.domain.common.Money
 import io.github.sepfins.limitguard.domain.limit.LimitKind
-import io.github.sepfins.limitguard.port.persistence.UsageBucketRepository
 import java.math.BigDecimal
 import java.time.Instant
 import java.util.UUID
 
-/** Maps Limit Applicability to the advisory operation capacity and reads the cascade's buckets. */
+/** Maps Limit Applicability and the cascade's Available Limit Capacity to the advisory operation capacity. */
 internal class OperationCapacityReader(
     private val limitApplicabilityResolver: LimitApplicabilityResolver,
-    private val usageBucketRepository: UsageBucketRepository,
-    private val usageWindowCalculator: UsageWindowCalculator,
+    private val capacityResolver: AvailableLimitCapacityResolver,
 ) {
     fun read(
         context: LimitEvaluationContext,
@@ -40,7 +36,7 @@ internal class OperationCapacityReader(
                 currency = currency,
                 at = at,
                 status = OperationCapacityStatus.UNAVAILABLE,
-                applicableLimits = applicability.cascade.map { it.toUsageResult(context, at) },
+                applicableLimits = usage(context, at, applicability.cascade),
                 reasons = applicability.reasons.map { it.toResult() },
             )
             is LimitApplicability.NotApplicable -> result(
@@ -62,9 +58,9 @@ internal class OperationCapacityReader(
         context: LimitEvaluationContext,
         currency: CurrencyCode,
         at: Instant,
-        selectedRules: List<ApplicableLimitRule>,
+        cascade: List<ApplicableLimitRule>,
     ): OperationCapacityResult {
-        val applicableLimits = selectedRules.map { it.toUsageResult(context, at) }
+        val applicableLimits = usage(context, at, cascade)
         // Unlimited rules are reported as applicable but never cap capacity.
         val boundedLimits = applicableLimits.filter { it.availableAmount != null }
         if (boundedLimits.isEmpty()) {
@@ -97,43 +93,36 @@ internal class OperationCapacityReader(
         )
     }
 
-    private fun ApplicableLimitRule.toUsageResult(
+    private fun usage(
         context: LimitEvaluationContext,
         at: Instant,
-    ): ApplicableLimitUsageResult {
-        val period = (configuration.limitKind as? LimitKind.Periodic)?.period
-        val window = period?.let { usageWindowCalculator.calculateWindow(at, it) }
-        // Unlimited rules reserve nothing, so they have no bucket to read.
-        val bucket = window?.takeIf { rule.isBounded }?.let {
-            usageBucketRepository.findByLimitRuleAndAssigneeInWindow(
-                tenantId = context.tenantId,
-                limitRuleId = rule.id,
-                assigneeId = context.actingPartyProfileId,
-                currency = rule.amount.currency,
-                window = it,
-            )
-        }
-        val zero = Money.zero(rule.amount.currency).amount
-        val cap = rule.amount.boundedMoney
+        cascade: List<ApplicableLimitRule>,
+    ): List<ApplicableLimitUsageResult> =
+        capacityResolver.read(context.tenantId, context.actingPartyProfileId, at, cascade).map { it.toUsageResult() }
 
-        return ApplicableLimitUsageResult(
+    private fun AvailableLimitCapacity.toUsageResult(): ApplicableLimitUsageResult =
+        ApplicableLimitUsageResult(
             limitRuleId = rule.id.value,
             ownerPartyProfileId = rule.ownerPartyProfileId.value,
             name = configuration.name.value,
             description = configuration.description,
-            limitKind = if (period == null) ApiLimitKind.PER_TRANSACTION else ApiLimitKind.PERIODIC,
-            period = period?.let { ApiLimitPeriod.valueOf(it.name) },
+            limitKind = if (isPeriodic) ApiLimitKind.PERIODIC else ApiLimitKind.PER_TRANSACTION,
+            period = (configuration.limitKind as? LimitKind.Periodic)?.let { ApiLimitPeriod.valueOf(it.period.name) },
             periodStartsAt = window?.periodStartsAt,
             periodEndsAt = window?.periodEndsAt,
             limitAmount = rule.amount.toApi(),
-            consumedAmount = window?.let { bucket?.consumedAmount?.amount ?: zero },
-            reservedAmount = window?.let { bucket?.reservedAmount?.amount ?: zero },
-            availableAmount = cap?.let { bucket?.remaining(it)?.amount ?: it.amount },
+            consumedAmount = consumed?.amount,
+            reservedAmount = reserved?.amount,
+            availableAmount = remaining?.amount,
+            status = when {
+                remaining == null -> OperationCapacityStatus.UNLIMITED
+                remaining.isZero -> OperationCapacityStatus.EXHAUSTED
+                else -> OperationCapacityStatus.AVAILABLE
+            },
             currency = rule.amount.currency.value,
             usageBucketId = bucket?.id?.value,
             updatedAt = bucket?.updatedAt,
         )
-    }
 
     private fun ApplicabilityReason.toResult(): OperationCapacityReasonResult =
         OperationCapacityReasonResult(code = code, message = message, limitRuleId = limitRuleId?.value)

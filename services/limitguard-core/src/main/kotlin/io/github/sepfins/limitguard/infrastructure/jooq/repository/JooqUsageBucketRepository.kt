@@ -22,19 +22,6 @@ class JooqUsageBucketRepository(
 ) : UsageBucketRepository {
     private val table = GeneratedLimitUsageBucketTable.LIMIT_USAGE_BUCKET
 
-    override fun findByLimitRuleInWindow(
-        tenantId: TenantId,
-        limitRuleId: LimitRuleId,
-        window: UsageWindow,
-    ): List<LimitUsageBucket> = jooqOperation("find usage buckets by rule and window") {
-        selectBuckets()
-            .where(table.TENANT_ID.eq(tenantId.value))
-            .and(table.LIMIT_RULE_ID.eq(limitRuleId.value))
-            .and(table.PERIOD_STARTED_AT.eq(window.periodStartsAt.toOffsetDateTime()))
-            .and(table.PERIOD_ENDED_AT.eq(window.periodEndsAt.toOffsetDateTime()))
-            .fetch { it.toDomain() }
-    }
-
     override fun findByLimitRuleAndAssigneeInWindow(
         tenantId: TenantId,
         limitRuleId: LimitRuleId,
@@ -53,12 +40,12 @@ class JooqUsageBucketRepository(
     }
 
     override fun findById(tenantId: TenantId, id: UsageBucketId): LimitUsageBucket? =
-        findById(tenantId, id, forUpdate = false)
-
-    override fun findByIdForUpdate(tenantId: TenantId, id: UsageBucketId): LimitUsageBucket? {
-        context.requireTransaction("locking a usage bucket row")
-        return findById(tenantId, id, forUpdate = true)
-    }
+        jooqOperation("find usage bucket by id") {
+            selectBuckets()
+                .where(table.TENANT_ID.eq(tenantId.value))
+                .and(table.ID.eq(id.value))
+                .fetchOne { it.toDomain() }
+        }
 
     override fun findByIds(tenantId: TenantId, ids: Set<UsageBucketId>): List<LimitUsageBucket> =
         jooqOperation("find usage buckets by ids") {
@@ -132,17 +119,6 @@ class JooqUsageBucketRepository(
                     .fetchOne()
             ) { "usage bucket not found: ${usageBucket.id.value}" }.toDomain()
         }
-
-    private fun findById(
-        tenantId: TenantId,
-        id: UsageBucketId,
-        forUpdate: Boolean,
-    ): LimitUsageBucket? = jooqOperation("find usage bucket by id") {
-        val query = selectBuckets()
-            .where(table.TENANT_ID.eq(tenantId.value))
-            .and(table.ID.eq(id.value))
-        if (forUpdate) query.forUpdate().fetchOne { it.toDomain() } else query.fetchOne { it.toDomain() }
-    }
 
     private fun selectBuckets() = context.dsl()
         .select(

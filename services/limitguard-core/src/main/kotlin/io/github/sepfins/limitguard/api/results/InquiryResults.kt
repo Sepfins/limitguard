@@ -160,6 +160,8 @@ data class ApplicableLimitUsageResult(
     val reservedAmount: BigDecimal?,
     /** Null for an unlimited rule, which never caps capacity. */
     val availableAmount: BigDecimal?,
+    /** AVAILABLE, EXHAUSTED, or UNLIMITED for this rule on its own. */
+    val status: OperationCapacityStatus,
     val currency: String,
     val usageBucketId: UUID?,
     val updatedAt: Instant?,

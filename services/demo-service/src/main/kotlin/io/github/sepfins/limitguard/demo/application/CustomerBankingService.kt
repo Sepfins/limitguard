@@ -3,7 +3,6 @@ package io.github.sepfins.limitguard.demo.application
 import io.github.sepfins.limitguard.api.AuthorizationDecision
 import io.github.sepfins.limitguard.api.LimitAmount
 import io.github.sepfins.limitguard.api.LimitKind
-import io.github.sepfins.limitguard.api.OperationCapacityStatus
 import io.github.sepfins.limitguard.api.TransactionEventType
 import io.github.sepfins.limitguard.api.TransactionStatus
 import io.github.sepfins.limitguard.api.Limitguard
@@ -224,11 +223,9 @@ class CustomerBankingService(
             stepAmount = money(stepAmount, configuration.currency),
             consumedAmount = money(consumed, configuration.currency),
             reservedAmount = money(reserved, configuration.currency),
-            availableAmount = money(available.max(BigDecimal.ZERO), configuration.currency),
+            availableAmount = money(available, configuration.currency),
             currentExposure = money(exposure, configuration.currency),
-            capacityStatus = usage?.let {
-                if (available.signum() == 0) OperationCapacityStatus.EXHAUSTED else OperationCapacityStatus.AVAILABLE
-            } ?: capacity.status,
+            capacityStatus = usage?.status ?: capacity.status,
             resetsAt = usage?.periodEndsAt,
             version = rule.version,
             agreedMaximum = agreedMaximumAmount?.let { money(it) },

@@ -11,7 +11,7 @@ import io.github.sepfins.limitguard.api.queries.ListFundingSourceProductsQuery
 import io.github.sepfins.limitguard.api.queries.ListTenantsQuery
 import io.github.sepfins.limitguard.application.transaction.TransactionMutationKind
 import io.github.sepfins.limitguard.application.usage.UsageMutationService
-import io.github.sepfins.limitguard.application.usage.UsageReservationService
+import io.github.sepfins.limitguard.application.usage.AvailableLimitCapacityResolver
 import io.github.sepfins.limitguard.application.usage.UsageWindowCalculator
 import io.github.sepfins.limitguard.domain.change.ChangeActor
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeEventType
@@ -510,7 +510,7 @@ class JooqRepositoryCoverageIntegrationTest {
                 }
             },
         )
-        val reservationService = UsageReservationService(
+        val capacityResolver = AvailableLimitCapacityResolver(
             idGenerator = SystemIdGenerator(),
             usageBucketRepository = reservationBuckets,
             usageEventRepository = JooqUsageEventRepository(reservationContext),
@@ -538,18 +538,19 @@ class JooqRepositoryCoverageIntegrationTest {
         try {
             val reservationFuture = executor.submit<UsageMutation> {
                 reservationRunner.inTransaction {
-                    val plan = reservationService.planAuthorizationReservation(
-                        transaction = transaction,
+                    val held = capacityResolver.hold(
+                        tenantId = transaction.tenantId,
+                        assigneePartyProfileId = transaction.actingPartyProfileId,
+                        at = NOW,
                         // This is evaluation/priority order; the lock key order must not depend on it.
-                        periodicRules = listOf(highPriority, lowPriority, missingBucket),
-                        now = NOW,
+                        cascade = listOf(highPriority, lowPriority, missingBucket),
                     )
-                    assertTrue(plan.allowed)
+                    assertTrue(held.capacities.all { it.admits(transaction.authorizedAmount) })
                     assertEquals(
                         listOf(highPriorityRule.id, lowPriorityRule.id, missingBucketRule.id),
-                        plan.candidates.map { it.rule.id },
+                        held.capacities.map { it.rule.id },
                     )
-                    reservationService.reserve(plan, reservationEvent.id, NOW)
+                    capacityResolver.reserve(held, transaction.authorizedAmount, reservationEvent.id, NOW)
                 }
             }
             assertTrue(reservationReachedFirstLock.await(5, TimeUnit.SECONDS))
@@ -1002,16 +1003,6 @@ class JooqRepositoryCoverageIntegrationTest {
                 currency,
                 window,
             )
-            signalOnce(afterFirstLock, afterSignalled)
-            return bucket
-        }
-
-        override fun findByIdForUpdate(
-            tenantId: TenantId,
-            id: UsageBucketId,
-        ): LimitUsageBucket? {
-            signalOnce(beforeFirstLock, beforeSignalled)
-            val bucket = delegate.findByIdForUpdate(tenantId, id)
             signalOnce(afterFirstLock, afterSignalled)
             return bucket
         }
