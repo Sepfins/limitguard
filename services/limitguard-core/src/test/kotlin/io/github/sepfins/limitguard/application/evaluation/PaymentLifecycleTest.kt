@@ -20,6 +20,7 @@ import io.github.sepfins.limitguard.api.queries.GetTransactionHistoryQuery
 import io.github.sepfins.limitguard.support.FixedClockProvider
 import io.github.sepfins.limitguard.support.OperationSubtreeScenario
 import io.github.sepfins.limitguard.support.PostgresFacade
+import io.github.sepfins.limitguard.support.execute
 import java.math.BigDecimal
 import java.time.Duration
 import java.time.Instant
@@ -172,6 +173,31 @@ class PaymentLifecycleTest {
         assertEquals(BigDecimal("0.0000"), s.usage(rule).reservedAmount)
         assertEquals(BigDecimal("25.0000"), s.usage(rule).consumedAmount)
         assertEquals(emptyList(), s.facade.limitEvaluationService.expireDueAuthorizations(ExpireDueAuthorizationsCommand(s.tenant)).expirations)
+    }
+
+    @Test
+    fun `a payment that cannot expire is reported and the pass still expires the rest`() {
+        val source = PostgresFacade.database()
+        val s = OperationSubtreeScenario(PostgresFacade.create(clock, emptyList(), source), NOW)
+        val operation = s.operation("TRANSFER")
+        val rule = s.grant(operation, amount = "200")
+        val stuck = payment(s, operation, "40", expiresAt = NOW.plusSeconds(30))
+        val healthy = payment(s, operation, "100", expiresAt = NOW.plusSeconds(60))
+        source.execute(
+            "CREATE FUNCTION refuse_update() RETURNS trigger LANGUAGE plpgsql AS 'BEGIN RAISE EXCEPTION ''refused''; END'",
+        )
+        source.execute(
+            "CREATE TRIGGER stuck_payment BEFORE UPDATE ON payment_transaction FOR EACH ROW " +
+                "WHEN (OLD.id = '$stuck') EXECUTE FUNCTION refuse_update()",
+        )
+        clock.advanceBy(Duration.ofSeconds(60))
+
+        val batch = s.facade.limitEvaluationService.expireDueAuthorizations(ExpireDueAuthorizationsCommand(s.tenant))
+
+        assertEquals(listOf(healthy), batch.expirations.map { it.paymentTransactionId })
+        assertEquals(listOf(stuck), batch.failures.map { it.paymentTransactionId })
+        assertEquals(TransactionStatus.AUTHORIZED, history(s, stuck).transaction.status)
+        assertEquals(BigDecimal("40.0000"), s.usage(rule).reservedAmount)
     }
 
     @Test

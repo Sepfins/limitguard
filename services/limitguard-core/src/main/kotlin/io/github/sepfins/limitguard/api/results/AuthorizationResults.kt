@@ -66,4 +66,10 @@ data class ExpireDueAuthorizationsResult(
     val tenantId: UUID,
     val processedAt: Instant,
     val expirations: List<UsageMutationResult>,
+    val failures: List<FailedExpiration>,
+)
+
+data class FailedExpiration(
+    val paymentTransactionId: UUID,
+    val reason: String,
 )

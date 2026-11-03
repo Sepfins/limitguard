@@ -4,6 +4,7 @@ import io.github.sepfins.limitguard.api.commands.ExpireDueAuthorizationsCommand
 import io.github.sepfins.limitguard.api.errors.NotFoundException
 import io.github.sepfins.limitguard.api.errors.ValidationException
 import io.github.sepfins.limitguard.api.results.ExpireDueAuthorizationsResult
+import io.github.sepfins.limitguard.api.results.FailedExpiration
 import io.github.sepfins.limitguard.api.results.UsageMutationResult
 import io.github.sepfins.limitguard.application.transaction.TransactionMutationKind
 import io.github.sepfins.limitguard.application.transaction.TransactionRecorder
@@ -40,14 +41,20 @@ internal class ExpireDueAuthorizationsWorkflow(
             at = now,
             limit = command.batchSize,
         )
-        val expirations = candidates.mapNotNull { candidate ->
-            transactionRunner.inTransaction {
-                val current = transactionRepository.findByIdForUpdate(tenantId, candidate)
-                    ?: return@inTransaction null
-                if (!current.isDueForExpiry(now)) {
-                    return@inTransaction null
-                }
-                expire(current, now)
+        val expirations = mutableListOf<UsageMutationResult>()
+        val failures = mutableListOf<FailedExpiration>()
+        candidates.forEach { candidate ->
+            try {
+                transactionRunner.inTransaction {
+                    val current = transactionRepository.findByIdForUpdate(tenantId, candidate)
+                        ?: return@inTransaction null
+                    if (!current.isDueForExpiry(now)) {
+                        return@inTransaction null
+                    }
+                    expire(current, now)
+                }?.let { expirations += it }
+            } catch (exception: Exception) {
+                failures += FailedExpiration(candidate.value, exception.message ?: "expiry failed")
             }
         }
 
@@ -55,6 +62,7 @@ internal class ExpireDueAuthorizationsWorkflow(
             tenantId = tenantId.value,
             processedAt = now,
             expirations = expirations,
+            failures = failures,
         )
     }
 
