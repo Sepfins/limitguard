@@ -19,6 +19,7 @@ import io.github.sepfins.limitguard.port.ids.IdGenerator
 import io.github.sepfins.limitguard.port.persistence.UsageBucketRepository
 import io.github.sepfins.limitguard.port.persistence.UsageEventRepository
 import java.time.Instant
+import java.time.ZoneId
 
 /**
  * Resolves the Available Limit Capacity of a limit cascade for one assignee at one instant:
@@ -30,16 +31,16 @@ internal class AvailableLimitCapacityResolver(
     private val idGenerator: IdGenerator,
     private val usageBucketRepository: UsageBucketRepository,
     private val usageEventRepository: UsageEventRepository,
-    private val usageWindowCalculator: UsageWindowCalculator,
 ) {
     /** The capacity of each rule, in cascade order, without locking anything. */
     fun read(
         tenantId: TenantId,
         assigneePartyProfileId: PartyProfileId,
         at: Instant,
+        timeZone: ZoneId,
         cascade: List<ApplicableLimitRule>,
     ): List<AvailableLimitCapacity> =
-        capacities(tenantId, assigneePartyProfileId, at, cascade) { key ->
+        capacities(tenantId, assigneePartyProfileId, at, timeZone, cascade) { key ->
             usageBucketRepository.findByLimitRuleAndAssigneeInWindow(
                 tenantId = tenantId,
                 limitRuleId = key.rule.id,
@@ -58,12 +59,13 @@ internal class AvailableLimitCapacityResolver(
         tenantId: TenantId,
         assigneePartyProfileId: PartyProfileId,
         at: Instant,
+        timeZone: ZoneId,
         cascade: List<ApplicableLimitRule>,
     ): HeldLimitCapacity =
         HeldLimitCapacity(
             tenantId = tenantId,
             assigneePartyProfileId = assigneePartyProfileId,
-            capacities = capacities(tenantId, assigneePartyProfileId, at, cascade) { key ->
+            capacities = capacities(tenantId, assigneePartyProfileId, at, timeZone, cascade) { key ->
                 usageBucketRepository.findForUpdate(
                     tenantId = tenantId,
                     limitRuleId = key.rule.id,
@@ -137,10 +139,12 @@ internal class AvailableLimitCapacityResolver(
         tenantId: TenantId,
         assigneePartyProfileId: PartyProfileId,
         at: Instant,
+        timeZone: ZoneId,
         cascade: List<ApplicableLimitRule>,
         find: (BucketKey) -> LimitUsageBucket?,
     ): List<AvailableLimitCapacity> {
-        val windows = cascade.associate { it.rule.id to it.window(at) }
+        val calculator = UsageWindowCalculator(timeZone)
+        val windows = cascade.associate { it.rule.id to it.window(at, calculator) }
         val keys = cascade
             .mapNotNull { applicable -> windows.getValue(applicable.rule.id)?.let { BucketKey(tenantId, assigneePartyProfileId, applicable.rule, it) } }
         // Only the lock acquisition order is sorted; evaluation keeps the cascade order.
@@ -158,8 +162,8 @@ internal class AvailableLimitCapacityResolver(
         }
     }
 
-    private fun ApplicableLimitRule.window(at: Instant): UsageWindow? =
-        (configuration.limitKind as? LimitKind.Periodic)?.let { usageWindowCalculator.calculateWindow(at, it.period) }
+    private fun ApplicableLimitRule.window(at: Instant, calculator: UsageWindowCalculator): UsageWindow? =
+        (configuration.limitKind as? LimitKind.Periodic)?.let { calculator.calculateWindow(at, it.period) }
 
     private class BucketKey(
         tenantId: TenantId,

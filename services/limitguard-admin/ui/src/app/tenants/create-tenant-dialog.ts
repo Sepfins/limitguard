@@ -6,6 +6,8 @@ import { apiErrorMessage } from '../core/api-error';
 import { NoMatchingRuleBehavior, Tenant } from '../core/admin-api.models';
 import { AdminApiService } from '../core/admin-api.service';
 
+const browserTimeZone = (): string => Intl.DateTimeFormat().resolvedOptions().timeZone;
+
 @Component({
   selector: 'app-create-tenant-dialog',
   imports: [ReactiveFormsModule, LucideAngularModule],
@@ -18,18 +20,20 @@ export class CreateTenantDialog {
   readonly created = output<Tenant>();
   protected readonly submitting = signal(false);
   protected readonly error = signal<string | null>(null);
+  protected readonly timeZones = Intl.supportedValuesOf('timeZone');
   protected readonly form = new FormGroup({
     name: new FormControl('', {
       nonNullable: true,
       validators: [Validators.required, Validators.maxLength(255)]
     }),
+    timeZone: new FormControl(browserTimeZone(), { nonNullable: true, validators: [Validators.required] }),
     noMatchingRuleBehavior: new FormControl<NoMatchingRuleBehavior>('DENY', { nonNullable: true })
   });
 
   constructor(private readonly api: AdminApiService) {}
 
   open(): void {
-    this.form.reset({ name: '', noMatchingRuleBehavior: 'DENY' });
+    this.form.reset({ name: '', timeZone: browserTimeZone(), noMatchingRuleBehavior: 'DENY' });
     this.error.set(null);
     this.dialog().nativeElement.showModal();
   }

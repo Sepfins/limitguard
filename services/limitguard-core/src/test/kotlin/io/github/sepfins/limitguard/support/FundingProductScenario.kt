@@ -8,11 +8,12 @@ import io.github.sepfins.limitguard.api.commands.RegisterFundingSourceProductCom
 import io.github.sepfins.limitguard.api.commands.RegisterTenantCommand
 import io.github.sepfins.limitguard.api.queries.FindFundingSourceByExternalReferenceQuery
 import io.github.sepfins.limitguard.api.queries.FindFundingSourceProductByCodeQuery
+import java.time.ZoneOffset
 import java.util.UUID
 
 class FundingProductScenario(val facade: Limitguard) {
     val tenant = facade.tenantCatalogService.registerTenant(
-        RegisterTenantCommand("Funding bank ${UUID.randomUUID()}"),
+        RegisterTenantCommand("Funding bank ${UUID.randomUUID()}", ZoneOffset.UTC),
     ).id
 
     fun product(code: String, parent: UUID? = null, leaf: Boolean = false, active: Boolean = true) =

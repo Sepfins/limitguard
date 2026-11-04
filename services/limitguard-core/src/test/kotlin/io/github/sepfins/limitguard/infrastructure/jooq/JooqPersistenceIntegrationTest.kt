@@ -105,7 +105,7 @@ class JooqPersistenceIntegrationTest {
                 createdAt = NOW,
             )
             demoDsl.execute(
-                "insert into tenant (id, name) values (?, ?)",
+                "insert into tenant (id, name, time_zone) values (?, ?, 'UTC')",
                 tenantId.value,
                 "Demo tenant ${tenantId.value}",
             )
@@ -232,7 +232,7 @@ class JooqPersistenceIntegrationTest {
         )
         DSL.using(dataSource, SQLDialect.POSTGRES).apply {
             execute(
-                "insert into tenant (id, name) values (?, ?)",
+                "insert into tenant (id, name, time_zone) values (?, ?, 'UTC')",
                 fixture.tenantId.value,
                 "Tenant ${fixture.tenantId.value}",
             )

@@ -43,6 +43,7 @@ class TenantAdminController(
         val result = applicationService.createTenant(
             identity = identityResolver.resolve(authentication),
             name = request.name,
+            timeZone = request.timeZone,
             noMatchingRuleBehavior = request.noMatchingRuleBehavior,
         )
         return ResponseEntity

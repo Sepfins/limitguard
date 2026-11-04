@@ -37,6 +37,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer
 import java.math.BigDecimal
 import java.time.Duration
 import java.time.Instant
+import java.time.ZoneOffset
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.CyclicBarrier
@@ -341,7 +342,7 @@ class ChangeWorkflowLockingIntegrationTest {
         JooqLimitguardFactory(source).create(clockProvider = FixedClockProvider(NOW))
 
     private fun fixture(): Fixture {
-        val tenant = facade.tenantCatalogService.registerTenant(RegisterTenantCommand("Locking bank ${UUID.randomUUID()}")).id
+        val tenant = facade.tenantCatalogService.registerTenant(RegisterTenantCommand("Locking bank ${UUID.randomUUID()}", ZoneOffset.UTC)).id
         val owner = facade.tenantCatalogService.registerPartyProfile(RegisterPartyProfileCommand(
             tenantId = tenant, partyType = PartyType.INDIVIDUAL, firstName = "Alex", lastName = "Customer",
         )).id

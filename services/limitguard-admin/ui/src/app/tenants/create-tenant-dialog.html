@@ -23,6 +23,20 @@
       </label>
 
       <label class="field">
+        <span>Time zone</span>
+        <input formControlName="timeZone" list="tenant-time-zones" autocomplete="off" />
+        <datalist id="tenant-time-zones">
+          @for (zone of timeZones; track zone) {
+            <option [value]="zone"></option>
+          }
+        </datalist>
+        @if (form.controls.timeZone.touched && form.controls.timeZone.hasError('required')) {
+          <small>A time zone is required.</small>
+        }
+        <small class="hint">Daily and monthly limits reset at midnight here. This cannot be changed later.</small>
+      </label>
+
+      <label class="field">
         <span>No matching rule behavior</span>
         <select formControlName="noMatchingRuleBehavior">
           <option value="DENY">Deny</option>

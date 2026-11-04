@@ -40,6 +40,7 @@ import io.github.sepfins.limitguard.support.FixedClockProvider
 import java.math.BigDecimal
 import java.math.BigInteger
 import java.time.Instant
+import java.time.ZoneOffset
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.Test
@@ -291,7 +292,7 @@ class ImmutableChangeIntentTest {
     private class Fixture(engines: Collection<PolicyEngine> = emptyList()) {
         val clock = FixedClockProvider(Instant.parse("2026-06-26T12:00:00Z"))
         val facade = PostgresFacade.create(clock, engines)
-        val tenant = facade.tenantCatalogService.registerTenant(RegisterTenantCommand("Immutable intent bank")).id
+        val tenant = facade.tenantCatalogService.registerTenant(RegisterTenantCommand("Immutable intent bank", ZoneOffset.UTC)).id
         val owner = facade.tenantCatalogService.registerPartyProfile(RegisterPartyProfileCommand(
             tenantId = tenant, partyType = PartyType.INDIVIDUAL, firstName = "Alex", lastName = "Customer",
         )).id

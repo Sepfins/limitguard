@@ -17,6 +17,7 @@ import org.jooq.Record
 import org.jooq.SelectFieldOrAsterisk
 import java.time.Instant
 import java.time.OffsetDateTime
+import java.time.ZoneId
 import java.time.ZoneOffset
 
 class JooqTenantRepository(
@@ -63,6 +64,7 @@ class JooqTenantRepository(
             .insertInto(TenantTable.table)
             .set(TenantTable.id, tenant.id.value)
             .set(TenantTable.name, tenant.name.value)
+            .set(TenantTable.timeZone, tenant.timeZone.id)
             .set(TenantTable.config, tenant.config.toJsonb())
             .set(
                 TenantTable.noMatchingRuleBehavior,
@@ -96,6 +98,7 @@ class JooqTenantRepository(
     private fun Record.toDomain(): Tenant = Tenant(
         id = TenantId.of(requireNotNull(get(TenantTable.id))),
         name = TenantName.of(requireNotNull(get(TenantTable.name))),
+        timeZone = ZoneId.of(requireNotNull(get(TenantTable.timeZone))),
         config = get(TenantTable.config).toMetadata(),
         noMatchingRuleBehavior = NoMatchingRuleBehavior.valueOf(
             requireNotNull(get(TenantTable.noMatchingRuleBehavior)).name
@@ -108,6 +111,7 @@ private object TenantTable {
     val table = GeneratedTenantTable.TENANT
     val id = table.ID
     val name = table.NAME
+    val timeZone = table.TIME_ZONE
     val config = table.CONFIG
     val noMatchingRuleBehavior = table.NO_MATCHING_RULE_BEHAVIOR
     val createdAt = table.CREATED_AT

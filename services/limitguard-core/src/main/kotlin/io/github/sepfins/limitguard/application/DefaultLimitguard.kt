@@ -22,7 +22,6 @@ import io.github.sepfins.limitguard.application.inquiry.DefaultLimitInquiryServi
 import io.github.sepfins.limitguard.application.transaction.TransactionRecorder
 import io.github.sepfins.limitguard.application.usage.AvailableLimitCapacityResolver
 import io.github.sepfins.limitguard.application.usage.UsageMutationService
-import io.github.sepfins.limitguard.application.usage.UsageWindowCalculator
 import io.github.sepfins.limitguard.port.ids.IdGenerator
 import io.github.sepfins.limitguard.port.persistence.AuthorizationDecisionRepository
 import io.github.sepfins.limitguard.port.persistence.ChannelGroupMemberRepository
@@ -166,7 +165,6 @@ class DefaultLimitguard(
         idGenerator = idGenerator,
         usageBucketRepository = usageBucketRepository,
         usageEventRepository = usageEventRepository,
-        usageWindowCalculator = UsageWindowCalculator(),
     )
     private val limitApplicabilityResolver = LimitApplicabilityResolver(
         referenceResolver = OperationReferenceResolver(

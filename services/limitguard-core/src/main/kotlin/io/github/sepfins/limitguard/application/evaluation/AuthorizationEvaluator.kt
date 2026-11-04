@@ -15,6 +15,7 @@ import io.github.sepfins.limitguard.domain.transaction.PaymentTransaction
 import io.github.sepfins.limitguard.domain.transaction.AuthorizationDecisionOutcome
 import io.github.sepfins.limitguard.domain.usage.UsageMutation
 import java.time.Instant
+import java.time.ZoneId
 
 internal data class LimitDecision(
     val outcome: AuthorizationDecisionOutcome,
@@ -76,19 +77,21 @@ internal class AuthorizationEvaluator(
                 amount = transaction.authorizedAmount,
                 held = null,
             )
-            is LimitApplicability.Unrestricted -> evaluateCascade(transaction, emptyList(), now)
-            is LimitApplicability.Applicable -> evaluateCascade(transaction, applicability.cascade, now)
+            is LimitApplicability.Unrestricted -> evaluateCascade(transaction, emptyList(), applicability.timeZone, now)
+            is LimitApplicability.Applicable -> evaluateCascade(transaction, applicability.cascade, applicability.timeZone, now)
         }
 
     private fun evaluateCascade(
         transaction: PaymentTransaction,
         cascade: List<ApplicableLimitRule>,
+        timeZone: ZoneId,
         now: Instant,
     ): AuthorizationEvaluation {
         val held = capacityResolver.hold(
             tenantId = transaction.tenantId,
             assigneePartyProfileId = transaction.actingPartyProfileId,
             at = now,
+            timeZone = timeZone,
             cascade = cascade,
         )
         val violations = held.capacities

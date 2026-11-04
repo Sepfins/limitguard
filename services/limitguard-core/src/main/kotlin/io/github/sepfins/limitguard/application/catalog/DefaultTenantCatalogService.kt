@@ -217,6 +217,7 @@ class DefaultTenantCatalogService(
         val tenant = Tenant(
             id = TenantId.of(idGenerator.newId()),
             name = TenantName.of(command.name),
+            timeZone = command.timeZone,
             config = Metadata(command.config),
             noMatchingRuleBehavior = NoMatchingRuleBehavior.valueOf(command.noMatchingRuleBehavior.name),
             createdAt = clockProvider.now(),

@@ -22,6 +22,7 @@ import io.github.sepfins.limitguard.support.OperationSubtreeScenario
 import io.github.sepfins.limitguard.support.PostgresFacade
 import java.math.BigDecimal
 import java.time.Instant
+import java.time.ZoneOffset
 import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -76,7 +77,7 @@ class EndedRepresentationTest {
             s.request(s.configuration(transfer), setAmount, mandate = mandate)
         }
 
-        val other = catalog.registerTenant(RegisterTenantCommand("Other bank ${UUID.randomUUID()}")).id
+        val other = catalog.registerTenant(RegisterTenantCommand("Other bank ${UUID.randomUUID()}", ZoneOffset.UTC)).id
         assertFailsWith<NotFoundException> { catalog.deactivateMandate(DeactivateMandateCommand(other, mandate)) }
         assertFailsWith<NotFoundException> {
             catalog.terminatePartyProfileDelegation(TerminatePartyProfileDelegationCommand(other, delegation))

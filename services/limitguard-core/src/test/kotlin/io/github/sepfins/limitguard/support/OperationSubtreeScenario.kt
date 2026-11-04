@@ -30,15 +30,18 @@ import io.github.sepfins.limitguard.api.queries.GetLimitChangeQuery
 import io.github.sepfins.limitguard.api.queries.GetOperationCapacityQuery
 import java.math.BigDecimal
 import java.time.Instant
+import java.time.ZoneId
+import java.time.ZoneOffset
 import java.util.UUID
 
 class OperationSubtreeScenario(
     val facade: Limitguard,
     val now: Instant,
     noMatchingRuleBehavior: NoMatchingRuleBehavior = NoMatchingRuleBehavior.ALLOW,
+    timeZone: ZoneId = ZoneOffset.UTC,
 ) {
     val tenant = facade.tenantCatalogService.registerTenant(RegisterTenantCommand(
-        "Operation bank ${UUID.randomUUID()}", noMatchingRuleBehavior = noMatchingRuleBehavior,
+        "Operation bank ${UUID.randomUUID()}", timeZone, noMatchingRuleBehavior = noMatchingRuleBehavior,
     )).id
     val owner = profile("Owner")
     val channel = facade.tenantCatalogService.registerChannel(RegisterChannelCommand(tenant, "API", "API")).id

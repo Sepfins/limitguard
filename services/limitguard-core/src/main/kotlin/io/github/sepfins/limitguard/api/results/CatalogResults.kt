@@ -17,11 +17,13 @@ import io.github.sepfins.limitguard.api.PartyProfileDelegationType
 import io.github.sepfins.limitguard.api.ProductNodeType
 import java.math.BigDecimal
 import java.time.Instant
+import java.time.ZoneId
 import java.util.UUID
 
 data class TenantResult(
     val id: UUID,
     val name: String,
+    val timeZone: ZoneId,
     val config: Map<String, Any?>,
     val noMatchingRuleBehavior: NoMatchingRuleBehavior,
     val createdAt: Instant,

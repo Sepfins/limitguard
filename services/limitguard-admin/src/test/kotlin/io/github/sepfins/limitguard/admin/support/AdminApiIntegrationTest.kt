@@ -52,7 +52,7 @@ abstract class AdminApiIntegrationTest {
             with(platformAdmin())
             with(csrf())
             contentType = MediaType.APPLICATION_JSON
-            content = """{"name":"$name"}"""
+            content = """{"name":"$name","timeZone":"Europe/Brussels"}"""
         },
     )
 

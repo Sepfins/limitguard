@@ -45,6 +45,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer
 import java.math.BigDecimal
 import java.math.BigInteger
 import java.time.Instant
+import java.time.ZoneOffset
 import java.util.UUID
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -62,7 +63,7 @@ class ImmutableJsonPersistenceIntegrationTest {
     }
     private val facade by lazy { JooqLimitguardFactory(dataSource).create(clockProvider = FixedClockProvider(NOW)) }
     private val tenant by lazy {
-        facade.tenantCatalogService.registerTenant(RegisterTenantCommand("JSON bank ${UUID.randomUUID()}")).id
+        facade.tenantCatalogService.registerTenant(RegisterTenantCommand("JSON bank ${UUID.randomUUID()}", ZoneOffset.UTC)).id
     }
 
     @Test

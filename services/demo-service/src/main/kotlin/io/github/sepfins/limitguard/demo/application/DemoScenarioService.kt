@@ -52,6 +52,7 @@ import org.springframework.transaction.support.TransactionTemplate
 import java.math.BigDecimal
 import java.time.Clock
 import java.time.Instant
+import java.time.ZoneId
 import java.util.UUID
 
 private val AGREED_TRANSFER_MAXIMUM = BigDecimal("7500")
@@ -112,6 +113,7 @@ class DemoScenarioService(
         val tenant = catalog.registerTenant(
             RegisterTenantCommand(
                 name = "Wrenfield",
+                timeZone = ZoneId.of("Europe/Dublin"),
                 config = mapOf("journey" to "CUSTOMER_BANKING_DEMO"),
                 noMatchingRuleBehavior = NoMatchingRuleBehavior.DENY,
             ),

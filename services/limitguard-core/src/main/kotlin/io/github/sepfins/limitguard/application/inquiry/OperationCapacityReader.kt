@@ -18,6 +18,7 @@ import io.github.sepfins.limitguard.domain.common.CurrencyCode
 import io.github.sepfins.limitguard.domain.limit.LimitKind
 import java.math.BigDecimal
 import java.time.Instant
+import java.time.ZoneId
 import java.util.UUID
 
 /** Maps Limit Applicability and the cascade's Available Limit Capacity to the advisory operation capacity. */
@@ -36,7 +37,7 @@ internal class OperationCapacityReader(
                 currency = currency,
                 at = at,
                 status = OperationCapacityStatus.UNAVAILABLE,
-                applicableLimits = usage(context, at, applicability.cascade),
+                applicableLimits = usage(context, at, applicability.timeZone, applicability.cascade),
                 reasons = applicability.reasons.map { it.toResult() },
             )
             is LimitApplicability.NotApplicable -> result(
@@ -51,16 +52,17 @@ internal class OperationCapacityReader(
                 at = at,
                 status = OperationCapacityStatus.UNLIMITED,
             )
-            is LimitApplicability.Applicable -> capacity(context, currency, at, applicability.cascade)
+            is LimitApplicability.Applicable -> capacity(context, currency, at, applicability.timeZone, applicability.cascade)
         }
 
     private fun capacity(
         context: LimitEvaluationContext,
         currency: CurrencyCode,
         at: Instant,
+        timeZone: ZoneId,
         cascade: List<ApplicableLimitRule>,
     ): OperationCapacityResult {
-        val applicableLimits = usage(context, at, cascade)
+        val applicableLimits = usage(context, at, timeZone, cascade)
         // Unlimited rules are reported as applicable but never cap capacity.
         val boundedLimits = applicableLimits.filter { it.availableAmount != null }
         if (boundedLimits.isEmpty()) {
@@ -96,9 +98,10 @@ internal class OperationCapacityReader(
     private fun usage(
         context: LimitEvaluationContext,
         at: Instant,
+        timeZone: ZoneId,
         cascade: List<ApplicableLimitRule>,
     ): List<ApplicableLimitUsageResult> =
-        capacityResolver.read(context.tenantId, context.actingPartyProfileId, at, cascade).map { it.toUsageResult() }
+        capacityResolver.read(context.tenantId, context.actingPartyProfileId, at, timeZone, cascade).map { it.toUsageResult() }
 
     private fun AvailableLimitCapacity.toUsageResult(): ApplicableLimitUsageResult =
         ApplicableLimitUsageResult(

@@ -9,6 +9,7 @@ import io.github.sepfins.limitguard.api.queries.GetTenantQuery
 import io.github.sepfins.limitguard.support.FixedClockProvider
 import io.github.sepfins.limitguard.support.PostgresFacade
 import java.time.Instant
+import java.time.ZoneOffset
 import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -20,7 +21,7 @@ class DefaultTenantCatalogQueryServiceTest {
 
     @Test
     fun `gets one tenant by id and rejects a missing tenant`() {
-        val tenant = facade.tenantCatalogService.registerTenant(RegisterTenantCommand("Known Bank"))
+        val tenant = facade.tenantCatalogService.registerTenant(RegisterTenantCommand("Known Bank", ZoneOffset.UTC))
         assertEquals("Known Bank", service.getTenant(GetTenantQuery(tenant.id)).name)
 
         assertFailsWith<NotFoundException> {

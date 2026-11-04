@@ -12,6 +12,7 @@ import io.github.sepfins.limitguard.api.errors.ConflictException
 import io.github.sepfins.limitguard.support.FixedClockProvider
 import io.github.sepfins.limitguard.support.PostgresFacade
 import java.time.Instant
+import java.time.ZoneOffset
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -23,7 +24,7 @@ class PrivatePartyProfileOnboardingTest {
 
     @Test
     fun `ordinary onboarding returns only a tenant profile canonical handle and tenant identifiers`() {
-        val tenant = facade.tenantCatalogService.registerTenant(RegisterTenantCommand("First bank")).id
+        val tenant = facade.tenantCatalogService.registerTenant(RegisterTenantCommand("First bank", ZoneOffset.UTC)).id
         facade.tenantCatalogService.registerIdentifierScheme(RegisterIdentifierSchemeCommand(
             tenant, "PARTY_PROFILE", "CUSTOMER_NUMBER",
         ))
@@ -48,8 +49,8 @@ class PrivatePartyProfileOnboardingTest {
 
     @Test
     fun `ordinary onboarding cannot probe an existing party by omitting verified details`() {
-        val first = facade.tenantCatalogService.registerTenant(RegisterTenantCommand("First bank")).id
-        val second = facade.tenantCatalogService.registerTenant(RegisterTenantCommand("Second bank")).id
+        val first = facade.tenantCatalogService.registerTenant(RegisterTenantCommand("First bank", ZoneOffset.UTC)).id
+        val second = facade.tenantCatalogService.registerTenant(RegisterTenantCommand("Second bank", ZoneOffset.UTC)).id
         facade.tenantCatalogService.registerPartyProfile(RegisterPartyProfileCommand(
             first, PartyType.INDIVIDUAL, firstName = "Mario", lastName = "Rossi", legalIdentifiers = listOf(LEGAL_ID),
         ))
@@ -69,9 +70,9 @@ class PrivatePartyProfileOnboardingTest {
 
     @Test
     fun `a new identifier alongside an existing match fails without extending shared identity`() {
-        val first = facade.tenantCatalogService.registerTenant(RegisterTenantCommand("First bank")).id
-        val second = facade.tenantCatalogService.registerTenant(RegisterTenantCommand("Second bank")).id
-        val third = facade.tenantCatalogService.registerTenant(RegisterTenantCommand("Third bank")).id
+        val first = facade.tenantCatalogService.registerTenant(RegisterTenantCommand("First bank", ZoneOffset.UTC)).id
+        val second = facade.tenantCatalogService.registerTenant(RegisterTenantCommand("Second bank", ZoneOffset.UTC)).id
+        val third = facade.tenantCatalogService.registerTenant(RegisterTenantCommand("Third bank", ZoneOffset.UTC)).id
         val command = RegisterPartyProfileCommand(
             first, PartyType.INDIVIDUAL, firstName = "Mario", lastName = "Rossi", legalIdentifiers = listOf(LEGAL_ID),
         )
@@ -95,8 +96,8 @@ class PrivatePartyProfileOnboardingTest {
 
     @Test
     fun `identical normalized legal identifiers do not turn initialization into a presence probe`() {
-        val first = facade.tenantCatalogService.registerTenant(RegisterTenantCommand("First bank")).id
-        val second = facade.tenantCatalogService.registerTenant(RegisterTenantCommand("Second bank")).id
+        val first = facade.tenantCatalogService.registerTenant(RegisterTenantCommand("First bank", ZoneOffset.UTC)).id
+        val second = facade.tenantCatalogService.registerTenant(RegisterTenantCommand("Second bank", ZoneOffset.UTC)).id
         val command = RegisterPartyProfileCommand(
             first, PartyType.INDIVIDUAL, firstName = "Mario", lastName = "Rossi",
             legalIdentifiers = listOf(LEGAL_ID, LEGAL_ID.copy(
@@ -112,8 +113,8 @@ class PrivatePartyProfileOnboardingTest {
 
     @Test
     fun `canonical reuse retains separate tenant metadata and external identifier namespaces`() {
-        val first = facade.tenantCatalogService.registerTenant(RegisterTenantCommand("First bank")).id
-        val second = facade.tenantCatalogService.registerTenant(RegisterTenantCommand("Second bank")).id
+        val first = facade.tenantCatalogService.registerTenant(RegisterTenantCommand("First bank", ZoneOffset.UTC)).id
+        val second = facade.tenantCatalogService.registerTenant(RegisterTenantCommand("Second bank", ZoneOffset.UTC)).id
         listOf(first, second).forEach { tenant ->
             facade.tenantCatalogService.registerIdentifierScheme(RegisterIdentifierSchemeCommand(
                 tenant, "PARTY_PROFILE", "CUSTOMER_NUMBER",
@@ -146,9 +147,9 @@ class PrivatePartyProfileOnboardingTest {
 
     @Test
     fun `contradictory identities type mismatches and duplicate profiles have the same sanitized conflict`() {
-        val first = facade.tenantCatalogService.registerTenant(RegisterTenantCommand("First bank")).id
-        val second = facade.tenantCatalogService.registerTenant(RegisterTenantCommand("Second bank")).id
-        val third = facade.tenantCatalogService.registerTenant(RegisterTenantCommand("Third bank")).id
+        val first = facade.tenantCatalogService.registerTenant(RegisterTenantCommand("First bank", ZoneOffset.UTC)).id
+        val second = facade.tenantCatalogService.registerTenant(RegisterTenantCommand("Second bank", ZoneOffset.UTC)).id
+        val third = facade.tenantCatalogService.registerTenant(RegisterTenantCommand("Third bank", ZoneOffset.UTC)).id
         val firstCommand = RegisterPartyProfileCommand(
             first, PartyType.INDIVIDUAL, firstName = "Mario", lastName = "Rossi", legalIdentifiers = listOf(LEGAL_ID),
         )

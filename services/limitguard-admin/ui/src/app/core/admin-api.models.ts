@@ -32,12 +32,14 @@ export interface PageResponse<T> {
 export interface Tenant {
   id: string;
   name: string;
+  timeZone: string;
   noMatchingRuleBehavior: NoMatchingRuleBehavior;
   createdAt: string;
 }
 
 export interface CreateTenantRequest {
   name: string;
+  timeZone: string;
   noMatchingRuleBehavior: NoMatchingRuleBehavior;
 }
 

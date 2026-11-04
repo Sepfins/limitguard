@@ -38,6 +38,7 @@ import io.github.sepfins.limitguard.support.FixedClockProvider
 import io.github.sepfins.limitguard.support.PostgresFacade
 import java.math.BigDecimal
 import java.time.Instant
+import java.time.ZoneOffset
 import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -48,12 +49,12 @@ class DefaultTenantCatalogServiceTest {
     private val fixedNow = Instant.parse("2026-06-21T00:00:00Z")
     private val facade = PostgresFacade.create(FixedClockProvider(fixedNow))
     private val service = facade.tenantCatalogService
-    private val tenant = service.registerTenant(RegisterTenantCommand("Retail Bank")).id
+    private val tenant = service.registerTenant(RegisterTenantCommand("Retail Bank", ZoneOffset.UTC)).id
 
     @Test
     fun `register tenant rejects duplicate name and defaults to deny unmatched authorizations`() {
-        assertEquals(NoMatchingRuleBehavior.DENY, service.registerTenant(RegisterTenantCommand("Other Bank")).noMatchingRuleBehavior)
-        assertFailsWith<ConflictException> { service.registerTenant(RegisterTenantCommand("Retail Bank")) }
+        assertEquals(NoMatchingRuleBehavior.DENY, service.registerTenant(RegisterTenantCommand("Other Bank", ZoneOffset.UTC)).noMatchingRuleBehavior)
+        assertFailsWith<ConflictException> { service.registerTenant(RegisterTenantCommand("Retail Bank", ZoneOffset.UTC)) }
     }
 
     @Test

@@ -21,9 +21,10 @@ internal class LimitApplicabilityResolver(
         at: Instant,
     ): LimitApplicability {
         val references = referenceResolver.resolve(context)
+        val timeZone = references.tenant.timeZone
         val unavailableReferences = references.unavailableReferences()
         if (unavailableReferences.isNotEmpty()) {
-            return LimitApplicability.Denied(unavailableReferences)
+            return LimitApplicability.Denied(unavailableReferences, timeZone)
         }
 
         val owners = fundingSourceOwnerRepository.findByFundingSource(context.tenantId, context.fundingSourceId)
@@ -41,15 +42,15 @@ internal class LimitApplicabilityResolver(
             at = at,
         )
         if (authorities.isEmpty()) {
-            return LimitApplicability.Denied(listOf(ACTOR_NOT_AUTHORIZED))
+            return LimitApplicability.Denied(listOf(ACTOR_NOT_AUTHORIZED), timeZone)
         }
 
         val matchedRules = limitRuleMatcher.findMatches(context, authorities, references)
         if (matchedRules.isEmpty()) {
             return when (references.tenant.noMatchingRuleBehavior) {
-                NoMatchingRuleBehavior.ALLOW -> LimitApplicability.Unrestricted(authorities)
-                NoMatchingRuleBehavior.DENY -> LimitApplicability.Denied(listOf(NO_MATCHING_RULE), authorities = authorities)
-                NoMatchingRuleBehavior.NOT_APPLICABLE -> LimitApplicability.NotApplicable(authorities)
+                NoMatchingRuleBehavior.ALLOW -> LimitApplicability.Unrestricted(authorities, timeZone)
+                NoMatchingRuleBehavior.DENY -> LimitApplicability.Denied(listOf(NO_MATCHING_RULE), timeZone, authorities = authorities)
+                NoMatchingRuleBehavior.NOT_APPLICABLE -> LimitApplicability.NotApplicable(authorities, timeZone)
             }
         }
 
@@ -60,10 +61,10 @@ internal class LimitApplicabilityResolver(
             .filter { it.isBounded && it.amount.currency != currency }
             .map { it.currencyMismatch(currency) }
         if (currencyMismatches.isNotEmpty()) {
-            return LimitApplicability.Denied(currencyMismatches, cascade, authorities)
+            return LimitApplicability.Denied(currencyMismatches, timeZone, cascade, authorities)
         }
 
-        return LimitApplicability.Applicable(cascade, authorities)
+        return LimitApplicability.Applicable(cascade, authorities, timeZone)
     }
 
     private fun LimitRule.currencyMismatch(currency: CurrencyCode): ApplicabilityReason =

@@ -34,11 +34,12 @@ import io.github.sepfins.limitguard.api.queries.GetLimitRuleQuery
 import io.github.sepfins.limitguard.api.results.LimitConfigurationResult
 import java.math.BigDecimal
 import java.time.Instant
+import java.time.ZoneOffset
 import java.util.UUID
 
 class FundingEnvelopeScenario(val facade: Limitguard, val now: Instant) {
     val tenant = facade.tenantCatalogService.registerTenant(
-        RegisterTenantCommand("Envelope bank ${UUID.randomUUID()}"),
+        RegisterTenantCommand("Envelope bank ${UUID.randomUUID()}", ZoneOffset.UTC),
     ).id
     val owner by lazy {
         facade.tenantCatalogService.registerPartyProfile(RegisterPartyProfileCommand(

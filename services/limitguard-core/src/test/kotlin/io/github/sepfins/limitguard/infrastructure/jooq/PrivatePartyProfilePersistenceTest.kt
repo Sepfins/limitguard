@@ -33,6 +33,7 @@ import java.sql.SQLException
 import java.math.BigDecimal
 import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneOffset
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
@@ -323,7 +324,7 @@ class PrivatePartyProfilePersistenceTest {
 
     private data class Fixture(val source: DataSource, val facade: Limitguard) {
         fun tenant(name: String): UUID {
-            val id = facade.tenantCatalogService.registerTenant(RegisterTenantCommand(name)).id
+            val id = facade.tenantCatalogService.registerTenant(RegisterTenantCommand(name, ZoneOffset.UTC)).id
             facade.tenantCatalogService.registerIdentifierScheme(RegisterIdentifierSchemeCommand(
                 id, "PARTY_PROFILE", "CUSTOMER_NUMBER",
             ))

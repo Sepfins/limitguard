@@ -8,7 +8,10 @@ import io.github.sepfins.limitguard.support.FixedClockProvider
 import io.github.sepfins.limitguard.support.OperationSubtreeScenario
 import io.github.sepfins.limitguard.support.PostgresFacade
 import java.math.BigDecimal
+import java.time.Duration
 import java.time.Instant
+import java.time.ZoneId
+import java.time.ZoneOffset
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -71,6 +74,26 @@ class OperationCapacityTest {
         assertEquals(BigDecimal("0.0000"), result.effectiveAvailableAmount)
         assertEquals(listOf(rule), result.limitingRuleIds)
         assertEquals(OperationCapacityStatus.EXHAUSTED, result.applicableLimits.single().status)
+    }
+
+    @Test
+    fun `capacity comes back at midnight in the tenant's own zone`() {
+        val clock = FixedClockProvider(Instant.parse("2026-07-04T21:30:00Z"))
+        val facade = PostgresFacade.create(clock, emptyList())
+        fun exhausted(zone: ZoneId) = OperationSubtreeScenario(facade, clock.instant, timeZone = zone).let { s ->
+            val operation = s.operation("TRANSFER")
+            s.grant(operation, amount = "100")
+            s.authorize(operation, "100")
+            assertEquals(OperationCapacityStatus.EXHAUSTED, s.capacity(operation).status)
+            s to operation
+        }
+        val (brussels, brusselsOperation) = exhausted(ZoneId.of("Europe/Brussels"))
+        val (utc, utcOperation) = exhausted(ZoneOffset.UTC)
+
+        clock.advanceBy(Duration.ofHours(1))
+
+        assertEquals(BigDecimal("100.0000"), brussels.capacity(brusselsOperation).effectiveAvailableAmount)
+        assertEquals(OperationCapacityStatus.EXHAUSTED, utc.capacity(utcOperation).status)
     }
 
     private companion object {

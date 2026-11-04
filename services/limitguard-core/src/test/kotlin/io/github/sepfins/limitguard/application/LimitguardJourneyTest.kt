@@ -34,6 +34,7 @@ import io.github.sepfins.limitguard.support.FixedClockProvider
 import io.github.sepfins.limitguard.support.PostgresFacade
 import java.math.BigDecimal
 import java.time.Instant
+import java.time.ZoneOffset
 import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -50,7 +51,7 @@ class LimitguardJourneyTest {
     @Test
     fun `a customer gets a daily transfer limit approved, pays against it, and has it lowered`() {
         // Onboarding: a tenant, its customer, the customer's account, and the catalog a payment refers to.
-        val tenant = catalog.registerTenant(RegisterTenantCommand("Journey Bank")).id
+        val tenant = catalog.registerTenant(RegisterTenantCommand("Journey Bank", ZoneOffset.UTC)).id
         val customer = catalog.registerPartyProfile(RegisterPartyProfileCommand(
             tenant, PartyType.INDIVIDUAL, firstName = "Maria", lastName = "Rossi",
         )).id

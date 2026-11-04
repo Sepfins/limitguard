@@ -9,6 +9,7 @@ describe('CreateTenantDialog', () => {
   const tenant = {
     id: '7f032ab4-d514-4f84-8264-12b5cfc2a126',
     name: 'Retail Italy',
+    timeZone: 'Europe/Rome',
     noMatchingRuleBehavior: 'DENY' as const,
     createdAt: '2026-08-09T10:00:00Z'
   };
@@ -36,12 +37,13 @@ describe('CreateTenantDialog', () => {
     const component = fixture.componentInstance as any;
     const emitted = vi.fn();
     fixture.componentInstance.created.subscribe(emitted);
-    component.form.setValue({ name: 'Retail Italy', noMatchingRuleBehavior: 'DENY' });
+    component.form.setValue({ name: 'Retail Italy', timeZone: 'Europe/Rome', noMatchingRuleBehavior: 'DENY' });
 
     component.submit();
 
     expect(api.createTenant).toHaveBeenCalledWith({
       name: 'Retail Italy',
+      timeZone: 'Europe/Rome',
       noMatchingRuleBehavior: 'DENY'
     });
     expect(emitted).toHaveBeenCalledWith(tenant);

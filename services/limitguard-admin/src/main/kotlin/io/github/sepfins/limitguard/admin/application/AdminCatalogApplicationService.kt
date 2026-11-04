@@ -40,6 +40,7 @@ import io.github.sepfins.limitguard.api.results.OperationTypeResult
 import io.github.sepfins.limitguard.api.results.PageResult
 import io.github.sepfins.limitguard.api.results.TenantResult
 import org.springframework.stereotype.Service
+import java.time.ZoneId
 import java.util.UUID
 
 @Service
@@ -82,12 +83,14 @@ class AdminCatalogApplicationService(
     fun createTenant(
         identity: AdminIdentity,
         name: String,
+        timeZone: ZoneId,
         noMatchingRuleBehavior: NoMatchingRuleBehavior,
     ): TenantResult {
         authorizer.requireTenantCreation(identity)
         return limitguard.tenantCatalogService.registerTenant(
             RegisterTenantCommand(
                 name = name,
+                timeZone = timeZone,
                 config = emptyMap(),
                 noMatchingRuleBehavior = noMatchingRuleBehavior,
             ),

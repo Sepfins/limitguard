@@ -12,7 +12,6 @@ import io.github.sepfins.limitguard.api.queries.ListTenantsQuery
 import io.github.sepfins.limitguard.application.transaction.TransactionMutationKind
 import io.github.sepfins.limitguard.application.usage.UsageMutationService
 import io.github.sepfins.limitguard.application.usage.AvailableLimitCapacityResolver
-import io.github.sepfins.limitguard.application.usage.UsageWindowCalculator
 import io.github.sepfins.limitguard.domain.change.ChangeActor
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeEventType
 import io.github.sepfins.limitguard.domain.change.LimitRuleChangeRequest
@@ -135,6 +134,7 @@ import java.math.BigDecimal
 import java.math.BigInteger
 import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneOffset
 import java.time.temporal.ChronoUnit
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
@@ -191,9 +191,9 @@ class JooqRepositoryCoverageIntegrationTest {
     @Test
     fun `factory exposes database backed catalog paging filtering and literal search`() {
         val limitguard = JooqLimitguardFactory(dataSource).create()
-        val zulu = limitguard.tenantCatalogService.registerTenant(RegisterTenantCommand(name = "Zulu Bank"))
-        val alpha = limitguard.tenantCatalogService.registerTenant(RegisterTenantCommand(name = "Alpha Bank"))
-        limitguard.tenantCatalogService.registerTenant(RegisterTenantCommand(name = "Percent% Bank"))
+        val zulu = limitguard.tenantCatalogService.registerTenant(RegisterTenantCommand(name = "Zulu Bank", timeZone = ZoneOffset.UTC))
+        val alpha = limitguard.tenantCatalogService.registerTenant(RegisterTenantCommand(name = "Alpha Bank", timeZone = ZoneOffset.UTC))
+        limitguard.tenantCatalogService.registerTenant(RegisterTenantCommand(name = "Percent% Bank", timeZone = ZoneOffset.UTC))
 
         val tenantPage = limitguard.tenantCatalogQueryService.listTenants(
             ListTenantsQuery(page = 0, size = 2),
@@ -514,7 +514,6 @@ class JooqRepositoryCoverageIntegrationTest {
             idGenerator = SystemIdGenerator(),
             usageBucketRepository = reservationBuckets,
             usageEventRepository = JooqUsageEventRepository(reservationContext),
-            usageWindowCalculator = UsageWindowCalculator(),
         )
 
         val mutationContext = JooqPersistenceContext(dataSource)
@@ -542,6 +541,7 @@ class JooqRepositoryCoverageIntegrationTest {
                         tenantId = transaction.tenantId,
                         assigneePartyProfileId = transaction.actingPartyProfileId,
                         at = NOW,
+                        timeZone = ZoneOffset.UTC,
                         // This is evaluation/priority order; the lock key order must not depend on it.
                         cascade = listOf(highPriority, lowPriority, missingBucket),
                     )
@@ -772,6 +772,7 @@ class JooqRepositoryCoverageIntegrationTest {
             Tenant(
                 id = TenantId.of(UUID.randomUUID()),
                 name = TenantName.of("Tenant ${UUID.randomUUID()}"),
+                timeZone = ZoneOffset.UTC,
                 config = Metadata(mapOf("region" to "EU")),
                 createdAt = NOW,
             )

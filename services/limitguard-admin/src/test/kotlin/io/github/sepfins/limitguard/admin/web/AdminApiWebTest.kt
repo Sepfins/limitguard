@@ -46,6 +46,7 @@ import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.post
 import java.time.Instant
+import java.time.ZoneId
 import java.util.UUID
 
 @WebMvcTest(
@@ -132,6 +133,7 @@ class AdminApiWebTest @Autowired constructor(
         val tenant = tenantResult()
         val expectedCommand = RegisterTenantCommand(
             name = "Retail Italy",
+            timeZone = ZoneId.of("Europe/Rome"),
             config = emptyMap(),
             noMatchingRuleBehavior = NoMatchingRuleBehavior.DENY,
         )
@@ -142,11 +144,12 @@ class AdminApiWebTest @Autowired constructor(
             with(platformAdmin())
             with(csrf())
             contentType = MediaType.APPLICATION_JSON
-            content = """{"name":"Retail Italy","noMatchingRuleBehavior":"DENY"}"""
+            content = """{"name":"Retail Italy","timeZone":"Europe/Rome","noMatchingRuleBehavior":"DENY"}"""
         }.andExpect {
             status { isCreated() }
             header { string("Location", "/limitguard/admin/api/v1/tenants/${tenant.id}") }
             jsonPath("$.name") { value("Retail Italy") }
+            jsonPath("$.timeZone") { value("Europe/Rome") }
         }
 
         verify(catalogService).registerTenant(expectedCommand)
@@ -168,7 +171,7 @@ class AdminApiWebTest @Autowired constructor(
             with(viewer(UUID.randomUUID()))
             with(csrf())
             contentType = MediaType.APPLICATION_JSON
-            content = """{"name":"Forbidden tenant"}"""
+            content = """{"name":"Forbidden tenant","timeZone":"Europe/Rome"}"""
         }.andExpect {
             status { isForbidden() }
             jsonPath("$.code") { value("FORBIDDEN") }
@@ -289,11 +292,24 @@ class AdminApiWebTest @Autowired constructor(
             with(platformAdmin())
             with(csrf())
             contentType = MediaType.APPLICATION_JSON
-            content = """{"name":""}"""
+            content = """{"name":"","timeZone":"Europe/Rome"}"""
         }.andExpect {
             status { isBadRequest() }
             jsonPath("$.code") { value("VALIDATION_FAILED") }
             jsonPath("$.fieldViolations[0].field") { value("name") }
+        }
+    }
+
+    @Test
+    fun `unknown time zone is rejected as invalid`() {
+        mockMvc.post("/limitguard/admin/api/v1/tenants") {
+            with(platformAdmin())
+            with(csrf())
+            contentType = MediaType.APPLICATION_JSON
+            content = """{"name":"Retail Italy","timeZone":"Europe/Atlantis"}"""
+        }.andExpect {
+            status { isBadRequest() }
+            jsonPath("$.code") { value("VALIDATION_FAILED") }
         }
     }
 
@@ -303,6 +319,7 @@ class AdminApiWebTest @Autowired constructor(
     ) = TenantResult(
         id = id,
         name = name,
+        timeZone = ZoneId.of("Europe/Rome"),
         config = mapOf("hidden" to true),
         noMatchingRuleBehavior = NoMatchingRuleBehavior.DENY,
         createdAt = Instant.parse("2026-08-09T10:00:00Z"),

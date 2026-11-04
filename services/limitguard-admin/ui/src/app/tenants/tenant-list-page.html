@@ -45,6 +45,7 @@
         <thead>
           <tr>
             <th scope="col">Tenant</th>
+            <th scope="col">Time zone</th>
             <th scope="col">Fallback decision</th>
             <th scope="col">Created</th>
             <th scope="col"><span class="sr-only">Actions</span></th>
@@ -62,6 +63,7 @@
                   </div>
                 </div>
               </td>
+              <td data-label="Time zone">{{ tenant.timeZone }}</td>
               <td data-label="Fallback decision">
                 {{ fallbackLabel(tenant.noMatchingRuleBehavior) }}
               </td>

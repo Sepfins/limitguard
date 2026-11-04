@@ -26,6 +26,7 @@ import jakarta.validation.constraints.Pattern
 import jakarta.validation.constraints.Size
 import java.math.BigDecimal
 import java.time.Instant
+import java.time.ZoneId
 import java.util.UUID
 
 data class MeResponse(
@@ -43,12 +44,14 @@ data class CreateTenantRequest(
     @field:NotBlank
     @field:Size(max = 255)
     val name: String,
+    val timeZone: ZoneId,
     val noMatchingRuleBehavior: NoMatchingRuleBehavior = NoMatchingRuleBehavior.DENY,
 )
 
 data class TenantResponse(
     val id: UUID,
     val name: String,
+    val timeZone: ZoneId,
     val noMatchingRuleBehavior: NoMatchingRuleBehavior,
     val createdAt: Instant,
 )
@@ -287,6 +290,7 @@ data class PageResponse<T>(
 fun TenantResult.toAdminResponse(): TenantResponse = TenantResponse(
     id = id,
     name = name,
+    timeZone = timeZone,
     noMatchingRuleBehavior = noMatchingRuleBehavior,
     createdAt = createdAt,
 )

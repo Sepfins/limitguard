@@ -202,7 +202,7 @@ class BankCatalogWalkthroughTest : AdminApiIntegrationTest() {
                 with(platformAdmin())
                 with(csrf())
                 contentType = MediaType.APPLICATION_JSON
-                content = """{"name":"$name","noMatchingRuleBehavior":"$noMatchingRuleBehavior"}"""
+                content = """{"name":"$name","timeZone":"Europe/Brussels","noMatchingRuleBehavior":"$noMatchingRuleBehavior"}"""
             },
         ),
     )

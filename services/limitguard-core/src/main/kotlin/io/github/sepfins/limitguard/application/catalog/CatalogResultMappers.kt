@@ -62,6 +62,7 @@ internal fun Tenant.toResult(): TenantResult =
     TenantResult(
         id = id.value,
         name = name.value,
+        timeZone = timeZone,
         config = config.value,
         noMatchingRuleBehavior = NoMatchingRuleBehavior.valueOf(noMatchingRuleBehavior.name),
         createdAt = requireNotNull(createdAt) {

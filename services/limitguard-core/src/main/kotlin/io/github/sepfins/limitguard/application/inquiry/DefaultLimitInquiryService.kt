@@ -177,6 +177,8 @@ internal class DefaultLimitInquiryService(
         val calculatedAt = query.at ?: clockProvider.now()
 
         transactionRunner.inTransaction {
+            val tenant = tenantRepository.findById(tenantId)
+                ?: throw NotFoundException("tenant not found: ${tenantId.value}")
             val rule = limitRuleRepository.findById(tenantId, ruleId)
                 ?: throw NotFoundException("limit rule not found: ${ruleId.value}")
             if (partyProfileRepository.findById(tenantId, assigneeId) == null) {
@@ -188,7 +190,7 @@ internal class DefaultLimitInquiryService(
                 ?: throw ValidationException("current usage is only available for periodic limit rules")
             if (!rule.isBounded) throw ValidationException("current usage is only available for bounded limit rules")
             val capacity = capacityResolver
-                .read(tenantId, assigneeId, calculatedAt, listOf(ApplicableLimitRule(rule, configuration)))
+                .read(tenantId, assigneeId, calculatedAt, tenant.timeZone, listOf(ApplicableLimitRule(rule, configuration)))
                 .single()
             val window = checkNotNull(capacity.window)
 

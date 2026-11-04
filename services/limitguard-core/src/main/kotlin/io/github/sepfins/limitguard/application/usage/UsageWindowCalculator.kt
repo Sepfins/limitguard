@@ -5,10 +5,9 @@ import io.github.sepfins.limitguard.domain.limit.LimitPeriod
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
-import java.time.ZoneOffset
 
 internal class UsageWindowCalculator(
-    private val zoneId: ZoneId = ZoneOffset.UTC,
+    private val zoneId: ZoneId,
 ) {
     fun currentDate(now: Instant): LocalDate =
         now.atZone(zoneId).toLocalDate()

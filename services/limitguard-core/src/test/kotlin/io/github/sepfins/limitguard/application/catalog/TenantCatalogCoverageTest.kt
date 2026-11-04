@@ -24,6 +24,7 @@ import io.github.sepfins.limitguard.support.PostgresFacade
 import io.github.sepfins.limitguard.support.FixedClockProvider
 import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneOffset
 import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -36,8 +37,8 @@ class TenantCatalogCoverageTest {
     @Test
     fun `bank defined NDG and IBAN identifiers resolve to their LimitGuard entities`() {
         val fixture = fixture()
-        val tenant = fixture.service.registerTenant(RegisterTenantCommand(name = "Access Key Bank"))
-        val otherTenant = fixture.service.registerTenant(RegisterTenantCommand(name = "Other Bank"))
+        val tenant = fixture.service.registerTenant(RegisterTenantCommand(name = "Access Key Bank", timeZone = ZoneOffset.UTC))
+        val otherTenant = fixture.service.registerTenant(RegisterTenantCommand(name = "Other Bank", timeZone = ZoneOffset.UTC))
         fixture.service.registerIdentifierScheme(
             RegisterIdentifierSchemeCommand(
                 tenantId = tenant.id,
@@ -167,7 +168,7 @@ class TenantCatalogCoverageTest {
     @Test
     fun `catalog rejects an unsupported policy expression and keeps the code free for a corrected policy`() {
         val fixture = fixture()
-        val tenant = fixture.service.registerTenant(RegisterTenantCommand(name = "Policy Bank"))
+        val tenant = fixture.service.registerTenant(RegisterTenantCommand(name = "Policy Bank", timeZone = ZoneOffset.UTC))
 
         // The built-in orderings are refused too: they compare as doubles, facts included.
         listOf("unsupported", ">", ">=", "<", "<=").forEach { operation ->
@@ -191,7 +192,7 @@ class TenantCatalogCoverageTest {
     @Test
     fun `catalog rejects unsupported policy phases and decisions before persistence`() {
         val fixture = fixture()
-        val tenant = fixture.service.registerTenant(RegisterTenantCommand(name = "Unsupported Policy Bank"))
+        val tenant = fixture.service.registerTenant(RegisterTenantCommand(name = "Unsupported Policy Bank", timeZone = ZoneOffset.UTC))
 
         LimitChangePolicyPhase.values()
             .filter { it != LimitChangePolicyPhase.AUTHORIZATION }

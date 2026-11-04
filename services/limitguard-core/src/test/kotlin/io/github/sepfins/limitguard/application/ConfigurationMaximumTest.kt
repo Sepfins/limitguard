@@ -25,6 +25,7 @@ import io.github.sepfins.limitguard.support.FixedClockProvider
 import io.github.sepfins.limitguard.support.PostgresFacade
 import java.math.BigDecimal
 import java.time.Instant
+import java.time.ZoneOffset
 import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -95,7 +96,7 @@ class ConfigurationMaximumTest {
     private class Fixture {
         val clock = FixedClockProvider(NOW)
         val facade = PostgresFacade.create(clock, emptyList())
-        val tenant = facade.tenantCatalogService.registerTenant(RegisterTenantCommand("Maximum bank ${UUID.randomUUID()}")).id
+        val tenant = facade.tenantCatalogService.registerTenant(RegisterTenantCommand("Maximum bank ${UUID.randomUUID()}", ZoneOffset.UTC)).id
         val owner = facade.tenantCatalogService.registerPartyProfile(RegisterPartyProfileCommand(
             tenantId = tenant, partyType = PartyType.INDIVIDUAL, firstName = "Alex", lastName = "Customer",
         )).id

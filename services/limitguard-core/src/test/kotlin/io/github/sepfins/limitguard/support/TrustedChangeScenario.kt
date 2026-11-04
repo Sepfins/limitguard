@@ -23,6 +23,7 @@ import io.github.sepfins.limitguard.api.commands.RequestLimitRuleChangeCommand
 import io.github.sepfins.limitguard.api.queries.GetLimitChangeQuery
 import java.math.BigDecimal
 import java.time.Instant
+import java.time.ZoneOffset
 import java.util.UUID
 
 class TrustedChangeScenario(
@@ -30,7 +31,7 @@ class TrustedChangeScenario(
     val now: Instant,
     createConfiguration: (CreateLimitConfigurationCommand) -> UUID = { facade.tenantCatalogService.createLimitConfiguration(it).id },
 ) {
-    val tenant = facade.tenantCatalogService.registerTenant(RegisterTenantCommand("Actor bank ${UUID.randomUUID()}")).id
+    val tenant = facade.tenantCatalogService.registerTenant(RegisterTenantCommand("Actor bank ${UUID.randomUUID()}", ZoneOffset.UTC)).id
     val owner = profile("Owner")
     val representative = profile("Representative")
     val unrelated = profile("Unrelated")

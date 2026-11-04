@@ -31,6 +31,7 @@ describe('TenantListPage', () => {
           {
             id: `tenant-${page}`,
             name: `Tenant ${page}`,
+            timeZone: 'Europe/Rome',
             noMatchingRuleBehavior: 'DENY',
             createdAt: '2026-08-09T10:00:00Z'
           }
